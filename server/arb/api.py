@@ -317,6 +317,18 @@ def create_app(
         now_ns = time.time_ns()
         return [adapter.status_snapshot(now_ns).as_payload() for adapter in adapter_list]
 
+    @app.get("/")
+    async def root() -> dict[str, str]:
+        return {
+            "service": "Cross-Exchange Arbitrage Detector",
+            "status": "ok",
+            "docs": "/docs",
+            "openapi": "/openapi.json",
+            "health": "/healthz",
+            "readiness": "/readyz",
+            "live_updates": "/ws/live",
+        }
+
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}

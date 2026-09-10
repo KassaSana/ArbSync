@@ -46,7 +46,11 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
     platform_port = os.getenv("PORT")
     configured_origins = raw["server"].get("cors_allowed_origins", [])
     origin_override = os.getenv("ARB_CORS_ALLOWED_ORIGINS")
-    origins = origin_override.split(",") if origin_override is not None else configured_origins
+    origins = (
+        [origin.strip() for origin in origin_override.split(",")]
+        if origin_override is not None
+        else configured_origins
+    )
     configured_host = str(raw["server"]["host"])
     default_host = "0.0.0.0" if platform_port is not None else configured_host
     host = os.getenv("ARB_HOST", default_host)

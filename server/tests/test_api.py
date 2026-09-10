@@ -68,6 +68,18 @@ async def test_recent_endpoint_returns_saved_rows(tmp_path: Path) -> None:
     assert response.json()[0]["theoretical_profit"] == "0.5"
 
 
+def test_root_describes_the_service() -> None:
+    client = TestClient(
+        create_app(OpportunityStore(":memory:"), OrderBookManager(), LiveBroadcaster())
+    )
+    response = client.get("/")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["health"] == "/healthz"
+    assert payload["live_updates"] == "/ws/live"
+
+
 def test_healthz_is_alive() -> None:
     client = TestClient(
         create_app(OpportunityStore(":memory:"), OrderBookManager(), LiveBroadcaster())

@@ -125,6 +125,34 @@ def test_cors_origins_can_be_set_by_environment(
     )
 
 
+def test_cors_origins_tolerate_whitespace_around_commas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(VALID_CONFIG)
+    monkeypatch.setenv(
+        "ARB_CORS_ALLOWED_ORIGINS", " https://dashboard.example.test , http://localhost:5173 "
+    )
+
+    config = load_config(path)
+
+    assert config.server.cors_allowed_origins == (
+        "https://dashboard.example.test",
+        "http://localhost:5173",
+    )
+
+
+def test_blank_cors_origin_entry_is_still_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(VALID_CONFIG)
+    monkeypatch.setenv("ARB_CORS_ALLOWED_ORIGINS", "https://dashboard.example.test,   ")
+
+    with pytest.raises(ValueError, match="non-empty strings"):
+        load_config(path)
+
+
 @pytest.mark.parametrize("origin", ["*", "https://dashboard.example.test/path"])
 def test_invalid_cors_origin_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, origin: str
