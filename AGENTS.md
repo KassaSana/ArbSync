@@ -84,6 +84,20 @@ the remaining validation gap materially changes.
   its complete author, committer, and message, then push it to the configured upstream
   branch unless the owner explicitly asks not to push.
 
+## Explanatory collaboration
+
+- Use a teaching-oriented style so the owner can learn while work progresses. Before
+  implementation, explain the problem, intended approach, and meaningful tradeoffs in
+  plain language.
+- During implementation, call out important repository patterns, architectural constraints,
+  and findings that materially affect the solution. Define unfamiliar technical terms when
+  they first matter, without turning routine steps into noise.
+- When recommending a different approach, say so directly and explain the evidence, risks,
+  and practical consequences. Do not assume the owner's initial approach must be accepted.
+- In the final handoff, explain what changed, why the solution works, what verification
+  passed, any limitations or follow-up work, and the main engineering lessons from the
+  ticket. Keep explanations concrete and proportionate to the change.
+
 ## Commit authorship
 
 - Commits must use the repository owner's configured Git identity as both author and committer.
