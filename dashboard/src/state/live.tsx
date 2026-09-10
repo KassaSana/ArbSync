@@ -161,6 +161,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     statuses: new Map<string, BookStatus>(),
     opportunities: [] as Opportunity[],
     tickAt: 0,
+    // Set by a state snapshot, which is a complete account of book state and so
+    // replaces what we hold instead of being merged into it.
+    authoritative: false,
   });
   const frame = useRef<number | null>(null);
 
@@ -172,13 +175,21 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       statuses: new Map(),
       opportunities: [],
       tickAt: 0,
+      authoritative: false,
     };
 
-    if (batch.books.size > 0) {
-      setBooks((current) => ({ ...current, ...Object.fromEntries(batch.books) }));
-    }
-    if (batch.statuses.size > 0) {
-      setBookStatuses((current) => ({ ...current, ...Object.fromEntries(batch.statuses) }));
+    if (batch.authoritative) {
+      // Replace, so a book the server no longer reports eligible disappears
+      // rather than lingering at whatever quote it last had.
+      setBooks(Object.fromEntries(batch.books));
+      setBookStatuses(Object.fromEntries(batch.statuses));
+    } else {
+      if (batch.books.size > 0) {
+        setBooks((current) => ({ ...current, ...Object.fromEntries(batch.books) }));
+      }
+      if (batch.statuses.size > 0) {
+        setBookStatuses((current) => ({ ...current, ...Object.fromEntries(batch.statuses) }));
+      }
     }
     if (batch.opportunities.length > 0) {
       setOpportunities((current) =>
@@ -222,6 +233,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       pending.current.tickAt = Date.now();
 
       if (message.type === "state_snapshot") {
+        // Anything queued earlier in this frame predates the snapshot, so the
+        // snapshot supersedes it. Updates arriving after it still apply.
+        pending.current.books.clear();
+        pending.current.statuses.clear();
+        pending.current.authoritative = true;
         for (const book of message.payload.books) {
           pending.current.books.set(bookKey(book), book);
         }
