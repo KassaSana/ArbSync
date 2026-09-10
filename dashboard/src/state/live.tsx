@@ -35,13 +35,32 @@ type LivePayload =
 
 type LiveEnvelope = LivePayload & { stream_sequence: number };
 
+/**
+ * A canonical book status plus the moment we received it.
+ *
+ * `age_ms` is the backend's monotonic receipt age at the instant it was sent,
+ * which is the only freshness clock the server trusts. It is a fixed reading,
+ * so displaying it alone would freeze; adding the time elapsed here keeps a
+ * canonical baseline while still advancing.
+ */
+export type TrackedBookStatus = BookStatus & { receivedAtMs: number };
+
+function track(statuses: Iterable<BookStatus>, receivedAtMs: number): TrackedBookStatus[] {
+  return [...statuses].map((status) => ({ ...status, receivedAtMs }));
+}
+
+/** Age to display for one contributing book: canonical reading plus local elapsed. */
+export function contributingAgeMs(status: TrackedBookStatus, nowMs: number): number {
+  return (status.age_ms ?? 0) + Math.max(0, nowMs - status.receivedAtMs);
+}
+
 type LiveValue = {
   status: ConnectionStatus;
   feedLive: boolean;
   nowMs: number;
   lastTickAgeMs: number | null;
   books: Record<string, TopOfBook>;
-  bookStatuses: Record<string, BookStatus>;
+  bookStatuses: Record<string, TrackedBookStatus>;
   opportunities: Async<Opportunity[]>;
   stats: Async<Stats>;
   pairs: Async<PairRecord[]>;
@@ -94,7 +113,7 @@ function mergeOpportunities(current: Opportunity[], incoming: Opportunity[]): Op
  */
 export function LiveProvider({ children }: { children: ReactNode }) {
   const [books, setBooks] = useState<Record<string, TopOfBook>>({});
-  const [bookStatuses, setBookStatuses] = useState<Record<string, BookStatus>>({});
+  const [bookStatuses, setBookStatuses] = useState<Record<string, TrackedBookStatus>>({});
   const [opportunities, setOpportunities] = useState<Async<Opportunity[]>>(loading);
   const [stats, setStats] = useState<Async<Stats>>(loading);
   const [pairs, setPairs] = useState<Async<PairRecord[]>>(loading);
@@ -138,7 +157,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     // One fallback read so the table is populated even if the socket never opens.
     fetchBookStatus()
       .then((statuses) =>
-        setBookStatuses(Object.fromEntries(statuses.map((s) => [bookKey(s), s]))),
+        setBookStatuses(
+          Object.fromEntries(track(statuses, Date.now()).map((s) => [bookKey(s), s])),
+        ),
       )
       .catch(() => undefined);
 
@@ -178,17 +199,21 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       authoritative: false,
     };
 
+    const receivedAtMs = Date.now();
+    const stamped = Object.fromEntries(
+      track(batch.statuses.values(), receivedAtMs).map((s) => [bookKey(s), s]),
+    );
     if (batch.authoritative) {
       // Replace, so a book the server no longer reports eligible disappears
       // rather than lingering at whatever quote it last had.
       setBooks(Object.fromEntries(batch.books));
-      setBookStatuses(Object.fromEntries(batch.statuses));
+      setBookStatuses(stamped);
     } else {
       if (batch.books.size > 0) {
         setBooks((current) => ({ ...current, ...Object.fromEntries(batch.books) }));
       }
       if (batch.statuses.size > 0) {
-        setBookStatuses((current) => ({ ...current, ...Object.fromEntries(batch.statuses) }));
+        setBookStatuses((current) => ({ ...current, ...stamped }));
       }
     }
     if (batch.opportunities.length > 0) {

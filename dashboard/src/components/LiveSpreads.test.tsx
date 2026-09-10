@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { BookStatus, PairRecord, TopOfBook } from "../api/client";
+import { PairRecord, TopOfBook } from "../api/client";
+import { TrackedBookStatus } from "../state/live";
 import { LiveSpreads } from "./LiveSpreads";
 
 const NOW_MS = 1_000_000;
@@ -19,7 +20,11 @@ function book(exchange: string, bid: string, ask: string): TopOfBook {
   };
 }
 
-function status(exchange: string, eligible: boolean): BookStatus {
+function status(
+  exchange: string,
+  eligible: boolean,
+  overrides: Partial<TrackedBookStatus> = {},
+): TrackedBookStatus {
   return {
     exchange,
     pair: "BTC-USD",
@@ -30,6 +35,8 @@ function status(exchange: string, eligible: boolean): BookStatus {
     max_age_ms: 60_000,
     eligible,
     reason: eligible ? null : "disconnected",
+    receivedAtMs: NOW_MS,
+    ...overrides,
   };
 }
 
@@ -38,7 +45,7 @@ const PAIRS: PairRecord[] = [
   { exchange: "coinbase", pair: "BTC-USD" },
 ];
 
-function renderSpreads(statuses: BookStatus[]) {
+function renderSpreads(statuses: TrackedBookStatus[]) {
   // A wide, obviously-arbitrageable cross: gemini bids 110 while coinbase asks 100.
   const books = {
     "gemini:BTC-USD": book("gemini", "110", "111"),
@@ -79,5 +86,40 @@ describe("live spreads", () => {
   it("reports no spread when a status has not arrived for a venue", () => {
     const cells = renderSpreads([status("gemini", true)]);
     expect(cells[3]).toHaveTextContent("—");
+  });
+
+  it("drops a venue the backend has aged out, even with a quote still held", () => {
+    // max_age_ms has been exceeded, so the backend reports it ineligible with
+    // reason `too_old`. The browser must not re-litigate that with its own
+    // threshold, and must not price off the quote it still holds.
+    const cells = renderSpreads([
+      status("gemini", true),
+      status("coinbase", false, { age_ms: 61_000, reason: "too_old", connected: true }),
+    ]);
+    expect(cells[3]).toHaveTextContent("—");
+  });
+
+  it.each([
+    ["crossed", "crossed"],
+    ["incomplete", "incomplete"],
+    ["discontinuous", "discontinuous"],
+    ["uninitialized", "uninitialized"],
+  ])("excludes a book the backend rejected as %s", (_label, reason) => {
+    const cells = renderSpreads([
+      status("gemini", true),
+      status("coinbase", false, { reason, connected: true }),
+    ]);
+    expect(cells[3]).toHaveTextContent("—");
+  });
+
+  it("ages contributing books from the canonical status, not the quote timestamp", () => {
+    // The quote carries an exchange timestamp of NOW_MS. If the row aged books
+    // from that, it would read 0ms. Canonical age says the backend received
+    // this book 4s ago, and 500ms have elapsed in the browser since.
+    const cells = renderSpreads([
+      status("gemini", true, { age_ms: 4_000, receivedAtMs: NOW_MS - 500 }),
+      status("coinbase", true, { age_ms: 100, receivedAtMs: NOW_MS }),
+    ]);
+    expect(cells[4]).toHaveTextContent("4.5s");
   });
 });

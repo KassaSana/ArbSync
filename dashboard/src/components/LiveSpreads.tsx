@@ -1,11 +1,12 @@
-import { BookStatus, PairRecord, TopOfBook } from "../api/client";
-import { age, DASH, nsToMs, price, spreadPct } from "../lib/format";
+import { PairRecord, TopOfBook } from "../api/client";
+import { age, DASH, price, spreadPct } from "../lib/format";
+import { contributingAgeMs, TrackedBookStatus } from "../state/live";
 import { Panel } from "./Panel";
 
 type Props = {
   pairs: PairRecord[];
   books: Record<string, TopOfBook>;
-  statuses: Record<string, BookStatus>;
+  statuses: Record<string, TrackedBookStatus>;
   nowMs: number;
   feedLive: boolean;
 };
@@ -20,6 +21,8 @@ type Venue = {
 type Row = {
   pair: string;
   entries: TopOfBook[];
+  /** Canonical ages of the books contributing to this row, one per entry. */
+  ages: number[];
   venues: Venue[];
   bestBid: number | null;
   bestAsk: number | null;
@@ -41,6 +44,7 @@ function emptyRow(pair: string): Row {
   return {
     pair,
     entries: [],
+    ages: [],
     venues: [],
     bestBid: null,
     bestAsk: null,
@@ -52,7 +56,7 @@ function emptyRow(pair: string): Row {
 function buildRows(
   pairs: PairRecord[],
   books: Record<string, TopOfBook>,
-  statuses: Record<string, BookStatus>,
+  statuses: Record<string, TrackedBookStatus>,
   nowMs: number,
 ): Row[] {
   const byPair = new Map<string, Row>();
@@ -61,7 +65,8 @@ function buildRows(
     const row = byPair.get(record.pair) ?? emptyRow(record.pair);
 
     const key = `${record.exchange}:${record.pair}`;
-    const eligible = statuses[key]?.eligible === true;
+    const status = statuses[key];
+    const eligible = status?.eligible === true;
     row.venues.push({ exchange: record.exchange, eligible });
     const book = books[key];
     // Only eligible books may contribute. The backend already made this call in
@@ -70,15 +75,17 @@ function buildRows(
     // disconnected venue keeps its last quote here long after it stopped counting.
     if (book !== undefined && eligible) {
       row.entries.push(book);
+      // Age comes from the canonical status, not the exchange timestamp on the
+      // quote: the backend judges freshness by monotonic receipt time precisely
+      // so venue clock skew cannot make a stale book look current.
+      row.ages.push(contributingAgeMs(status, nowMs));
     }
     byPair.set(record.pair, row);
   }
 
   for (const row of byPair.values()) {
-    if (row.entries.length > 0) {
-      row.oldestAgeMs = Math.max(
-        ...row.entries.map((entry) => nowMs - nsToMs(entry.timestamp_ns)),
-      );
+    if (row.ages.length > 0) {
+      row.oldestAgeMs = Math.max(...row.ages);
     }
     if (row.entries.length >= 2) {
       const bid = Math.max(...row.entries.map((entry) => Number(entry.best_bid_price)));
