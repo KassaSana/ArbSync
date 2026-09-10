@@ -29,6 +29,9 @@ Binance.US aligns buffered deltas with a REST snapshot, Coinbase waits for a new
 Level 2 stream snapshot, and Gemini reconnects for a new differential-depth snapshot.
 The shared order-book module only accepts a continuous normalized stream.
 
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a component-by-component walkthrough
+of book eligibility, detection, persistence, live delivery, and dashboard state.
+
 ## Run locally
 
 Prerequisites:
@@ -230,6 +233,7 @@ server/tests/        Unit, property, replay, and pipeline tests
 dashboard/src/       React/TypeScript dashboard
 tools/                Benchmark, replay, profiling, and soak utilities
 artifacts/benchmarks/ Machine-readable results and live-run artifacts
+docs/ARCHITECTURE.md Architecture and end-to-end application walkthrough
 docs/BENCHMARKS.md   Benchmark and soak methodology
 docs/RESYNC.md       Current recovery design decision
 docs/VALIDATION.md   Verified behavior and remaining validation evidence
