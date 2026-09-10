@@ -196,7 +196,29 @@ Acceptance criteria:
 - Configure the owner's intended Git identity for future commits.
 - Do not add AI authors, co-authors, generated-by trailers, or invented identities.
 
-P0 total: **34 engineer-hours**.
+### [x] ARB-024 — Make agent configuration portable and attribution-safe
+
+- Priority: P0
+- Estimate: 3 hours
+- Dependencies: none
+
+Problem: Repository guidance was duplicated or configured differently across coding tools,
+pinned unsafe automatic pushing behavior, and relied only on prose to prevent an AI coding
+agent from being recorded as a contributor.
+
+Acceptance criteria:
+
+- Keep one concise, model-neutral instruction source with only the minimal tool shims needed
+  for Claude, Codex, Gemini CLI, and Cursor.
+- Keep personal output-style settings local and untracked.
+- Preserve real human authorship while prohibiting AI-agent author, committer, co-author,
+  contributor, generated-by, and assisted-by attribution.
+- Enforce structured attribution locally and in CI without rejecting ordinary exchange or
+  tooling discussion in commit prose.
+- Create verified local commits after completed tickets and require an explicit owner request
+  before any push.
+
+P0 total: **37 engineer-hours**.
 
 ## Reliability and maintainability (P1)
 
@@ -491,10 +513,10 @@ P2 total: **24 engineer-hours plus the 24-hour soak runtime**.
 
 | Milestone | Engineer effort | Release requirement |
 | --- | ---: | --- |
-| P0 release gate | 34 h | Required before public announcement |
+| P0 release gate | 37 h | Required before public announcement |
 | P1 reliability and maintainability | 54 h | Strongly recommended for the first stable release |
 | P2 operations and evidence | 24 h | Can follow initial publication except where dependencies say otherwise |
-| Total | **112 h** | About 2.8 engineer-weeks at 40 h/week |
+| Total | **115 h** | About 2.9 engineer-weeks at 40 h/week |
 
 The critical path is ARB-002 -> ARB-004/ARB-010 -> ARB-021. The highest-risk issue is
 quote-currency conflation, not performance. Avoid expanding into execution modeling until

@@ -19,3 +19,4 @@ var/*
 !var/.gitkeep
 dashboard/dist-perf/
 artifacts/benchmarks/performance/raw/
+.claude/settings.local.json

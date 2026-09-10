@@ -4,9 +4,11 @@ ArbSync ingests public Gemini, Coinbase, and Binance.US order books, maintains
 trusted in-memory L2 books, detects theoretical cross-exchange opportunities, stores
 them in SQLite, and streams state to a React dashboard.
 
-This file is the single source of instructions for all AI coding agents working in
-this repository. `CLAUDE.md` imports it; Codex reads it directly; Gemini CLI is
-pointed at it by `.gemini/settings.json`. Edit this file, not the shims.
+This file is the model- and tool-neutral source of instructions for coding agents
+working in this repository. `CLAUDE.md` imports it; Codex and Cursor read it directly;
+Gemini CLI is pointed at it by `.gemini/settings.json`. Edit this file, not the shims.
+Describe required outcomes and repository constraints here without pinning model names,
+versions, or product-specific capabilities.
 
 ## Layout
 
@@ -80,9 +82,10 @@ the remaining validation gap materially changes.
 - When a ticket in [`todolist.md`](todolist.md) is complete, update its checkbox from `[ ]`
   to `[x]` in the same commit without waiting for a separate request. If work is partial
   or blocked, leave it unchecked and record the remaining gap where appropriate.
-- After verification, create a focused commit with an accurate imperative message, verify
-  its complete author, committer, and message, then push it to the configured upstream
-  branch unless the owner explicitly asks not to push.
+- After verification, create a focused local commit with an accurate imperative message
+  and verify its complete author, committer, and message.
+- Never push automatically. Push only when the owner explicitly requests it after reviewing
+  the local result.
 
 ## Explanatory collaboration
 
@@ -100,8 +103,15 @@ the remaining validation gap materially changes.
 
 ## Commit authorship
 
-- Commits must use the repository owner's configured Git identity as both author and committer.
-- Never add other authors, co-authors, or `Co-authored-by` trailers.
-- Never add AI contributor attribution, generated-by notices, or assistant signatures (including Claude, Cursor, Codex, or other AI tools) to commit messages or contribution credits.
-- Verify the author, committer, and complete commit message after committing. If the owner's identity is unavailable or ambiguous, ask before committing; do not invent an identity.
-- Apply these rules to every future commit in this repository unless the owner explicitly changes them.
+- When a coding agent creates a commit on the owner's behalf, use the repository owner's
+  configured Git identity as both author and committer. If that identity is unavailable or
+  ambiguous, ask before committing; never invent an identity.
+- Preserve truthful author and co-author credit for real human contributors. Do not rewrite
+  a human contributor's authorship to the repository owner.
+- Never identify Claude, Codex, Gemini, Cursor, Copilot, or any other AI/coding agent as an
+  author, committer, co-author, contributor, or commit-signature identity. Never add
+  generated-by, assisted-by, or similar AI-tool attribution to commits or contribution
+  credits.
+- Verify the author, committer, and complete commit message after every commit.
+- Apply these rules to every future commit in this repository unless the owner explicitly
+  changes them.

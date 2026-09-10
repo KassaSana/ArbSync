@@ -1,3 +1,5 @@
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: local
     hooks:
@@ -42,3 +44,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^dashboard/
+
+      - id: commit-attribution
+        name: commit-attribution
+        entry: python tools/check_commit_attribution.py message
+        language: system
+        stages: [commit-msg]
