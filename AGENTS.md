@@ -62,6 +62,7 @@ From `dashboard/`:
 ```bash
 npm run typecheck
 npm run lint
+npm run test
 npm run build
 npm run dev
 ```

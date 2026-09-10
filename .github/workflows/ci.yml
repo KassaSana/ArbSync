@@ -57,5 +57,7 @@ jobs:
         run: npm run lint
       - name: Typecheck dashboard
         run: npm run typecheck
+      - name: Test dashboard
+        run: npm run test
       - name: Build dashboard
         run: npm run build
