@@ -157,6 +157,39 @@ describe("live state", () => {
     await expectBooks("coinbase:BTC-USD,gemini:BTC-USD");
   });
 
+  it("drops a held quote as soon as a status reports the book ineligible", async () => {
+    render(
+      <LiveProvider>
+        <Probe />
+      </LiveProvider>,
+    );
+    const socket = await socketCount(1);
+    socket.onopen?.();
+
+    socket.emit({
+      type: "state_snapshot",
+      stream_sequence: 1,
+      payload: {
+        books: [book("gemini", "100", 1), book("coinbase", "101", 1)],
+        statuses: [status("gemini", true), status("coinbase", true)],
+      },
+    });
+    await expectBooks("coinbase:BTC-USD,gemini:BTC-USD");
+
+    // A disconnect arrives as an incremental status, not a snapshot.
+    socket.emit({
+      type: "book_status",
+      stream_sequence: 2,
+      payload: status("coinbase", false),
+    });
+    await expectBooks("gemini:BTC-USD");
+
+    // Recovery re-populates it: the server only sends a quote once eligible.
+    socket.emit({ type: "top_of_book", stream_sequence: 3, payload: book("coinbase", "102", 2) });
+    socket.emit({ type: "book_status", stream_sequence: 4, payload: status("coinbase", true) });
+    await expectBooks("coinbase:BTC-USD,gemini:BTC-USD");
+  });
+
   it("rebuilds state from the snapshot delivered after a reconnect", async () => {
     render(
       <LiveProvider>

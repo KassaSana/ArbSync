@@ -182,6 +182,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     statuses: new Map<string, BookStatus>(),
     opportunities: [] as Opportunity[],
     tickAt: 0,
+    // Books to drop because a status in this batch declared them ineligible.
+    evicted: new Set<string>(),
     // Set by a state snapshot, which is a complete account of book state and so
     // replaces what we hold instead of being merged into it.
     authoritative: false,
@@ -196,6 +198,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       statuses: new Map(),
       opportunities: [],
       tickAt: 0,
+      evicted: new Set(),
       authoritative: false,
     };
 
@@ -209,8 +212,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       setBooks(Object.fromEntries(batch.books));
       setBookStatuses(stamped);
     } else {
-      if (batch.books.size > 0) {
-        setBooks((current) => ({ ...current, ...Object.fromEntries(batch.books) }));
+      if (batch.books.size > 0 || batch.evicted.size > 0) {
+        setBooks((current) => {
+          const next = { ...current, ...Object.fromEntries(batch.books) };
+          for (const key of batch.evicted) {
+            delete next[key];
+          }
+          return next;
+        });
       }
       if (batch.statuses.size > 0) {
         setBookStatuses((current) => ({ ...current, ...stamped }));
@@ -262,6 +271,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // snapshot supersedes it. Updates arriving after it still apply.
         pending.current.books.clear();
         pending.current.statuses.clear();
+        pending.current.evicted.clear();
         pending.current.authoritative = true;
         for (const book of message.payload.books) {
           pending.current.books.set(bookKey(book), book);
@@ -270,9 +280,21 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           pending.current.statuses.set(bookKey(status), status);
         }
       } else if (message.type === "top_of_book") {
-        pending.current.books.set(bookKey(message.payload), message.payload);
+        const key = bookKey(message.payload);
+        pending.current.books.set(key, message.payload);
+        pending.current.evicted.delete(key);
       } else if (message.type === "book_status") {
-        pending.current.statuses.set(bookKey(message.payload), message.payload);
+        const key = bookKey(message.payload);
+        pending.current.statuses.set(key, message.payload);
+        if (message.payload.eligible) {
+          pending.current.evicted.delete(key);
+        } else {
+          // Drop the quote outright rather than trusting every reader to check
+          // eligibility first. A held quote for an ineligible book is exactly
+          // what let a dropped venue keep pricing the spreads table.
+          pending.current.books.delete(key);
+          pending.current.evicted.add(key);
+        }
       } else if (message.type === "opportunity") {
         pending.current.opportunities.push(message.payload);
       }

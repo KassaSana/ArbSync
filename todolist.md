@@ -104,7 +104,7 @@ Acceptance criteria:
 - Add a dashboard recovery path for a failed or empty initial pair request.
 - Verify cold start, partial exchange initialization, and reconnect behavior.
 
-### [ ] ARB-004 — Exclude ineligible and stale books from dashboard spread calculations
+### [x] ARB-004 — Exclude ineligible and stale books from dashboard spread calculations
 
 - Priority: P0
 - Estimate: 6 hours
@@ -124,10 +124,15 @@ Acceptance criteria:
 - Add frontend tests for disconnect, age expiry, crossed/incomplete status, reconnect, and
   a state snapshot that omits a previously eligible book.
 
-Progress: contributing books are now gated on canonical eligibility, and tests cover the
-disconnected and missing-status cases. Still open: replacing rather than merging state on a
-new WebSocket snapshot, deriving contributing-book age from canonical status age, and tests
-for age expiry, crossed/incomplete status, reconnect, and snapshot omission.
+Resolution: contributing books are gated on canonical eligibility; a state snapshot
+replaces held books and statuses instead of merging into them; an ineligible `book_status`
+drops the held quote outright rather than relying on every reader to check first; and the
+age column is derived from the backend's `age_ms` plus locally elapsed time instead of the
+exchange timestamp the backend deliberately does not trust. Covered by
+`LiveSpreads.test.tsx` and `live.test.tsx`.
+
+ARB-003 is listed as a dependency and remains open, but it governs which pairs appear at
+all during cold start, not whether an ineligible book may contribute to a row.
 
 ### [x] ARB-005 — Repair the pre-commit backend hook paths
 
