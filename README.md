@@ -86,7 +86,7 @@ Runtime settings live in [`config.toml`](config.toml):
 | --- | --- |
 | `detector` | Minimum spread percentage that emits an opportunity |
 | `exchanges` | Exchange-native symbols to subscribe to |
-| `server` | Bind address, port, and SQLite path |
+| `server` | Bind address, port, SQLite path, and browser CORS allowlist |
 | `persistence` | Batch size, flush interval, and bounded queue size |
 | `order_books` | Maximum accepted age for otherwise trusted books |
 
@@ -96,14 +96,38 @@ Environment variables used by the application:
 | --- | --- | --- |
 | `ARB_LOG_LEVEL` | Backend log level | `INFO` |
 | `ARB_HOST` | Explicit backend bind-address override | `config.toml`, or `0.0.0.0` when `PORT` is supplied |
+| `ARB_CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the API | `server.cors_allowed_origins` from `config.toml` |
 | `PORT` | Hosted-platform port override and external-bind signal | `server.port` from `config.toml` |
 | `VITE_API_URL` | REST origin used by the dashboard; its scheme is converted for WebSockets | Local Vite proxy in development; hosted API in production |
 
-Restart the backend after changing `config.toml`.
+Restart the backend after changing `config.toml` or these backend environment variables.
 
-Binding to `0.0.0.0` exposes the service beyond the local machine. The current wildcard
-CORS policy and unauthenticated uptime-reset endpoint are not hardened for arbitrary public
-deployment; completing ARB-020 is required before treating the API as production-secure.
+## Hosted deployment
+
+Binding to `0.0.0.0` exposes the service beyond the local machine. Put it behind a TLS-
+terminating reverse proxy; direct public Uvicorn exposure is not a supported deployment.
+Set `ARB_CORS_ALLOWED_ORIGINS` to the exact `https://` origins that host the dashboard
+(for example, `https://dashboard.example.com`). Wildcards, paths, and query strings are
+rejected so the browser allowlist cannot accidentally expand to every site. Same-origin
+deployments can leave the list empty.
+
+Configure the proxy to:
+
+- Redirect HTTP to HTTPS and forward `X-Forwarded-Proto` and `X-Forwarded-For` only from
+  trusted proxy addresses.
+- Limit HTTP request bodies to 64 KiB or less. ArbSync's public API is read-only and does
+  not accept uploads.
+- Cap concurrent connections and WebSocket connections per client/IP, apply an idle timeout
+  (60 seconds is a reasonable starting point), and preserve WebSocket upgrade headers.
+- Apply a per-IP rate limit to REST and WebSocket handshakes. Start conservatively (for
+  example, 60 REST requests/minute and 10 WebSocket handshakes/minute) and tune from proxy
+  telemetry; health checks may need a separate allowance.
+- Use upstream connect and response-header timeouts around 5 seconds, plus an appropriate
+  streaming/WebSocket idle timeout. Do not buffer WebSocket traffic.
+
+The uptime-reset control route was removed: uptime now represents the process lifetime.
+These controls reduce exposure but do not make market data, theoretical opportunities, or
+the dashboard suitable for trading or accounting decisions.
 
 ## Useful interfaces
 

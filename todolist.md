@@ -218,7 +218,7 @@ Acceptance criteria:
 - Create verified local commits after completed tickets and require an explicit owner request
   before any push.
 
-### [ ] ARB-020 — Harden public deployment defaults and control endpoints
+### [x] ARB-020 — Harden public deployment defaults and control endpoints
 
 - Priority: P0
 - Estimate: 6 hours
@@ -230,7 +230,8 @@ hosted security profile or abuse controls for expensive/stateless public request
 WebSockets.
 
 Progress: the local bind defaults to `127.0.0.1`; `PORT` enables conventional hosted binding,
-and `ARB_HOST` provides an explicit override. The remaining criteria keep this ticket open.
+and `ARB_HOST` provides an explicit override. CORS now uses a validated explicit allowlist,
+and the unauthenticated uptime-reset route was removed.
 
 Acceptance criteria:
 

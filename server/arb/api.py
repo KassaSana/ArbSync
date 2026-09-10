@@ -244,13 +244,14 @@ def create_app(
     expected_pairs: Iterable[tuple[str, str]] = (),
     started_at_holder: list[int] | None = None,
     background_failures: Callable[[], list[dict[str, str]]] = lambda: [],
+    cors_allowed_origins: Iterable[str] = (),
 ) -> FastAPI:
     app = FastAPI(title="Cross-Exchange Arbitrage Detector")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=list(cors_allowed_origins),
+        allow_methods=["GET"],
+        allow_headers=[],
     )
     adapter_list = list(adapters)
     tracked_pairs = list(expected_pairs)
@@ -300,11 +301,6 @@ def create_app(
             "bucket_seconds": bucket_seconds,
             "points": serialized_points,
         }
-
-    @app.post("/api/system/reset")
-    async def system_reset() -> dict[str, int | str]:
-        started_at[0] = time.time_ns()
-        return {"started_at_ns": str(started_at[0]), "uptime_seconds": 0}
 
     @app.get("/api/pairs")
     async def pairs() -> list[dict[str, str]]:

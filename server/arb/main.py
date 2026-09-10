@@ -216,6 +216,7 @@ async def run_pipeline() -> None:
         expected_pairs=expected_pairs,
         started_at_holder=started_at_holder,
         background_failures=supervisor.failures,
+        cors_allowed_origins=config.server.cors_allowed_origins,
     )
 
     await store.initialize()

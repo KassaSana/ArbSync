@@ -10,6 +10,9 @@ binance = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "
 host = "127.0.0.1"
 port = 8000
 database_path = "var/arb.sqlite3"
+# Browser origins permitted to call the API. Public deployments must replace
+# these local development origins or set ARB_CORS_ALLOWED_ORIGINS.
+cors_allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 [persistence]
 batch_size = 500

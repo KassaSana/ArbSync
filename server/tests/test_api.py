@@ -74,6 +74,37 @@ def test_healthz_is_alive() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_cors_allows_only_configured_origin() -> None:
+    client = TestClient(
+        create_app(
+            OpportunityStore(":memory:"),
+            OrderBookManager(),
+            LiveBroadcaster(),
+            cors_allowed_origins=["https://dashboard.example.test"],
+        )
+    )
+
+    allowed = client.options(
+        "/healthz",
+        headers={
+            "Origin": "https://dashboard.example.test",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    denied = client.options(
+        "/healthz",
+        headers={
+            "Origin": "https://untrusted.example.test",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == "https://dashboard.example.test"
+    assert denied.status_code == 400
+    assert "access-control-allow-origin" not in denied.headers
+
+
 @pytest.mark.parametrize("limit", [0, 501])
 def test_recent_endpoint_rejects_out_of_range_limits(limit: int) -> None:
     client = TestClient(
@@ -575,28 +606,12 @@ async def test_system_timeseries_endpoint_returns_buckets(tmp_path: Path) -> Non
     assert isinstance(body["points"][0]["bucket_start_ns"], str)
 
 
-@pytest.mark.asyncio
-async def test_system_reset_zeros_uptime_without_clearing_history(tmp_path: Path) -> None:
-    store = OpportunityStore(str(tmp_path / "reset.sqlite3"))
-    await store.initialize()
-    started_at_holder = [time.time_ns() - 60_000_000_000]  # started 60s ago
+def test_system_reset_endpoint_is_not_exposed() -> None:
     client = TestClient(
-        create_app(
-            store, OrderBookManager(), LiveBroadcaster(), started_at_holder=started_at_holder
-        )
+        create_app(OpportunityStore(":memory:"), OrderBookManager(), LiveBroadcaster())
     )
-    before = client.get("/api/system/overview").json()
-    assert before["uptime_seconds"] >= 60
 
-    reset = client.post("/api/system/reset")
-    assert reset.status_code == 200
-    assert reset.json()["uptime_seconds"] == 0
-
-    after = client.get("/api/system/overview").json()
-    assert after["uptime_seconds"] < 5
-    assert after["started_at_ns"] > before["started_at_ns"]
-    # Holder is mutated so subsequent endpoints see the new start.
-    assert str(started_at_holder[0]) == after["started_at_ns"]
+    assert client.post("/api/system/reset").status_code == 404
 
 
 @pytest.mark.asyncio

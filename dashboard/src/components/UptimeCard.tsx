@@ -4,10 +4,9 @@ import { Panel } from "./Panel";
 
 type Props = {
   startedAtNs: string | null;
-  onReset: () => void;
 };
 
-export function UptimeCard({ startedAtNs, onReset }: Props) {
+export function UptimeCard({ startedAtNs }: Props) {
   // Borrows the one-second tick the live provider already runs.
   const { nowMs } = useLive();
 
@@ -29,13 +28,6 @@ export function UptimeCard({ startedAtNs, onReset }: Props) {
               : `Running since ${new Date(startedAtMs).toLocaleString()}`}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReset}
-          className="rounded border border-line px-3 py-1.5 text-xs text-ink-2 transition-colors hover:border-ink-3 hover:text-ink"
-        >
-          Reset timer
-        </button>
       </div>
     </Panel>
   );

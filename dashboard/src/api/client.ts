@@ -155,9 +155,3 @@ export async function fetchSystemTimeseries(
     `/api/system/timeseries?window=${window}&bucket_seconds=${bucketSeconds}`,
   );
 }
-
-export async function resetSystemTimer(): Promise<{ started_at_ns: string; uptime_seconds: number }> {
-  return requestJson<{ started_at_ns: string; uptime_seconds: number }>("/api/system/reset", {
-    method: "POST",
-  });
-}

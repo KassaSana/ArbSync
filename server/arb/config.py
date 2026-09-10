@@ -4,6 +4,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class ServerConfig:
     host: str
     port: int
     database_path: str
+    cors_allowed_origins: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,9 @@ class AppConfig:
 def load_config(path: str | Path = "config.toml") -> AppConfig:
     raw = tomllib.loads(Path(path).read_text())
     platform_port = os.getenv("PORT")
+    configured_origins = raw["server"].get("cors_allowed_origins", [])
+    origin_override = os.getenv("ARB_CORS_ALLOWED_ORIGINS")
+    origins = origin_override.split(",") if origin_override is not None else configured_origins
     configured_host = str(raw["server"]["host"])
     default_host = "0.0.0.0" if platform_port is not None else configured_host
     host = os.getenv("ARB_HOST", default_host)
@@ -56,6 +61,7 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
             host=host,
             port=port,
             database_path=raw["server"]["database_path"],
+            cors_allowed_origins=_validate_cors_origins(origins),
         ),
         persistence=PersistenceConfig(
             batch_size=int(raw["persistence"]["batch_size"]),
@@ -66,3 +72,27 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
             max_age_seconds=float(raw.get("order_books", {}).get("max_age_seconds", 30.0)),
         ),
     )
+
+
+def _validate_cors_origins(origins: object) -> tuple[str, ...]:
+    if not isinstance(origins, list):
+        raise ValueError("cors_allowed_origins must be an array of origins")
+
+    validated: list[str] = []
+    for origin in origins:
+        if not isinstance(origin, str) or not origin:
+            raise ValueError("CORS origins must be non-empty strings")
+        parsed = urlparse(origin)
+        if (
+            origin == "*"
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.path
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(f"invalid CORS origin: {origin!r}")
+        if origin not in validated:
+            validated.append(origin)
+    return tuple(validated)
