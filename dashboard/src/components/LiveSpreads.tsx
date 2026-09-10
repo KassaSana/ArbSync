@@ -61,12 +61,14 @@ function buildRows(
     const row = byPair.get(record.pair) ?? emptyRow(record.pair);
 
     const key = `${record.exchange}:${record.pair}`;
-    row.venues.push({
-      exchange: record.exchange,
-      eligible: statuses[key]?.eligible === true,
-    });
+    const eligible = statuses[key]?.eligible === true;
+    row.venues.push({ exchange: record.exchange, eligible });
     const book = books[key];
-    if (book !== undefined) {
+    // Only eligible books may contribute. The backend already made this call in
+    // OrderBookManager; recomputing a spread from every book we hold would give a
+    // second, weaker answer. Books are never evicted from the live store, so a
+    // disconnected venue keeps its last quote here long after it stopped counting.
+    if (book !== undefined && eligible) {
       row.entries.push(book);
     }
     byPair.set(record.pair, row);
