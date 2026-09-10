@@ -6,7 +6,9 @@ tests, and focused documents such as [`RESYNC.md`](RESYNC.md).
 
 ## Automated verification
 
-Current baseline: 180 backend tests passing as of 2026-09-09.
+The backend suite passes in full on every supported commit; run
+`uv run pytest -q server/tests` for the current count rather than relying on a
+number recorded here, which cannot stay accurate between edits.
 
 The suite covers:
 

@@ -136,10 +136,12 @@ the dashboard suitable for trading or accounting decisions.
 
 | Interface | Purpose |
 | --- | --- |
+| `GET /` | Service identity and pointers to the interfaces below |
 | `GET /healthz` | Process liveness |
 | `GET /readyz` | Adapter, book, and background-task readiness |
 | `GET /api/adapters` | Connection age, reconnects, gaps, and last errors |
 | `GET /api/book-status` | Eligibility and freshness for every configured book |
+| `GET /api/pairs` | Every `(exchange, pair)` the book manager has seen |
 | `GET /api/opportunities/recent?limit=50` | Recent theoretical opportunities (`limit`: 1–500) |
 | `GET /api/stats?window=1h` | Basic opportunity statistics |
 | `GET /api/system/overview` | Uptime and all-time peaks |

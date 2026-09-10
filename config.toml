@@ -20,4 +20,7 @@ flush_interval_seconds = 1.0
 queue_maxsize = 10000
 
 [order_books]
+# Books older than this stop contributing to detection, readiness, metrics, and
+# dashboard spreads. Omitting this section falls back to the stricter 30.0s
+# built into `load_config`, not to the value shipped here.
 max_age_seconds = 60.0
