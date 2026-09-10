@@ -17,6 +17,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  # Required by starlette.testclient, which `fastapi.testclient.TestClient`
+  # wraps: it does `import httpx2 as httpx` and falls back to httpx with a
+  # deprecation warning. Nothing in this repository imports it directly, so a
+  # grep-based audit will wrongly report it as unused. See
+  # test_test_client_prefers_httpx2.
+  "httpx2>=2.12.0",
   "hypothesis>=6.0.0",
   "mypy>=2.0.0",
   "pre-commit>=4.6.0",

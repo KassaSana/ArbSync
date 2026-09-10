@@ -163,6 +163,13 @@ Acceptance criteria:
 - If it is deliberate, document exactly which tool requires it and add a test or command
   that proves that requirement.
 
+Resolution: the use is deliberate. `starlette.testclient` does `import httpx2 as httpx`
+and falls back to `httpx` with a deprecation warning, so every test using
+`fastapi.testclient.TestClient` depends on it without naming it. It was briefly removed on
+the grounds that nothing imports it, which is true and misleading; the dependency is
+restored, documented at its declaration, and pinned by
+`test_test_client_prefers_httpx2`.
+
 ### [x] ARB-007 — Make fixtures and validation claims accurately describe their evidence
 
 - Priority: P0

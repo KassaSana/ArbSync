@@ -69,6 +69,19 @@ async def test_recent_endpoint_returns_saved_rows(tmp_path: Path) -> None:
     assert response.json()[0]["theoretical_profit"] == "0.5"
 
 
+def test_test_client_prefers_httpx2() -> None:
+    """The httpx2 development dependency is required, and only implicitly.
+
+    `starlette.testclient` does `import httpx2 as httpx` and falls back to
+    httpx with a deprecation warning. Nothing here imports httpx2 by name, so
+    an audit that only greps for imports concludes it is unused and removes
+    it. This test fails the moment that happens.
+    """
+    import starlette.testclient
+
+    assert starlette.testclient.httpx.__name__ == "httpx2"
+
+
 def test_root_describes_the_service() -> None:
     client = TestClient(
         create_app(OpportunityStore(":memory:"), OrderBookManager(), LiveBroadcaster())
