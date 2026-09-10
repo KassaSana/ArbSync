@@ -219,3 +219,9 @@ liquidity and is an observability project, not an execution engine or trading sy
 The largest remaining validation gap is a documented 24-hour live soak covering
 memory stability, reconnect recovery, sequence gaps, and the 60-second freshness
 threshold.
+
+## License
+
+ArbSync is licensed under the [Apache License 2.0](LICENSE). See the
+[dependency license audit](docs/DEPENDENCY_LICENSES.md) for the compatibility review
+of the current Python and dashboard dependency sets.

@@ -3,6 +3,7 @@ name = "cross-exchange-arb-detector"
 version = "0.1.0"
 description = "Cross-exchange crypto arbitrage detector with FastAPI backend and React dashboard"
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
   "aiosqlite>=0.20.0",
