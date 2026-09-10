@@ -9,19 +9,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
 from replay import replay_capture
 
-FIXTURE_DIR = Path("server/tests/fixtures/recorded")
+FIXTURE_DIR = Path("server/tests/fixtures/synthetic")
 
 
 @pytest.mark.parametrize(
     "fixture_name",
     [
-        "gemini_btcusd_5min.jsonl",
-        "coinbase_btcusd_5min.jsonl",
-        "binance_btcusd_5min.jsonl",
+        "gemini_btcusd.jsonl",
+        "coinbase_btcusd.jsonl",
+        "binance_btcusdt.jsonl",
     ],
 )
 @pytest.mark.asyncio
-async def test_recorded_replay_has_no_crashes_and_finishes_with_book(fixture_name: str) -> None:
+async def test_synthetic_replay_has_no_crashes_and_finishes_with_book(fixture_name: str) -> None:
     result = await replay_capture(FIXTURE_DIR / fixture_name)
 
     assert result["crashes"] == 0

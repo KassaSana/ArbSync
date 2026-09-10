@@ -11,7 +11,7 @@ Purpose:
 Command:
 
 ```bash
-python3 tools/benchmark.py
+uv run python tools/benchmark.py
 ```
 
 Current output:
@@ -32,7 +32,7 @@ Purpose:
 Command:
 
 ```bash
-python3 tools/bench_e2e.py --iterations 10000
+uv run python tools/bench_e2e.py --iterations 10000
 ```
 
 Current output:
@@ -82,7 +82,7 @@ roughly 1,441 samples. Shorter runs take `-DurationSeconds` and `-SampleSeconds`
 The observer can also be driven directly:
 
 ```bash
-python3 tools/soak.py \
+uv run python tools/soak.py \
   --duration-seconds 86400 \
   --sample-seconds 60 \
   --pid <backend-pid> \

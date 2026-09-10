@@ -24,23 +24,6 @@ subscriptions in total. See [`config.toml`](config.toml) for the exact symbols.
 
 ## How data moves through the system
 
-```text
-Exchange WebSockets
-        |
-        v
-Exchange adapters  -- validate continuity and normalize messages
-        |
-        v
-OrderBookManager   -- maintain L2 books and reject untrusted/stale state
-        |
-        v
-ArbitrageDetector  -- compare eligible top-of-book prices
-        |
-        +----------> SQLite opportunity history
-        |
-        +----------> FastAPI WebSocket ----------> React dashboard
-```
-
 Recovery stays inside each exchange adapter because sequence semantics differ:
 Binance.US aligns buffered deltas with a REST snapshot, Coinbase waits for a new
 Level 2 stream snapshot, and Gemini reconnects for a new differential-depth snapshot.
@@ -161,8 +144,10 @@ npm run lint
 npm run build
 ```
 
-The repository currently has 150 passing backend tests. CI runs tests with coverage,
-strict type checking, linting, and the production dashboard build.
+The backend suite covers protocol recovery, canonical book eligibility, detection,
+persistence, API behavior, and synthetic fixture replay. CI runs tests with coverage,
+strict type checking, linting, and the production dashboard build. The dated verification
+baseline lives in [`docs/VALIDATION.md`](docs/VALIDATION.md).
 
 ## Benchmarks and replay
 
@@ -177,9 +162,9 @@ exchange or network performance.
 Reproduce them from the repository root:
 
 ```powershell
-python tools/benchmark.py
-python tools/bench_e2e.py --iterations 10000
-python tools/replay.py server/tests/fixtures/recorded
+uv run python tools/benchmark.py
+uv run python tools/bench_e2e.py --iterations 10000
+uv run python tools/replay.py server/tests/fixtures/synthetic
 ```
 
 See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for methodology and

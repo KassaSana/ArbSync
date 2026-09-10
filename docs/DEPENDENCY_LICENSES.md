@@ -2,7 +2,8 @@
 
 This is a compatibility review of the dependencies resolved by `uv.lock` and
 `dashboard/package-lock.json` as of September 9, 2026. It is not legal advice and does
-not replace the license terms shipped by each dependency.
+not replace the license terms shipped by each dependency. Re-run the review whenever a
+lockfile changes; ARB-017 tracks automating that maintenance.
 
 ArbSync is licensed under Apache-2.0. The resolved Python and dashboard dependencies
 use permissive MIT, BSD, ISC, Apache-2.0, PSF, Blue Oak, or similarly permissive terms,

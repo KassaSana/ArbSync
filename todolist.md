@@ -7,7 +7,7 @@ asyncio, React, and exchange market-data protocols.
 
 ## Audit baseline
 
-- Backend: 161 tests pass.
+- Backend verification baseline: [`docs/VALIDATION.md`](docs/VALIDATION.md).
 - Static checks: Ruff check and format, strict mypy, TypeScript typecheck, and ESLint pass.
 - Repository documentation has no broken relative links.
 - No obvious committed credentials were found.
@@ -158,16 +158,16 @@ Acceptance criteria:
 - If it is deliberate, document exactly which tool requires it and add a test or command
   that proves that requirement.
 
-### [ ] ARB-007 — Make fixtures and validation claims accurately describe their evidence
+### [x] ARB-007 — Make fixtures and validation claims accurately describe their evidence
 
 - Priority: P0
 - Estimate: 3 hours
 - Dependencies: none
 
-Problem: `server/tests/fixtures/recorded/*_5min.jsonl` contains three synthetic/example
-frames per exchange, not five minutes of recorded traffic. The tests are useful, but the
-path and filenames overstate what they validate. The README also says 150 tests while
-[`VALIDATION.md`](docs/VALIDATION.md#L9) and the current suite report 161.
+Problem (resolved): the former `server/tests/fixtures/recorded/*_5min.jsonl` files contained
+three synthetic/example frames per exchange, not five minutes of recorded traffic. Their
+old path and filenames overstated what they validated, and manually copied test counts had
+drifted between the README and validation record.
 
 Acceptance criteria:
 

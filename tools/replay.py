@@ -30,6 +30,7 @@ async def replay_capture(path: Path) -> dict[str, int | str]:
     crashes = 0
     crossed_or_gap_events = 0
     event_count = 0
+    parsed_pair: str | None = None
 
     for line in path.read_text().splitlines():
         payload = json.loads(line)
@@ -41,14 +42,17 @@ async def replay_capture(path: Path) -> dict[str, int | str]:
             continue
         for event in events:
             event_count += 1
+            parsed_pair = event.pair
             result = manager.apply(event)
             if result.reason in {"crossed_book", "sequence_gap"}:
                 crossed_or_gap_events += 1
 
-    snapshot = manager.snapshot(adapter.name, "BTC-USD")
-    top = snapshot.top_of_book
+    top = (
+        manager.snapshot(adapter.name, parsed_pair).top_of_book if parsed_pair is not None else None
+    )
     return {
         "exchange": adapter.name,
+        "pair": parsed_pair or "",
         "messages": len(path.read_text().splitlines()),
         "events": event_count,
         "crashes": crashes,

@@ -6,7 +6,7 @@ tests, and focused documents such as [`RESYNC.md`](RESYNC.md).
 
 ## Automated verification
 
-Current baseline: 161 backend tests passing as of 2026-09-08.
+Current baseline: 176 backend tests passing as of 2026-09-09.
 
 The suite covers:
 
@@ -16,7 +16,7 @@ The suite covers:
 - disconnect invalidation and cold-start delta rejection
 - stale, incomplete, and crossed-book exclusion
 - detection using only eligible venues
-- fixture replay for Gemini, Coinbase, and Binance.US
+- synthetic fixture replay for Gemini, Coinbase, and Binance.US
 - bounded persistence and WebSocket queues
 - coalesced dashboard delivery, immediate invalidation ordering, and suppression
   of unchanged book updates, including a sequence-gap storm

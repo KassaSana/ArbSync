@@ -1,5 +1,9 @@
 # Live soak report - 2026-09-05
 
+> Historical evidence note: This report predates ARB-002. Binance.US subscribed to USDT
+> markets, but the then-current normalizer rendered them as `*-USD`; these legacy labels
+> do not establish USD/USDT parity.
+
 - Started: `2026-09-05T22:05:04.921390+00:00`
 - Ended: `2026-09-05T22:10:04.976535+00:00`
 - Requested duration: `300.0s`
