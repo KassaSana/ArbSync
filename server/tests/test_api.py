@@ -19,6 +19,10 @@ class StubAdapter(ExchangeAdapter):
     ws_url = "wss://example.test"
     snapshot_url = "https://example.test/snapshot"
 
+    @staticmethod
+    def normalize_symbol(symbol: str) -> str:
+        return symbol
+
     async def subscribe(self, websocket: Any) -> None:
         return None
 

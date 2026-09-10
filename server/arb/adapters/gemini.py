@@ -22,6 +22,7 @@ class GeminiAdapter(ExchangeAdapter):
     name = "gemini"
     ws_url = "wss://ws.gemini.com?snapshot=-1"
     snapshot_url = "https://api.gemini.com/v1/book"
+    normalize_symbol = staticmethod(normalize_gemini_symbol)
 
     def __init__(self, pairs: list[str]) -> None:
         super().__init__(pairs)

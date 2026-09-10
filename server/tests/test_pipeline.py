@@ -81,16 +81,19 @@ async def test_processing_order_and_payloads(monkeypatch, enqueue_accepted) -> N
         broadcaster=broadcaster,
     )
 
+    # eligible_books orders venues by exchange name, so the detector sees the
+    # same list regardless of which venue happened to update last.
     pair_books = [
-        manager.top_of_book(exchange, event.pair) for exchange in ("gemini", "coinbase", "binance")
+        manager.top_of_book(exchange, event.pair) for exchange in ("binance", "coinbase", "gemini")
     ]
+    event_book = manager.top_of_book(event.exchange, event.pair)
     opportunities = detector.detect_for_pair(event.pair, pair_books, 123)
     assert len(opportunities) == 3
     books.apply.assert_called_once_with(event, received_monotonic_ns=123)
     detection.detect_for_pair.assert_called_once_with("BTC-USD", pair_books, 123)
     assert store.enqueue.await_count == 3
     assert len(broadcaster.messages) == 5
-    assert broadcaster.messages[0] == LiveMessage("top_of_book", pair_books[0].as_payload())
+    assert broadcaster.messages[0] == LiveMessage("top_of_book", event_book.as_payload())
     assert broadcaster.messages[1].type == "book_status"
     assert [message.type for message in broadcaster.messages[2:]] == ["opportunity"] * 3
     assert [(exchange, pair) for exchange, pair, _ in broadcaster.books] == [

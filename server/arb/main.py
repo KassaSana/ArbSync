@@ -12,9 +12,9 @@ import structlog
 import uvicorn
 
 from arb.adapters.base import ExchangeAdapter
-from arb.adapters.binance import BinanceAdapter, normalize_binance_symbol
-from arb.adapters.coinbase import CoinbaseAdapter, normalize_coinbase_symbol
-from arb.adapters.gemini import GeminiAdapter, normalize_gemini_symbol
+from arb.adapters.binance import BinanceAdapter
+from arb.adapters.coinbase import CoinbaseAdapter
+from arb.adapters.gemini import GeminiAdapter
 from arb.api import create_app
 from arb.broadcast import LiveBroadcaster
 from arb.config import load_config
@@ -124,9 +124,7 @@ async def process_market_event(
     await broadcaster.broadcast_book(
         event.exchange, event.pair, LiveMessage(type="book_status", payload=status.as_payload())
     )
-    pair_books = book_manager.eligible_books(
-        event.pair, ("gemini", "coinbase", "binance"), eligibility_checked_ns
-    )
+    pair_books = book_manager.eligible_books(event.pair, eligibility_checked_ns)
     detect_started = time.perf_counter()
     opportunities = detector.detect_for_pair(event.pair, pair_books, time.time_ns())
     detection_latency_seconds.observe(time.perf_counter() - detect_started)
@@ -196,18 +194,7 @@ async def run_pipeline() -> None:
     for adapter in adapters:
         adapter.set_connection_state_callback(report_connection_state)
     expected_pairs = [
-        *(
-            ("gemini", normalize_gemini_symbol(symbol))
-            for symbol in config.exchanges.get("gemini", [])
-        ),
-        *(
-            ("coinbase", normalize_coinbase_symbol(symbol))
-            for symbol in config.exchanges.get("coinbase", [])
-        ),
-        *(
-            ("binance", normalize_binance_symbol(symbol))
-            for symbol in config.exchanges.get("binance", [])
-        ),
+        (adapter.name, pair) for adapter in adapters for pair in adapter.expected_pairs()
     ]
     app = create_app(
         store,

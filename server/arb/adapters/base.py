@@ -77,6 +77,21 @@ class ExchangeAdapter(abc.ABC):
             if isawaitable(result):
                 await result
 
+    @staticmethod
+    @abc.abstractmethod
+    def normalize_symbol(symbol: str) -> str:
+        """Map one exchange-native symbol to its normalized `BASE-QUOTE` name."""
+        raise NotImplementedError
+
+    def expected_pairs(self) -> list[str]:
+        """Normalized names of the pairs this adapter is configured to track.
+
+        Callers build their venue and pair rosters from the adapters they were
+        given, so a new exchange cannot be half-registered by adding an adapter
+        and forgetting a list somewhere else.
+        """
+        return [self.normalize_symbol(symbol) for symbol in self.pairs]
+
     @abc.abstractmethod
     async def subscribe(self, websocket: Any) -> None:
         raise NotImplementedError

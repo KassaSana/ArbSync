@@ -42,7 +42,7 @@ async def test_burst_workload_keeps_all_books_continuous_and_exercises_opportuni
         assert len(events) == 1
         for event in events:
             assert manager.apply(event).accepted
-            books = manager.eligible_books(event.pair, EXCHANGES)
+            books = manager.eligible_books(event.pair)
             emitted += len(detector.detect_for_pair(event.pair, books, 0))
     assert emitted > 0
     assert len(manager.known_pairs()) == 27

@@ -242,12 +242,17 @@ class OrderBookManager:
             return None
         return self.top_of_book(exchange, pair)
 
-    def eligible_books(
-        self, pair: str, exchanges: tuple[str, ...], now_monotonic_ns: int | None = None
-    ) -> list[TopOfBook]:
+    def eligible_books(self, pair: str, now_monotonic_ns: int | None = None) -> list[TopOfBook]:
+        """Every eligible top of book for one pair, or nothing if fewer than two.
+
+        The manager already knows which exchanges hold a book for this pair, so
+        callers do not supply a venue roster and cannot drift from the adapters
+        that are actually running.
+        """
         books = [
             top
-            for exchange in exchanges
+            for exchange, book_pair in sorted(self._books)
+            if book_pair == pair
             if (top := self.eligible_top_of_book(exchange, pair, now_monotonic_ns)) is not None
         ]
         return books if len(books) >= 2 else []

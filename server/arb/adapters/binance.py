@@ -34,6 +34,7 @@ class BinanceAdapter(ExchangeAdapter):
     ws_url = "wss://stream.binance.us:9443/ws"
     snapshot_url = "https://api.binance.us/api/v3/depth"
     max_buffered_updates = 1_000
+    normalize_symbol = staticmethod(normalize_binance_symbol)
 
     def __init__(self, pairs: list[str]) -> None:
         super().__init__(pairs)

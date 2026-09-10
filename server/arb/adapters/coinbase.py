@@ -17,6 +17,7 @@ class CoinbaseAdapter(ExchangeAdapter):
     name = "coinbase"
     ws_url = "wss://advanced-trade-ws.coinbase.com"
     snapshot_url = "https://api.exchange.coinbase.com/products"
+    normalize_symbol = staticmethod(normalize_coinbase_symbol)
 
     def __init__(self, pairs: list[str]) -> None:
         super().__init__(pairs)
