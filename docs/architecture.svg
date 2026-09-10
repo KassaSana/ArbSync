@@ -1,55 +1,184 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" fill="none">
-  <rect width="1200" height="640" fill="#F7F1E6"/>
-  <rect x="60" y="70" width="180" height="80" rx="20" fill="#FFF8ED" stroke="#A16207" stroke-width="2"/>
-  <text x="150" y="102" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#1F2937">Gemini</text>
-  <text x="150" y="128" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">Public WebSocket</text>
-  <rect x="60" y="180" width="180" height="80" rx="20" fill="#FFF8ED" stroke="#A16207" stroke-width="2"/>
-  <text x="150" y="212" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#1F2937">Coinbase</text>
-  <text x="150" y="238" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">Public WebSocket</text>
-  <rect x="60" y="290" width="180" height="80" rx="20" fill="#FFF8ED" stroke="#A16207" stroke-width="2"/>
-  <text x="150" y="322" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#1F2937">Binance</text>
-  <text x="150" y="348" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">Public WebSocket</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="930" viewBox="0 0 1500 930" role="img" aria-labelledby="title description">
+  <title id="title">ArbSync architecture</title>
+  <desc id="description">Public exchange feeds pass through exchange-owned recovery adapters, the canonical order book trust gate, and theoretical arbitrage detection. Opportunities flow to bounded SQLite persistence and FastAPI streams live state to the React dashboard.</desc>
 
-  <rect x="320" y="110" width="220" height="220" rx="24" fill="#FFFFFF" stroke="#D6D3D1" stroke-width="2"/>
-  <text x="430" y="150" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="24" fill="#1F2937">Exchange Adapters</text>
-  <text x="430" y="182" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">normalize symbols</text>
-  <text x="430" y="208" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">reconnect with jitter</text>
-  <text x="430" y="234" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">REST snapshot resync on gap</text>
-  <text x="430" y="260" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">emit MarketEvent objects</text>
+  <defs>
+    <pattern id="paper-dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#d6d3d1" opacity="0.28"/>
+    </pattern>
+    <filter id="paper-shadow" x="-15%" y="-15%" width="140%" height="140%">
+      <feDropShadow dx="5" dy="6" stdDeviation="0" flood-color="#1f2937" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow-dark" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 L10 6 L1 11 L3.5 6 Z" fill="#292524" stroke="#292524" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M1 1 L10 6 L1 11 L3.5 6 Z" fill="#2563eb" stroke="#2563eb" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      .ink { fill: #292524; }
+      .muted { fill: #57534e; }
+      .title { font: 700 38px "Segoe Print", "Comic Sans MS", cursive; }
+      .subtitle { font: 18px "Segoe Print", "Comic Sans MS", cursive; }
+      .section { font: 700 15px "Segoe Print", "Comic Sans MS", cursive; letter-spacing: 1.8px; }
+      .box-title { font: 700 23px "Segoe Print", "Comic Sans MS", cursive; }
+      .box-copy { font: 16px "Segoe Print", "Comic Sans MS", cursive; }
+      .small { font: 14px "Segoe Print", "Comic Sans MS", cursive; }
+      .label { font: 700 14px "Segoe Print", "Comic Sans MS", cursive; }
+      .rough { stroke: #292524; stroke-width: 2.8; stroke-linecap: round; stroke-linejoin: round; }
+      .rough-echo { fill: none; stroke: #292524; stroke-width: 1.3; opacity: 0.2; stroke-linecap: round; stroke-linejoin: round; }
+      .flow { fill: none; stroke: #292524; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-dark); }
+      .flow-echo { fill: none; stroke: #292524; stroke-width: 1.2; opacity: 0.22; stroke-linecap: round; stroke-linejoin: round; }
+      .state-flow { fill: none; stroke: #2563eb; stroke-width: 3; stroke-dasharray: 9 8; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrow-blue); }
+    </style>
+  </defs>
 
-  <rect x="620" y="70" width="240" height="120" rx="24" fill="#FFFFFF" stroke="#D6D3D1" stroke-width="2"/>
-  <text x="740" y="114" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="24" fill="#1F2937">OrderBookManager</text>
-  <text x="740" y="144" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">in-memory L2 books</text>
-  <text x="740" y="168" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">gap / crossed-book handling</text>
+  <rect width="1500" height="930" fill="#fbfaf7"/>
+  <rect width="1500" height="930" fill="url(#paper-dots)"/>
 
-  <rect x="620" y="230" width="240" height="120" rx="24" fill="#FFFFFF" stroke="#D6D3D1" stroke-width="2"/>
-  <text x="740" y="274" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="24" fill="#1F2937">ArbitrageDetector</text>
-  <text x="740" y="304" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">cross-venue best bid / ask</text>
-  <text x="740" y="328" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">spread %, size, theoretical profit</text>
+  <text x="58" y="60" class="title ink">ArbSync market-data pipeline</text>
+  <text x="60" y="94" class="subtitle muted">From noisy public feeds to trusted books, theoretical signals, and bounded consumers.</text>
 
-  <rect x="940" y="90" width="200" height="100" rx="24" fill="#FFFFFF" stroke="#D6D3D1" stroke-width="2"/>
-  <text x="1040" y="128" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#1F2937">SQLite</text>
-  <text x="1040" y="154" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">batched async writes</text>
+  <g transform="translate(1080 42)">
+    <path d="M0 0 C62 -3 139 2 194 0 C198 15 196 32 194 43 C132 46 61 42 0 44 C-3 29 2 13 0 0 Z" fill="#dbeafe" class="rough"/>
+    <text x="97" y="28" text-anchor="middle" class="label ink">LIVE MARKET PATH</text>
+  </g>
+  <g transform="translate(1290 42)">
+    <path d="M0 1 C49 -2 100 2 148 0 C151 14 149 31 147 43 C98 46 47 42 1 44 C-2 29 1 14 0 1 Z" fill="#f5f5f4" class="rough" stroke-dasharray="7 6"/>
+    <text x="74" y="28" text-anchor="middle" class="label ink">REST CHECK</text>
+  </g>
 
-  <rect x="940" y="230" width="200" height="100" rx="24" fill="#FFFFFF" stroke="#D6D3D1" stroke-width="2"/>
-  <text x="1040" y="268" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#1F2937">FastAPI</text>
-  <text x="1040" y="294" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">REST + WebSocket + metrics</text>
+  <!-- Public exchanges -->
+  <g filter="url(#paper-shadow)">
+    <path d="M50 151 C114 146 238 153 300 150 C304 254 297 407 302 510 C228 516 121 507 51 512 C46 408 54 252 50 151 Z" fill="#eff6ff" class="rough"/>
+    <path d="M54 154 C126 151 235 156 297 153 C300 261 295 403 299 507" class="rough-echo"/>
+  </g>
+  <text x="176" y="184" text-anchor="middle" class="section" fill="#1d4ed8">PUBLIC EXCHANGES</text>
 
-  <rect x="940" y="390" width="200" height="100" rx="24" fill="#FFFFFF" stroke="#D6D3D1" stroke-width="2"/>
-  <text x="1040" y="428" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#1F2937">React Dashboard</text>
-  <text x="1040" y="454" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">spreads, feed, stats, health</text>
+  <g>
+    <path d="M80 209 C126 206 220 211 270 208 C273 229 268 258 271 278 C220 282 129 277 80 280 C77 257 82 230 80 209 Z" fill="#ffffff" class="rough"/>
+    <path d="M83 212 C132 209 218 214 268 211" class="rough-echo"/>
+    <text x="175" y="240" text-anchor="middle" class="box-title ink">Gemini</text>
+    <text x="175" y="264" text-anchor="middle" class="small muted">differential depth</text>
+  </g>
+  <g>
+    <path d="M80 315 C132 312 219 317 270 314 C273 337 268 364 271 386 C219 390 130 384 80 387 C77 366 82 336 80 315 Z" fill="#ffffff" class="rough"/>
+    <path d="M83 318 C132 315 219 320 267 317" class="rough-echo"/>
+    <text x="175" y="346" text-anchor="middle" class="box-title ink">Coinbase</text>
+    <text x="175" y="370" text-anchor="middle" class="small muted">level2 channel</text>
+  </g>
+  <g>
+    <path d="M80 421 C132 418 220 423 270 420 C273 443 268 471 271 492 C220 496 130 490 80 493 C77 472 82 442 80 421 Z" fill="#ffffff" class="rough"/>
+    <path d="M83 424 C132 421 219 426 268 423" class="rough-echo"/>
+    <text x="175" y="452" text-anchor="middle" class="box-title ink">Binance.US</text>
+    <text x="175" y="476" text-anchor="middle" class="small muted">depth stream + REST</text>
+  </g>
 
-  <rect x="620" y="400" width="240" height="100" rx="24" fill="#FFF8ED" stroke="#A16207" stroke-width="2"/>
-  <text x="740" y="438" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" fill="#1F2937">Snapshot Reconciler</text>
-  <text x="740" y="464" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#6B7280">periodic REST vs live-book diff</text>
+  <!-- Adapters -->
+  <g filter="url(#paper-shadow)">
+    <path d="M380 210 C447 205 562 212 630 209 C635 271 627 380 632 441 C563 447 447 438 381 443 C375 378 385 275 380 210 Z" fill="#fef3c7" class="rough"/>
+    <path d="M384 214 C452 209 559 216 627 212 C631 276 625 376 629 437" class="rough-echo"/>
+  </g>
+  <text x="505" y="250" text-anchor="middle" class="box-title ink">Exchange adapters</text>
+  <path d="M414 270 C461 267 552 271 597 269" fill="none" stroke="#d97706" stroke-width="2.4" stroke-linecap="round"/>
+  <text x="410" y="306" class="box-copy ink">✓ validate native sequences</text>
+  <text x="410" y="340" class="box-copy ink">✓ own gap recovery</text>
+  <text x="410" y="374" class="box-copy ink">✓ normalize market events</text>
+  <text x="410" y="408" class="box-copy ink">✓ reconnect with jitter</text>
+  <g transform="translate(425 457)">
+    <path d="M0 2 C47 -2 115 2 160 0 C163 15 161 34 159 47 C109 50 49 46 1 49 C-2 32 2 16 0 2 Z" fill="#fff7d6" stroke="#d97706" stroke-width="2" stroke-linejoin="round"/>
+    <text x="80" y="30" text-anchor="middle" class="label" fill="#92400e">RECOVERY LIVES HERE</text>
+  </g>
 
-  <path d="M240 110H320" stroke="#A16207" stroke-width="3"/>
-  <path d="M240 220H320" stroke="#A16207" stroke-width="3"/>
-  <path d="M240 330H320" stroke="#A16207" stroke-width="3"/>
-  <path d="M540 180H620" stroke="#A16207" stroke-width="3"/>
-  <path d="M740 190V230" stroke="#A16207" stroke-width="3"/>
-  <path d="M860 290H940" stroke="#A16207" stroke-width="3"/>
-  <path d="M860 150H940" stroke="#A16207" stroke-width="3"/>
-  <path d="M1040 330V390" stroke="#A16207" stroke-width="3"/>
-  <path d="M740 350V400" stroke="#A16207" stroke-width="3"/>
+  <!-- Canonical trust gate -->
+  <g filter="url(#paper-shadow)">
+    <path d="M710 190 C784 185 920 192 995 189 C1000 264 992 384 997 460 C921 466 785 457 711 462 C705 385 715 266 710 190 Z" fill="#ede9fe" class="rough"/>
+    <path d="M714 194 C789 189 917 196 992 192 C996 268 990 380 994 456" class="rough-echo"/>
+  </g>
+  <text x="853" y="232" text-anchor="middle" class="box-title ink">OrderBookManager</text>
+  <text x="853" y="260" text-anchor="middle" class="label" fill="#6d28d9">CANONICAL TRUST GATE</text>
+  <path d="M748 279 C805 276 903 281 958 278" fill="none" stroke="#7c3aed" stroke-width="2.4" stroke-linecap="round"/>
+  <text x="745" y="317" class="box-copy ink">in-memory L2 books</text>
+  <text x="745" y="351" class="box-copy ink">continuous + initialized</text>
+  <text x="745" y="385" class="box-copy ink">fresh + complete + uncrossed</text>
+  <g transform="translate(758 408)">
+    <path d="M0 1 C54 -2 136 2 188 0 C191 13 189 31 187 42 C132 46 54 41 1 44 C-2 28 2 14 0 1 Z" fill="#ffffff" stroke="#7c3aed" stroke-width="2" stroke-linejoin="round"/>
+    <text x="94" y="27" text-anchor="middle" class="label" fill="#5b21b6">ONLY ELIGIBLE BOOKS PASS</text>
+  </g>
+
+  <!-- Detector -->
+  <g filter="url(#paper-shadow)">
+    <path d="M1070 220 C1153 215 1308 223 1390 219 C1395 278 1387 373 1392 431 C1308 437 1153 428 1071 433 C1065 373 1075 279 1070 220 Z" fill="#fee2e2" class="rough"/>
+    <path d="M1074 224 C1158 219 1304 227 1387 222 C1391 283 1385 369 1389 427" class="rough-echo"/>
+  </g>
+  <text x="1230" y="262" text-anchor="middle" class="box-title ink">ArbitrageDetector</text>
+  <path d="M1113 283 C1181 280 1281 285 1348 282" fill="none" stroke="#dc2626" stroke-width="2.4" stroke-linecap="round"/>
+  <text x="1105" y="321" class="box-copy ink">compare eligible best bid / ask</text>
+  <text x="1105" y="356" class="box-copy ink">spread %, size, profit estimate</text>
+  <text x="1105" y="391" class="box-copy ink">theoretical opportunities only</text>
+
+  <!-- Main data path arrows -->
+  <path d="M302 327 C329 323 350 330 380 326" class="flow"/>
+  <path d="M303 331 C330 327 352 334 377 330" class="flow-echo"/>
+  <text x="340" y="309" text-anchor="middle" class="label muted">JSON</text>
+
+  <path d="M632 326 C660 322 680 329 710 325" class="flow"/>
+  <path d="M633 330 C659 326 681 333 707 329" class="flow-echo"/>
+  <text x="670" y="307" text-anchor="middle" class="label muted">events</text>
+
+  <path d="M997 326 C1024 322 1043 330 1070 325" class="flow"/>
+  <path d="M998 330 C1023 326 1044 334 1067 329" class="flow-echo"/>
+  <text x="1033" y="307" text-anchor="middle" class="label muted">eligible</text>
+
+  <!-- Reconciler -->
+  <g filter="url(#paper-shadow)">
+    <path d="M400 590 C473 585 610 592 685 589 C689 630 683 694 687 735 C610 740 475 733 401 737 C396 695 405 632 400 590 Z" fill="#f5f5f4" class="rough" stroke-dasharray="8 7"/>
+  </g>
+  <text x="543" y="627" text-anchor="middle" class="box-title ink">Snapshot reconciler</text>
+  <text x="543" y="659" text-anchor="middle" class="box-copy muted">periodic REST vs. live comparison</text>
+  <text x="543" y="691" text-anchor="middle" class="small" fill="#b45309">metrics + logs (observability only)</text>
+  <path d="M620 589 C659 535 752 515 817 462" class="state-flow"/>
+  <text x="697" y="526" text-anchor="middle" class="label" fill="#2563eb" transform="rotate(-14 697 526)">compare</text>
+
+  <!-- Persistence branch -->
+  <g filter="url(#paper-shadow)">
+    <path d="M780 570 C843 566 968 572 1030 569 C1034 610 1028 675 1032 716 C967 721 844 714 781 718 C776 676 785 612 780 570 Z" fill="#dcfce7" class="rough"/>
+  </g>
+  <text x="905" y="608" text-anchor="middle" class="box-title ink">Persistence worker</text>
+  <text x="905" y="641" text-anchor="middle" class="box-copy muted">bounded queue</text>
+  <text x="905" y="672" text-anchor="middle" class="box-copy muted">batched async writes</text>
+  <g filter="url(#paper-shadow)">
+    <path d="M1120 585 C1175 581 1277 587 1330 584 C1334 619 1328 672 1332 707 C1277 712 1175 705 1121 709 C1117 672 1124 620 1120 585 Z" fill="#ffffff" class="rough"/>
+  </g>
+  <text x="1226" y="631" text-anchor="middle" class="box-title ink">SQLite</text>
+  <text x="1226" y="664" text-anchor="middle" class="box-copy muted">opportunities, not books</text>
+  <path d="M1032 644 C1063 640 1088 647 1120 643" class="flow"/>
+  <path d="M1033 648 C1064 644 1089 651 1117 647" class="flow-echo"/>
+
+  <path d="M1228 433 C1226 478 1185 506 1055 506 C960 506 907 528 906 570" class="flow"/>
+  <path d="M1234 434 C1232 484 1186 512 1057 512 C965 512 914 534 912 567" class="flow-echo"/>
+  <text x="1081" y="494" text-anchor="middle" class="label muted">opportunities</text>
+
+  <!-- Live delivery branch -->
+  <g filter="url(#paper-shadow)">
+    <path d="M780 775 C843 771 969 777 1030 774 C1034 808 1028 860 1032 894 C968 899 843 892 781 896 C777 861 784 809 780 775 Z" fill="#cffafe" class="rough"/>
+  </g>
+  <text x="905" y="816" text-anchor="middle" class="box-title ink">FastAPI</text>
+  <text x="905" y="847" text-anchor="middle" class="box-copy muted">REST + bounded client queues</text>
+  <text x="905" y="875" text-anchor="middle" class="small muted">health + metrics</text>
+
+  <g filter="url(#paper-shadow)">
+    <path d="M1120 775 C1188 771 1324 777 1390 774 C1394 808 1388 860 1392 894 C1324 899 1188 892 1121 896 C1117 861 1124 809 1120 775 Z" fill="#ffffff" class="rough"/>
+  </g>
+  <text x="1256" y="817" text-anchor="middle" class="box-title ink">React dashboard</text>
+  <text x="1256" y="850" text-anchor="middle" class="box-copy muted">books • spreads • stats • health</text>
+  <path d="M1032 836 C1063 832 1088 839 1120 835" class="flow"/>
+  <path d="M1033 840 C1064 836 1089 843 1117 839" class="flow-echo"/>
+
+  <path d="M1390 382 C1443 399 1450 457 1450 607 C1450 713 1388 744 1080 744 C1037 744 1011 757 1000 775" class="flow"/>
+  <path d="M1391 388 C1437 406 1444 461 1444 607 C1444 706 1384 738 1080 738 C1034 738 1006 752 995 772" class="flow-echo"/>
+  <text x="1431" y="617" text-anchor="middle" class="label muted" transform="rotate(90 1431 617)">live opportunities</text>
+
+  <path d="M835 462 C783 514 742 604 744 716 C745 768 757 818 780 829" class="state-flow"/>
+  <text x="731" y="666" text-anchor="middle" class="label" fill="#2563eb" transform="rotate(-88 731 666)">book + eligibility state</text>
 </svg>
