@@ -150,6 +150,31 @@ async def test_decimal_round_trip_preserves_string_form(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_canonical_decimals_remain_exact_when_rollups_are_approximate(
+    tmp_path: Path,
+) -> None:
+    store = OpportunityStore(
+        str(tmp_path / "db.sqlite3"), batch_size=10, flush_interval_seconds=0.05
+    )
+    await store.initialize()
+    runner = asyncio.create_task(store.run())
+    timestamp_ns = time.time_ns()
+    await store.enqueue(make_opp(timestamp_ns, spread="0.1", profit="0.1"))
+    await store.enqueue(make_opp(timestamp_ns + 1, spread="0.2", profit="0.2"))
+    await store.close()
+    await asyncio.wait_for(runner, timeout=1.0)
+
+    rows = await store.recent(limit=2)
+    assert {row["spread_pct"] for row in rows} == {"0.1", "0.2"}
+    assert {row["theoretical_profit_usd"] for row in rows} == {"0.1", "0.2"}
+
+    stats = await store.extended_stats(window_ns=None)
+    approximate_profit = Decimal(str(stats["total_theoretical_profit_usd"]))
+    assert approximate_profit != Decimal("0.3")
+    assert float(approximate_profit) == pytest.approx(0.3, rel=0, abs=1e-15)
+
+
+@pytest.mark.asyncio
 async def test_recent_orders_descending_by_timestamp(tmp_path: Path) -> None:
     store = OpportunityStore(
         str(tmp_path / "db.sqlite3"), batch_size=10, flush_interval_seconds=0.05

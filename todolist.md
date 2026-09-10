@@ -336,16 +336,16 @@ Acceptance criteria:
 - Add a frontend test runner and tests for malformed JSON, missing fields, invalid Decimal
   strings, invalid nanosecond timestamps, unknown message types, and valid payloads.
 
-### [ ] ARB-015 — Clarify canonical Decimal guarantees and derived-statistics precision
+### [x] ARB-015 — Clarify canonical Decimal guarantees and derived-statistics precision
 
 - Priority: P1
 - Estimate: 1 hour
 - Dependencies: owner approval of the intended invariant
 
-Problem: `AGENTS.md` says Decimal values never pass through binary floats, but
-[`opportunity_minutes`](server/arb/persistence.py#L36) deliberately stores derived
-aggregates as SQLite `REAL`, and `_rollup_rows` converts Decimal values to `float`.
-Canonical opportunity rows remain exact text; derived statistics do not.
+Problem (resolved): `AGENTS.md` previously said Decimal values never passed through binary
+floats, but [`opportunity_minutes`](server/arb/persistence.py#L36) deliberately stores
+derived aggregates as SQLite `REAL`, and `_rollup_rows` converts Decimal values to `float`.
+Canonical opportunity rows remain exact text; derived statistics are approximate.
 
 Acceptance criteria:
 

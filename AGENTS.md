@@ -36,7 +36,9 @@ var/                 Ignored runtime data
 - Persistence and per-client WebSocket delivery remain bounded and must not block
   market-data ingestion.
 - SQLite stores opportunities, not order books.
-- Decimal values are stored and serialized without converting through binary floats.
+- Canonical prices, sizes, spreads, profits, persisted opportunity rows, and wire values
+  remain decimal-exact strings. Derived minute rollups and dashboard statistics use SQLite
+  `REAL`/binary64 and are approximate observability summaries, not accounting values.
 - Opportunities are theoretical and exclude fees, slippage, latency, inventory, and
   execution risk.
 

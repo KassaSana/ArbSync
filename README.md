@@ -118,6 +118,11 @@ FastAPI's interactive schema is available at `http://127.0.0.1:8000/docs` while
 the backend is running. Nanosecond timestamps are serialized as decimal strings so
 JavaScript clients do not lose integer precision.
 
+Canonical market and opportunity values are stored and transmitted as decimal strings.
+Derived minute rollups and aggregate dashboard statistics use SQLite binary64 values for
+efficient observability queries, so they are approximate and should not be used for
+accounting or execution decisions.
+
 ## Verify a change
 
 Run backend checks from the repository root:

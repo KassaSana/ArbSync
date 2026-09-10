@@ -104,7 +104,7 @@ def _minute_boundary(cutoff_ns: int) -> int:
     A window rarely starts exactly on a minute. Rows between the cutoff and this
     boundary belong to a minute the rollup only holds in full, so they are read
     from `opportunities` directly and the rollup supplies everything after it.
-    That keeps windowed results exact rather than rounding out to the minute.
+    That keeps cutoff membership exact rather than rounding the window out to the minute.
     """
     if cutoff_ns <= 0:
         return 0

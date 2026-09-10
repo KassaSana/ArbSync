@@ -6,7 +6,7 @@ tests, and focused documents such as [`RESYNC.md`](RESYNC.md).
 
 ## Automated verification
 
-Current baseline: 176 backend tests passing as of 2026-09-09.
+Current baseline: 177 backend tests passing as of 2026-09-09.
 
 The suite covers:
 
@@ -23,8 +23,8 @@ The suite covers:
 - cached top-of-book invalidation across size changes, level deletion, sequence
   gaps, snapshot recovery, and disconnect
 - per-minute statistics rollup: backfill of pre-rollup history, consistency
-  across separate write batches, exactness for a window starting mid-minute,
-  and sub-minute buckets bypassing the rollup
+  across separate write batches, exact cutoff membership for a window starting
+  mid-minute, documented binary64 tolerance, and sub-minute buckets bypassing the rollup
 - WebSocket reconnection and state restoration
 - REST, readiness, metrics, persistence, and statistics behavior
 
@@ -85,6 +85,12 @@ Results were checked against the previous full-scan queries on all three
 databases, with time frozen so both sides used identical window cutoffs. All
 eight query variants matched, including windows starting mid-minute and
 sub-minute timeseries buckets, which do not use the rollup.
+
+Canonical opportunity columns remain decimal text and round-trip without binary-float
+conversion. Aggregate spread and profit statistics intentionally use SQLite `REAL`
+(binary64), matching the full-scan queries they replaced. They are suitable for dashboard
+observability but may contain normal floating-point rounding and are not exact accounting
+values.
 
 These are synthetic databases with uniformly distributed timestamps across nine
 pairs. Real history may cluster differently, and no measurement covers a
