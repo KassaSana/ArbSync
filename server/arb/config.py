@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,12 +41,20 @@ class AppConfig:
 
 def load_config(path: str | Path = "config.toml") -> AppConfig:
     raw = tomllib.loads(Path(path).read_text())
+    platform_port = os.getenv("PORT")
+    configured_host = str(raw["server"]["host"])
+    default_host = "0.0.0.0" if platform_port is not None else configured_host
+    host = os.getenv("ARB_HOST", default_host)
+    try:
+        port = int(platform_port) if platform_port is not None else int(raw["server"]["port"])
+    except ValueError as exc:
+        raise ValueError("PORT must be an integer") from exc
     return AppConfig(
         detector=DetectorConfig(threshold_pct=float(raw["detector"]["threshold_pct"])),
         exchanges={name: list(symbols) for name, symbols in raw["exchanges"].items()},
         server=ServerConfig(
-            host=raw["server"]["host"],
-            port=int(raw["server"]["port"]),
+            host=host,
+            port=port,
             database_path=raw["server"]["database_path"],
         ),
         persistence=PersistenceConfig(

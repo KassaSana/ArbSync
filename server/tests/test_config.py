@@ -29,6 +29,12 @@ max_age_seconds = 12.5
 """
 
 
+@pytest.fixture(autouse=True)
+def clear_server_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ARB_HOST", raising=False)
+    monkeypatch.delenv("PORT", raising=False)
+
+
 def test_load_config_parses_all_sections(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(VALID_CONFIG)
@@ -65,4 +71,35 @@ def test_load_config_raises_on_missing_section(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text("[detector]\nthreshold_pct = 0.1\n")
     with pytest.raises(KeyError):
+        load_config(path)
+
+
+def test_platform_port_uses_external_bind_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(VALID_CONFIG)
+    monkeypatch.setenv("PORT", "9000")
+    config = load_config(path)
+    assert config.server.host == "0.0.0.0"
+    assert config.server.port == 9000
+
+
+def test_arb_host_overrides_platform_bind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(VALID_CONFIG)
+    monkeypatch.setenv("PORT", "9000")
+    monkeypatch.setenv("ARB_HOST", "127.0.0.2")
+    config = load_config(path)
+    assert config.server.host == "127.0.0.2"
+    assert config.server.port == 9000
+
+
+def test_invalid_platform_port_has_actionable_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(VALID_CONFIG)
+    monkeypatch.setenv("PORT", "not-a-port")
+    with pytest.raises(ValueError, match="PORT must be an integer"):
         load_config(path)

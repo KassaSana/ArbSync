@@ -54,8 +54,9 @@ uv sync --locked --extra dev
 uv run python -m arb.main
 ```
 
-The API listens on `http://127.0.0.1:8000` by default. In a second terminal,
-start the dashboard:
+The API listens only on `http://127.0.0.1:8000` by default. Hosting platforms that
+supply `PORT` use that port and bind to `0.0.0.0`; set `ARB_HOST` to override the bind
+address explicitly. In a second terminal, start the dashboard:
 
 PowerShell:
 
@@ -94,9 +95,15 @@ Environment variables used by the application:
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `ARB_LOG_LEVEL` | Backend log level | `INFO` |
+| `ARB_HOST` | Explicit backend bind-address override | `config.toml`, or `0.0.0.0` when `PORT` is supplied |
+| `PORT` | Hosted-platform port override and external-bind signal | `server.port` from `config.toml` |
 | `VITE_API_URL` | REST origin used by the dashboard; its scheme is converted for WebSockets | Local Vite proxy in development; hosted API in production |
 
 Restart the backend after changing `config.toml`.
+
+Binding to `0.0.0.0` exposes the service beyond the local machine. The current wildcard
+CORS policy and unauthenticated uptime-reset endpoint are not hardened for arbitrary public
+deployment; completing ARB-020 is required before treating the API as production-secure.
 
 ## Useful interfaces
 

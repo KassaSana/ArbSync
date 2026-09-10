@@ -218,7 +218,29 @@ Acceptance criteria:
 - Create verified local commits after completed tickets and require an explicit owner request
   before any push.
 
-P0 total: **37 engineer-hours**.
+### [ ] ARB-020 — Harden public deployment defaults and control endpoints
+
+- Priority: P0
+- Estimate: 6 hours
+- Dependencies: ARB-009, ARB-018
+
+Problem: Local development now defaults to loopback, but hosted mode still permits every
+CORS origin and exposes an unauthenticated uptime-reset endpoint. The project has no complete
+hosted security profile or abuse controls for expensive/stateless public requests and
+WebSockets.
+
+Progress: the local bind defaults to `127.0.0.1`; `PORT` enables conventional hosted binding,
+and `ARB_HOST` provides an explicit override. The remaining criteria keep this ticket open.
+
+Acceptance criteria:
+
+- Default local development to loopback or prominently explain network exposure.
+- Make allowed origins configurable and restrictive in the hosted profile.
+- Remove, protect, or explicitly scope the reset endpoint.
+- Document reverse-proxy TLS, request-size, connection, timeout, and rate-limit expectations.
+- Add tests for origin policy and any protected control route.
+
+P0 total: **43 engineer-hours**.
 
 ## Reliability and maintainability (P1)
 
@@ -432,24 +454,6 @@ Acceptance criteria:
   unbounded period.
 - Test pruning boundaries, active writes, restart, and statistics after retention.
 
-### [ ] ARB-020 — Harden public deployment defaults and control endpoints
-
-- Priority: P2
-- Estimate: 6 hours
-- Dependencies: ARB-009, ARB-018
-
-Problem: The default server binds to `0.0.0.0`, CORS allows every origin, and the uptime
-reset endpoint is unauthenticated. The project has no explicit local-only versus hosted
-security profile or abuse controls for expensive/stateless public requests and WebSockets.
-
-Acceptance criteria:
-
-- Default local development to loopback or prominently explain network exposure.
-- Make allowed origins configurable and restrictive in the hosted profile.
-- Remove, protect, or explicitly scope the reset endpoint.
-- Document reverse-proxy TLS, request-size, connection, timeout, and rate-limit expectations.
-- Add tests for origin policy and any protected control route.
-
 ### [ ] ARB-021 — Complete and publish the 24-hour live soak
 
 - Priority: P2
@@ -507,15 +511,15 @@ Acceptance criteria:
 - Verify all README commands on Windows and one Unix-like CI runner.
 - Tag the release only after required tickets and checks pass.
 
-P2 total: **24 engineer-hours plus the 24-hour soak runtime**.
+P2 total: **18 engineer-hours plus the 24-hour soak runtime**.
 
 ## Planning summary
 
 | Milestone | Engineer effort | Release requirement |
 | --- | ---: | --- |
-| P0 release gate | 37 h | Required before public announcement |
+| P0 release gate | 43 h | Required before public announcement |
 | P1 reliability and maintainability | 54 h | Strongly recommended for the first stable release |
-| P2 operations and evidence | 24 h | Can follow initial publication except where dependencies say otherwise |
+| P2 operations and evidence | 18 h | Can follow initial publication except where dependencies say otherwise |
 | Total | **115 h** | About 2.9 engineer-weeks at 40 h/week |
 
 The critical path is ARB-002 -> ARB-004/ARB-010 -> ARB-021. The highest-risk issue is

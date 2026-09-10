@@ -7,7 +7,7 @@ coinbase = ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "LINK-USD", "LTC-USD", 
 binance = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "UNIUSDT", "DOTUSDT", "AAVEUSDT"]
 
 [server]
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 8000
 database_path = "var/arb.sqlite3"
 
