@@ -8,7 +8,6 @@ from decimal import Decimal
 
 from arb.types import (
     BookEligibility,
-    BookStateSnapshot,
     BookUpdateResult,
     EventKind,
     MarketEvent,
@@ -252,24 +251,6 @@ class OrderBookManager:
             if (top := self.eligible_top_of_book(exchange, pair, now_monotonic_ns)) is not None
         ]
         return books if len(books) >= 2 else []
-
-    def snapshot(self, exchange: str, pair: str) -> BookStateSnapshot:
-        book = self._books.get((exchange, pair))
-        if not book:
-            return BookStateSnapshot(exchange=exchange, pair=pair, sequence=None, stale=True)
-        status = self.eligibility(exchange, pair)
-        return BookStateSnapshot(
-            exchange=exchange,
-            pair=pair,
-            sequence=book.sequence,
-            stale=book.stale,
-            initialized=status.initialized,
-            continuous=status.continuous,
-            connected=status.connected,
-            age_ns=status.age_ns,
-            eligible=status.eligible,
-            top_of_book=self.top_of_book(exchange, pair),
-        )
 
     def known_pairs(self) -> list[tuple[str, str]]:
         return sorted(self._books.keys())

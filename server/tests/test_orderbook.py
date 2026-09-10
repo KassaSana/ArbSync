@@ -83,7 +83,7 @@ def test_gap_detection_marks_book_stale() -> None:
     result = manager.apply(event(kind=EventKind.DELTA, sequence=12, bids=[("100.5", "1")], asks=[]))
     assert result.accepted is False
     assert result.reason == "sequence_gap"
-    assert manager.snapshot("gemini", "BTC-USD").stale is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is False
 
 
 def test_stale_book_blocks_new_deltas_until_snapshot() -> None:
@@ -124,13 +124,13 @@ def test_recovery_after_gap_with_new_snapshot() -> None:
     )
     # Trigger a gap.
     manager.apply(event(kind=EventKind.DELTA, sequence=12, bids=[("100.5", "1")], asks=[]))
-    assert manager.snapshot("gemini", "BTC-USD").stale is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is False
     # Recover with a fresh snapshot at the new sequence.
     result = manager.apply(
         event(kind=EventKind.SNAPSHOT, sequence=20, bids=[("99", "1")], asks=[("100", "1")])
     )
     assert result.accepted is True
-    assert manager.snapshot("gemini", "BTC-USD").stale is False
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
     assert manager.best_bid("gemini", "BTC-USD") == Decimal("99")
     assert manager.best_ask("gemini", "BTC-USD") == Decimal("100")
 

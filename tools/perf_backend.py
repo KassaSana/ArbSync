@@ -12,13 +12,10 @@ import cProfile
 import json
 import os
 import pstats
-import sys
 import time
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
 import uvicorn
 from arb.adapters.binance import BinanceAdapter

@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
 from arb.adapters.binance import BinanceAdapter
 from arb.adapters.coinbase import CoinbaseAdapter
@@ -47,9 +44,7 @@ async def replay_capture(path: Path) -> dict[str, int | str]:
             if result.reason in {"crossed_book", "sequence_gap"}:
                 crossed_or_gap_events += 1
 
-    top = (
-        manager.snapshot(adapter.name, parsed_pair).top_of_book if parsed_pair is not None else None
-    )
+    top = manager.top_of_book(adapter.name, parsed_pair) if parsed_pair is not None else None
     return {
         "exchange": adapter.name,
         "pair": parsed_pair or "",

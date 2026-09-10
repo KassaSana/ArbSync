@@ -4,15 +4,11 @@ import argparse
 import asyncio
 import json
 import statistics
-import sys
 import time
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
 
 import websockets
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
 from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager

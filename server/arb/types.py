@@ -127,17 +127,3 @@ class BookEligibility:
 class LiveMessage:
     type: Literal["top_of_book", "opportunity", "book_status", "state_snapshot"]
     payload: dict[str, object]
-
-
-@dataclass
-class BookStateSnapshot:
-    exchange: str
-    pair: str
-    sequence: int | None
-    stale: bool
-    initialized: bool = False
-    continuous: bool = False
-    connected: bool = False
-    age_ns: int | None = None
-    eligible: bool = False
-    top_of_book: TopOfBook | None = None

@@ -45,9 +45,6 @@ def serialize_peak(peak: dict[str, int] | None) -> dict[str, int | str] | None:
     return {**peak, "minute_start_ns": str(peak["minute_start_ns"])}
 
 
-READINESS_WINDOW_NS = 30_000_000_000
-
-
 # Fields that decide what a book update actually shows. A status also carries
 # `age_ms`, which changes on every event even when nothing about the book has;
 # comparing it would defeat suppression entirely. The dashboard re-polls

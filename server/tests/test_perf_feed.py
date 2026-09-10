@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
+from decimal import Decimal
 
 import pytest
 from arb.adapters.binance import BinanceAdapter
@@ -10,11 +9,6 @@ from arb.adapters.coinbase import CoinbaseAdapter
 from arb.adapters.gemini import GeminiAdapter
 from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
-
-from decimal import Decimal
-
 from perf_feed import ASSETS, EXCHANGES, Feed, levels
 
 

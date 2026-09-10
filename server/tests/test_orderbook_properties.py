@@ -107,4 +107,4 @@ def test_sequence_gap_detection_fires_when_expected(
     assert result.accepted is False
     assert result.reason == "sequence_gap"
     assert result.stale is True
-    assert manager.snapshot("gemini", "BTC-USD").stale is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is False
