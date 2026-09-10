@@ -124,6 +124,11 @@ Acceptance criteria:
 - Add frontend tests for disconnect, age expiry, crossed/incomplete status, reconnect, and
   a state snapshot that omits a previously eligible book.
 
+Progress: contributing books are now gated on canonical eligibility, and tests cover the
+disconnected and missing-status cases. Still open: replacing rather than merging state on a
+new WebSocket snapshot, deriving contributing-book age from canonical status age, and tests
+for age expiry, crossed/incomplete status, reconnect, and snapshot omission.
+
 ### [x] ARB-005 — Repair the pre-commit backend hook paths
 
 - Priority: P0
@@ -140,7 +145,7 @@ Acceptance criteria:
 - Run `pre-commit run --all-files` successfully from a clean checkout.
 - Add a lightweight CI check that exercises the local hook configuration or its commands.
 
-### [ ] ARB-006 — Remove or justify the unused `httpx2` dependency
+### [x] ARB-006 — Remove or justify the unused `httpx2` dependency
 
 - Priority: P0
 - Estimate: 1 hour
