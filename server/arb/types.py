@@ -65,25 +65,27 @@ class TopOfBook:
 class ArbitrageOpportunity:
     timestamp_ns: int
     pair: str
+    quote_asset: str
     buy_exchange: str
     sell_exchange: str
     buy_price: Decimal
     sell_price: Decimal
     spread_pct: Decimal
     max_size: Decimal
-    theoretical_profit_usd: Decimal
+    theoretical_profit: Decimal
 
     def as_payload(self) -> dict[str, object]:
         return {
             "timestamp_ns": str(self.timestamp_ns),
             "pair": self.pair,
+            "quote_asset": self.quote_asset,
             "buy_exchange": self.buy_exchange,
             "sell_exchange": self.sell_exchange,
             "buy_price": str(self.buy_price),
             "sell_price": str(self.sell_price),
             "spread_pct": str(self.spread_pct),
             "max_size": str(self.max_size),
-            "theoretical_profit_usd": str(self.theoretical_profit_usd),
+            "theoretical_profit": str(self.theoretical_profit),
         }
 
 

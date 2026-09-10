@@ -48,8 +48,9 @@ class OneMessageSocket:
 
 def test_symbol_normalization() -> None:
     assert normalize_gemini_symbol("btcusd") == "BTC-USD"
+    assert normalize_gemini_symbol("btcusdt") == "BTC-USDT"
     assert normalize_coinbase_symbol("BTC-USD") == "BTC-USD"
-    assert normalize_binance_symbol("BTCUSDT") == "BTC-USD"
+    assert normalize_binance_symbol("BTCUSDT") == "BTC-USDT"
 
 
 @pytest.mark.asyncio

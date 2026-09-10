@@ -1,13 +1,14 @@
 export type Opportunity = {
   timestamp_ns: string;
   pair: string;
+  quote_asset: string;
   buy_exchange: string;
   sell_exchange: string;
   buy_price: string;
   sell_price: string;
   spread_pct: string;
   max_size: string;
-  theoretical_profit_usd: string;
+  theoretical_profit: string;
 };
 
 export type PairRecord = {
@@ -18,7 +19,7 @@ export type PairRecord = {
 export type Stats = {
   count: number;
   max_spread_pct: string;
-  total_theoretical_profit_usd: string;
+  theoretical_profit_by_quote: Record<string, string>;
 };
 
 export type AdapterStatus = {
@@ -73,7 +74,7 @@ export type WindowStats = {
   count: number;
   max_spread_pct: string;
   mean_spread_pct: string;
-  total_theoretical_profit_usd: string;
+  theoretical_profit_by_quote: Record<string, string>;
   top_pair: string | null;
   peak_minute: PeakMinute | null;
 };

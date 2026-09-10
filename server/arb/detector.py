@@ -14,6 +14,10 @@ class ArbitrageDetector:
         self, pair: str, books: list[TopOfBook], timestamp_ns: int
     ) -> list[ArbitrageOpportunity]:
         opportunities: list[ArbitrageOpportunity] = []
+        base_asset, separator, quote_asset = pair.rpartition("-")
+        if not base_asset or not separator or not quote_asset:
+            return opportunities
+        books = [book for book in books if book.pair == pair]
         if len(books) < 2:
             return opportunities
 
@@ -33,13 +37,14 @@ class ArbitrageDetector:
                 ArbitrageOpportunity(
                     timestamp_ns=timestamp_ns,
                     pair=pair,
+                    quote_asset=quote_asset,
                     buy_exchange=buy_book.exchange,
                     sell_exchange=sell_book.exchange,
                     buy_price=buy_book.best_ask_price,
                     sell_price=sell_book.best_bid_price,
                     spread_pct=spread_pct,
                     max_size=max_size,
-                    theoretical_profit_usd=theoretical_profit,
+                    theoretical_profit=theoretical_profit,
                 )
             )
         return opportunities

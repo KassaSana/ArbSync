@@ -94,7 +94,8 @@ def test_max_size_is_min_of_legs_and_profit_is_correct() -> None:
     )
     assert opp.max_size == Decimal("0.4")
     # profit = max_size * (sell_bid - buy_ask) = 0.4 * (110 - 100) = 4
-    assert opp.theoretical_profit_usd == Decimal("4.0")
+    assert opp.quote_asset == "USD"
+    assert opp.theoretical_profit == Decimal("4.0")
     # spread_pct = (110 - 100) / 100 * 100 = 10
     assert opp.spread_pct == Decimal("10")
 
@@ -133,8 +134,25 @@ def test_opportunity_payload_serializes_decimals_as_strings() -> None:
     assert payload["buy_price"] == "100"
     assert payload["sell_price"] == "102"
     # Every Decimal field must be a string.
-    for key in ("buy_price", "sell_price", "spread_pct", "max_size", "theoretical_profit_usd"):
+    for key in ("buy_price", "sell_price", "spread_pct", "max_size", "theoretical_profit"):
         assert isinstance(payload[key], str)
+
+
+def test_mixed_quote_books_do_not_produce_an_opportunity() -> None:
+    detector = ArbitrageDetector(threshold_pct=Decimal("0.1"))
+    usd_book = book("gemini", "99", "1", "100", "1")
+    usdt_book = TopOfBook(
+        exchange="binance",
+        pair="BTC-USDT",
+        best_bid_price=Decimal("102"),
+        best_bid_size=Decimal("1"),
+        best_ask_price=Decimal("103"),
+        best_ask_size=Decimal("1"),
+        sequence=1,
+        timestamp_ns=1,
+    )
+
+    assert detector.detect_for_pair("BTC-USD", [usd_book, usdt_book], 1) == []
 
 
 def test_decimal_precision_is_preserved() -> None:

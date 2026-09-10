@@ -1,6 +1,6 @@
 import { WindowStats } from "../api/client";
 import { Async } from "../lib/async";
-import { count, DASH, dateTime, spreadPct, usd } from "../lib/format";
+import { count, DASH, dateTime, quoteAmount, spreadPct } from "../lib/format";
 import { Panel } from "./Panel";
 import { Placeholder } from "./Placeholder";
 import { Stat } from "./Stat";
@@ -52,7 +52,13 @@ export function WindowStatsGrid({ stats, windowLabel, onRetry }: Props) {
         <Stat label="Top pair" value={data.top_pair ?? DASH} />
         <Stat label="Max spread" value={spreadPct(data.max_spread_pct)} />
         <Stat label="Mean spread" value={spreadPct(data.mean_spread_pct)} />
-        <Stat label="Theoretical profit" value={usd(data.total_theoretical_profit_usd)} />
+        {Object.entries(data.theoretical_profit_by_quote).map(([quoteAsset, profit]) => (
+          <Stat
+            key={quoteAsset}
+            label={`Theoretical profit (${quoteAsset})`}
+            value={quoteAmount(profit, quoteAsset)}
+          />
+        ))}
         <Stat
           label="Peak minute"
           value={peak === null ? DASH : count(peak.count)}

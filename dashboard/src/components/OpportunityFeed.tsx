@@ -1,6 +1,6 @@
 import { Opportunity } from "../api/client";
 import { Async } from "../lib/async";
-import { eventTime, spreadPct, usd } from "../lib/format";
+import { eventTime, quoteAmount, spreadPct } from "../lib/format";
 import { Panel } from "./Panel";
 import { Placeholder } from "./Placeholder";
 
@@ -101,7 +101,7 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
                   {spreadPct(row.spread_pct)}
                 </td>
                 <td className="num px-4 py-1.5 text-right text-ink-2">
-                  {usd(row.theoretical_profit_usd)}
+                  {quoteAmount(row.theoretical_profit, row.quote_asset)}
                 </td>
               </tr>
             ))}

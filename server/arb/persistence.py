@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS opportunities (
     sell_price TEXT NOT NULL,
     spread_pct TEXT NOT NULL,
     max_size TEXT NOT NULL,
-    theoretical_profit_usd TEXT NOT NULL
+    quote_asset TEXT NOT NULL,
+    theoretical_profit TEXT NOT NULL
 );
 """
 
@@ -45,56 +46,53 @@ CREATE TABLE IF NOT EXISTS opportunity_minutes (
     count INTEGER NOT NULL,
     max_spread_pct REAL NOT NULL,
     sum_spread_pct REAL NOT NULL,
-    sum_profit_usd REAL NOT NULL,
+    quote_asset TEXT NOT NULL,
+    sum_profit REAL NOT NULL,
     PRIMARY KEY (minute_ns, pair)
 );
 CREATE INDEX IF NOT EXISTS idx_minutes_ns ON opportunity_minutes(minute_ns);
 """
 
-BACKFILL_ROLLUP_SQL = """
-INSERT INTO opportunity_minutes (
-    minute_ns, pair, count, max_spread_pct, sum_spread_pct, sum_profit_usd
-)
-SELECT (timestamp_ns / ?) * ?,
-       pair,
-       COUNT(*),
-       MAX(CAST(spread_pct AS REAL)),
-       SUM(CAST(spread_pct AS REAL)),
-       SUM(CAST(theoretical_profit_usd AS REAL))
-FROM opportunities
-GROUP BY 1, 2
-"""
-
 UPSERT_ROLLUP_SQL = """
 INSERT INTO opportunity_minutes (
-    minute_ns, pair, count, max_spread_pct, sum_spread_pct, sum_profit_usd
-) VALUES (?, ?, ?, ?, ?, ?)
+    minute_ns, pair, count, max_spread_pct, sum_spread_pct, quote_asset, sum_profit
+) VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(minute_ns, pair) DO UPDATE SET
     count = count + excluded.count,
     max_spread_pct = MAX(max_spread_pct, excluded.max_spread_pct),
     sum_spread_pct = sum_spread_pct + excluded.sum_spread_pct,
-    sum_profit_usd = sum_profit_usd + excluded.sum_profit_usd
+    sum_profit = sum_profit + excluded.sum_profit
 """
 
 
 def _rollup_rows(batch: Iterable[ArbitrageOpportunity]) -> list[tuple[object, ...]]:
     """Fold a write batch into one row per minute and pair."""
-    totals: dict[tuple[int, str], list[float]] = {}
+    totals: dict[tuple[int, str], tuple[int, float, float, str, float]] = {}
     for opp in batch:
         key = ((opp.timestamp_ns // MINUTE_NS) * MINUTE_NS, opp.pair)
         spread = float(opp.spread_pct)
-        profit = float(opp.theoretical_profit_usd)
+        profit = float(opp.theoretical_profit)
         entry = totals.get(key)
         if entry is None:
-            totals[key] = [1, spread, spread, profit]
+            totals[key] = (1, spread, spread, opp.quote_asset, profit)
         else:
-            entry[0] += 1
-            entry[1] = max(entry[1], spread)
-            entry[2] += spread
-            entry[3] += profit
+            count, max_spread, sum_spread, quote_asset, sum_profit = entry
+            totals[key] = (
+                count + 1,
+                max(max_spread, spread),
+                sum_spread + spread,
+                quote_asset,
+                sum_profit + profit,
+            )
     return [
-        (minute_ns, pair, int(count), max_spread, sum_spread, sum_profit)
-        for (minute_ns, pair), (count, max_spread, sum_spread, sum_profit) in totals.items()
+        (minute_ns, pair, int(count), max_spread, sum_spread, quote_asset, sum_profit)
+        for (minute_ns, pair), (
+            count,
+            max_spread,
+            sum_spread,
+            quote_asset,
+            sum_profit,
+        ) in totals.items()
     ]
 
 
@@ -131,13 +129,16 @@ class OpportunityStore:
     async def initialize(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA journal_mode=WAL;")
+            cursor = await db.execute("PRAGMA table_info(opportunities)")
+            columns = {str(row[1]) for row in await cursor.fetchall()}
+            if columns and {"quote_asset", "theoretical_profit"} - columns:
+                # Earlier releases recorded Binance.US USDT amounts as USD. Their
+                # historical opportunities and rollups cannot be relabelled safely.
+                await db.executescript(
+                    "DROP TABLE IF EXISTS opportunity_minutes; DROP TABLE opportunities;"
+                )
             await db.executescript(CREATE_TABLE_SQL + CREATE_INDEX_SQL + CREATE_ROLLUP_SQL)
-            # A database written before the rollup existed still holds history
-            # the statistics endpoints must report, so derive it once here.
-            cursor = await db.execute("SELECT EXISTS (SELECT 1 FROM opportunity_minutes)")
-            row = await cursor.fetchone()
-            if row is not None and not row[0]:
-                await db.execute(BACKFILL_ROLLUP_SQL, (MINUTE_NS, MINUTE_NS))
+            await db.execute("PRAGMA user_version = 2")
             await db.commit()
 
     async def enqueue(self, opportunity: ArbitrageOpportunity) -> bool:
@@ -179,8 +180,8 @@ class OpportunityStore:
 
     async def recent(self, limit: int = 100) -> list[dict[str, Any]]:
         query = """
-        SELECT timestamp_ns, pair, buy_exchange, sell_exchange, buy_price, sell_price,
-               spread_pct, max_size, theoretical_profit_usd
+        SELECT timestamp_ns, pair, quote_asset, buy_exchange, sell_exchange, buy_price, sell_price,
+               spread_pct, max_size, theoretical_profit
         FROM opportunities
         ORDER BY timestamp_ns DESC
         LIMIT ?
@@ -192,43 +193,59 @@ class OpportunityStore:
             {
                 "timestamp_ns": row[0],
                 "pair": row[1],
-                "buy_exchange": row[2],
-                "sell_exchange": row[3],
-                "buy_price": row[4],
-                "sell_price": row[5],
-                "spread_pct": row[6],
-                "max_size": row[7],
-                "theoretical_profit_usd": row[8],
+                "quote_asset": row[2],
+                "buy_exchange": row[3],
+                "sell_exchange": row[4],
+                "buy_price": row[5],
+                "sell_price": row[6],
+                "spread_pct": row[7],
+                "max_size": row[8],
+                "theoretical_profit": row[9],
             }
             for row in rows
         ]
 
     async def _windowed_totals(
         self, db: aiosqlite.Connection, cutoff_ns: int
-    ) -> tuple[int, float | None, float, float]:
+    ) -> tuple[int, float | None, float, dict[str, float]]:
         """Return count, max spread, summed spread and summed profit since the cutoff."""
         boundary_ns = _minute_boundary(cutoff_ns)
         cursor = await db.execute(
             "SELECT COALESCE(SUM(count), 0), MAX(max_spread_pct), "
-            "COALESCE(SUM(sum_spread_pct), 0), COALESCE(SUM(sum_profit_usd), 0) "
+            "COALESCE(SUM(sum_spread_pct), 0) "
             "FROM opportunity_minutes WHERE minute_ns >= ?",
             (boundary_ns,),
         )
-        rolled = await cursor.fetchone() or (0, None, 0.0, 0.0)
+        rolled = await cursor.fetchone() or (0, None, 0.0)
         cursor = await db.execute(
             "SELECT COUNT(*), MAX(CAST(spread_pct AS REAL)), "
-            "COALESCE(SUM(CAST(spread_pct AS REAL)), 0), "
-            "COALESCE(SUM(CAST(theoretical_profit_usd AS REAL)), 0) "
+            "COALESCE(SUM(CAST(spread_pct AS REAL)), 0) "
             "FROM opportunities WHERE timestamp_ns >= ? AND timestamp_ns < ?",
             (cutoff_ns, boundary_ns),
         )
-        partial = await cursor.fetchone() or (0, None, 0.0, 0.0)
+        partial = await cursor.fetchone() or (0, None, 0.0)
+        profits: dict[str, float] = {}
+        for query, params in (
+            (
+                "SELECT quote_asset, SUM(sum_profit) FROM opportunity_minutes "
+                "WHERE minute_ns >= ? GROUP BY quote_asset",
+                (boundary_ns,),
+            ),
+            (
+                "SELECT quote_asset, SUM(CAST(theoretical_profit AS REAL)) FROM opportunities "
+                "WHERE timestamp_ns >= ? AND timestamp_ns < ? GROUP BY quote_asset",
+                (cutoff_ns, boundary_ns),
+            ),
+        ):
+            cursor = await db.execute(query, params)
+            for quote_asset, profit in await cursor.fetchall():
+                profits[str(quote_asset)] = profits.get(str(quote_asset), 0.0) + float(profit)
         maxima = [value for value in (rolled[1], partial[1]) if value is not None]
         return (
             int(rolled[0]) + int(partial[0]),
             max(maxima) if maxima else None,
             float(rolled[2]) + float(partial[2]),
-            float(rolled[3]) + float(partial[3]),
+            profits,
         )
 
     async def _windowed_pair_counts(
@@ -251,20 +268,23 @@ class OpportunityStore:
             counts[pair] = counts.get(pair, 0) + int(count)
         return counts
 
-    async def stats(self, window_ns: int) -> dict[str, str | int]:
+    async def stats(self, window_ns: int) -> dict[str, object]:
         cutoff_ns = time.time_ns() - window_ns
         async with aiosqlite.connect(self.db_path) as db:
-            count, max_spread, _spread, profit = await self._windowed_totals(db, cutoff_ns)
+            count, max_spread, _spread, profits = await self._windowed_totals(db, cutoff_ns)
         return {
             "count": count,
             "max_spread_pct": str(Decimal(str(max_spread if max_spread is not None else 0))),
-            "total_theoretical_profit_usd": str(Decimal(str(profit))),
+            "theoretical_profit_by_quote": {
+                quote_asset: str(Decimal(str(profit)))
+                for quote_asset, profit in sorted(profits.items())
+            },
         }
 
-    async def extended_stats(self, window_ns: int | None) -> dict[str, str | int | None]:
+    async def extended_stats(self, window_ns: int | None) -> dict[str, object]:
         cutoff_ns = 0 if window_ns is None else time.time_ns() - window_ns
         async with aiosqlite.connect(self.db_path) as db:
-            count, max_spread, sum_spread, profit = await self._windowed_totals(db, cutoff_ns)
+            count, max_spread, sum_spread, profits = await self._windowed_totals(db, cutoff_ns)
             pair_counts = await self._windowed_pair_counts(db, cutoff_ns)
         mean_spread = sum_spread / count if count else 0
         top_pair = (
@@ -274,7 +294,10 @@ class OpportunityStore:
             "count": count,
             "max_spread_pct": str(Decimal(str(max_spread if max_spread is not None else 0))),
             "mean_spread_pct": str(Decimal(str(mean_spread))),
-            "total_theoretical_profit_usd": str(Decimal(str(profit))),
+            "theoretical_profit_by_quote": {
+                quote_asset: str(Decimal(str(profit)))
+                for quote_asset, profit in sorted(profits.items())
+            },
             "top_pair": top_pair,
         }
 
@@ -364,7 +387,8 @@ class OpportunityStore:
                 str(opp.sell_price),
                 str(opp.spread_pct),
                 str(opp.max_size),
-                str(opp.theoretical_profit_usd),
+                opp.quote_asset,
+                str(opp.theoretical_profit),
             )
             for opp in batch
         ]
@@ -373,8 +397,8 @@ class OpportunityStore:
                 """
                 INSERT INTO opportunities (
                     timestamp_ns, pair, buy_exchange, sell_exchange, buy_price, sell_price,
-                    spread_pct, max_size, theoretical_profit_usd
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    spread_pct, max_size, quote_asset, theoretical_profit
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )

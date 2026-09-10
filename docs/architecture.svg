@@ -113,8 +113,8 @@
   </g>
   <text x="1230" y="262" text-anchor="middle" class="box-title ink">ArbitrageDetector</text>
   <path d="M1113 283 C1181 280 1281 285 1348 282" fill="none" stroke="#dc2626" stroke-width="2.4" stroke-linecap="round"/>
-  <text x="1105" y="321" class="box-copy ink">compare eligible best bid / ask</text>
-  <text x="1105" y="356" class="box-copy ink">spread %, size, profit estimate</text>
+  <text x="1105" y="321" class="box-copy ink">compare eligible matching base / quote books</text>
+  <text x="1105" y="356" class="box-copy ink">spread %, size, quote-asset profit estimate</text>
   <text x="1105" y="391" class="box-copy ink">theoretical opportunities only</text>
 
   <!-- Main data path arrows -->

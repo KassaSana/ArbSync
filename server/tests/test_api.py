@@ -45,13 +45,14 @@ async def test_recent_endpoint_returns_saved_rows(tmp_path: Path) -> None:
         ArbitrageOpportunity(
             timestamp_ns=1,
             pair="BTC-USD",
+            quote_asset="USD",
             buy_exchange="gemini",
             sell_exchange="coinbase",
             buy_price=Decimal("100"),
             sell_price=Decimal("101"),
             spread_pct=Decimal("1"),
             max_size=Decimal("0.5"),
-            theoretical_profit_usd=Decimal("0.5"),
+            theoretical_profit=Decimal("0.5"),
         )
     )
     task = asyncio.create_task(store.run())
@@ -63,6 +64,8 @@ async def test_recent_endpoint_returns_saved_rows(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json()[0]["pair"] == "BTC-USD"
     assert response.json()[0]["timestamp_ns"] == "1"
+    assert response.json()[0]["quote_asset"] == "USD"
+    assert response.json()[0]["theoretical_profit"] == "0.5"
 
 
 def test_healthz_is_alive() -> None:
@@ -338,13 +341,14 @@ async def test_stats_endpoint_returns_aggregates(tmp_path: Path) -> None:
         ArbitrageOpportunity(
             timestamp_ns=now_ns,
             pair="BTC-USD",
+            quote_asset="USD",
             buy_exchange="gemini",
             sell_exchange="coinbase",
             buy_price=Decimal("100"),
             sell_price=Decimal("103"),
             spread_pct=Decimal("3"),
             max_size=Decimal("1"),
-            theoretical_profit_usd=Decimal("3"),
+            theoretical_profit=Decimal("3"),
         )
     )
     runner = asyncio.create_task(store.run())
@@ -357,7 +361,7 @@ async def test_stats_endpoint_returns_aggregates(tmp_path: Path) -> None:
     body = response.json()
     assert body["count"] == 1
     assert Decimal(body["max_spread_pct"]) == Decimal("3")
-    assert Decimal(body["total_theoretical_profit_usd"]) == Decimal("3")
+    assert body["theoretical_profit_by_quote"] == {"USD": "3.0"}
 
 
 class FakeWebSocket:
@@ -522,13 +526,14 @@ def _seed_opp(store: OpportunityStore, **kwargs: Any) -> ArbitrageOpportunity:
     defaults: dict[str, Any] = dict(
         timestamp_ns=time.time_ns(),
         pair="BTC-USD",
+        quote_asset="USD",
         buy_exchange="gemini",
         sell_exchange="coinbase",
         buy_price=Decimal("100"),
         sell_price=Decimal("103"),
         spread_pct=Decimal("3"),
         max_size=Decimal("1"),
-        theoretical_profit_usd=Decimal("3"),
+        theoretical_profit=Decimal("3"),
     )
     defaults.update(kwargs)
     return ArbitrageOpportunity(**defaults)

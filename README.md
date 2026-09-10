@@ -2,7 +2,7 @@
 
 ArbSync is a real-time, detection-only crypto arbitrage system. It consumes public
 level-2 order books from Gemini, Coinbase, and Binance.US, normalizes each feed,
-maintains trusted in-memory books, detects cross-exchange spreads, stores theoretical
+maintains trusted in-memory books, detects spreads only across matching base/quote markets, stores theoretical
 opportunities in SQLite, and streams live state to a React dashboard.
 
 No API keys are required. ArbSync does not place trades.
@@ -153,6 +153,12 @@ Canonical market and opportunity values are stored and transmitted as decimal st
 Derived minute rollups and aggregate dashboard statistics use SQLite binary64 values for
 efficient observability queries, so they are approximate and should not be used for
 accounting or execution decisions.
+
+USD and USDT are separate quote assets. ArbSync does not infer a conversion or parity between
+them: `BTC-USD` is compared only with other `BTC-USD` books, while `BTC-USDT` remains a
+separate market. Theoretical profit is reported in its pair's quote asset, and dashboard/API
+profit totals are grouped by quote asset rather than added across currencies. Updating to this
+version clears legacy opportunity history because earlier Binance.US USDT rows were labelled USD.
 
 ## Verify a change
 

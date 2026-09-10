@@ -64,7 +64,7 @@ Acceptance criteria:
 - State the license in the README.
 - Verify dependency licenses are compatible with the chosen project license.
 
-### [ ] ARB-002 — Stop treating USDT books as USD books
+### [x] ARB-002 — Stop treating USDT books as USD books
 
 - Priority: P0
 - Estimate: 16 hours

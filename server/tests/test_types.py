@@ -31,19 +31,21 @@ def test_arbitrage_opportunity_payload_round_trips_decimal_strings() -> None:
     opp = ArbitrageOpportunity(
         timestamp_ns=1,
         pair="ETH-USD",
+        quote_asset="USD",
         buy_exchange="gemini",
         sell_exchange="binance",
         buy_price=Decimal("2000.123"),
         sell_price=Decimal("2010.456"),
         spread_pct=Decimal("0.516"),
         max_size=Decimal("0.25"),
-        theoretical_profit_usd=Decimal("2.583250"),
+        theoretical_profit=Decimal("2.583250"),
     )
     payload = opp.as_payload()
     assert payload["pair"] == "ETH-USD"
     assert payload["timestamp_ns"] == "1"
     assert payload["buy_price"] == "2000.123"
-    assert payload["theoretical_profit_usd"] == "2.583250"
+    assert payload["quote_asset"] == "USD"
+    assert payload["theoretical_profit"] == "2.583250"
     # All Decimal fields must be strings; non-Decimal scalars unchanged.
     assert isinstance(payload["spread_pct"], str)
     assert isinstance(payload["max_size"], str)

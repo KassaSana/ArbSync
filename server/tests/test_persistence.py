@@ -17,13 +17,14 @@ def make_opp(
     return ArbitrageOpportunity(
         timestamp_ns=timestamp_ns,
         pair=pair,
+        quote_asset=pair.rsplit("-", maxsplit=1)[1],
         buy_exchange="gemini",
         sell_exchange="coinbase",
         buy_price=Decimal("100.123456789"),
         sell_price=Decimal("101.987654321"),
         spread_pct=Decimal(spread),
         max_size=Decimal("0.5"),
-        theoretical_profit_usd=Decimal(profit),
+        theoretical_profit=Decimal(profit),
     )
 
 
@@ -166,10 +167,10 @@ async def test_canonical_decimals_remain_exact_when_rollups_are_approximate(
 
     rows = await store.recent(limit=2)
     assert {row["spread_pct"] for row in rows} == {"0.1", "0.2"}
-    assert {row["theoretical_profit_usd"] for row in rows} == {"0.1", "0.2"}
+    assert {row["theoretical_profit"] for row in rows} == {"0.1", "0.2"}
 
     stats = await store.extended_stats(window_ns=None)
-    approximate_profit = Decimal(str(stats["total_theoretical_profit_usd"]))
+    approximate_profit = Decimal(str(stats["theoretical_profit_by_quote"]["USD"]))
     assert approximate_profit != Decimal("0.3")
     assert float(approximate_profit) == pytest.approx(0.3, rel=0, abs=1e-15)
 
@@ -208,7 +209,23 @@ async def test_stats_window_filters_out_old_rows(tmp_path: Path) -> None:
     stats = await store.stats(window_ns=one_hour_ns)
     assert stats["count"] == 1
     assert Decimal(stats["max_spread_pct"]) == Decimal("2")
-    assert Decimal(stats["total_theoretical_profit_usd"]) == Decimal("1")
+    assert Decimal(stats["theoretical_profit_by_quote"]["USD"]) == Decimal("1")
+
+
+@pytest.mark.asyncio
+async def test_stats_group_profits_by_quote_asset(tmp_path: Path) -> None:
+    store = OpportunityStore(str(tmp_path / "db.sqlite3"), batch_size=2)
+    await store.initialize()
+    runner = asyncio.create_task(store.run())
+    now_ns = time.time_ns()
+    await store.enqueue(make_opp(now_ns, profit="1.5", pair="BTC-USD"))
+    await store.enqueue(make_opp(now_ns + 1, profit="2.25", pair="BTC-USDT"))
+    await store.close()
+    await runner
+
+    stats = await store.stats(window_ns=3_600_000_000_000)
+
+    assert stats["theoretical_profit_by_quote"] == {"USD": "1.5", "USDT": "2.25"}
 
 
 @pytest.mark.asyncio
@@ -218,7 +235,7 @@ async def test_stats_with_no_rows_returns_zeros(tmp_path: Path) -> None:
     stats = await store.stats(window_ns=3_600_000_000_000)
     assert stats["count"] == 0
     assert Decimal(stats["max_spread_pct"]) == Decimal("0")
-    assert Decimal(stats["total_theoretical_profit_usd"]) == Decimal("0")
+    assert stats["theoretical_profit_by_quote"] == {}
 
 
 @pytest.mark.asyncio
@@ -251,7 +268,7 @@ async def test_extended_stats_aggregates_within_window(tmp_path: Path) -> None:
     assert stats["count"] == 4
     assert Decimal(str(stats["max_spread_pct"])) == Decimal("5")
     assert Decimal(str(stats["mean_spread_pct"])) == Decimal("2.75")
-    assert Decimal(str(stats["total_theoretical_profit_usd"])) == Decimal("13.5")
+    assert Decimal(str(stats["theoretical_profit_by_quote"]["USD"])) == Decimal("13.5")
     assert stats["top_pair"] == "BTC-USD"
 
 
@@ -281,7 +298,7 @@ async def test_extended_stats_empty_returns_safe_defaults(tmp_path: Path) -> Non
     assert stats["count"] == 0
     assert Decimal(str(stats["max_spread_pct"])) == Decimal("0")
     assert Decimal(str(stats["mean_spread_pct"])) == Decimal("0")
-    assert Decimal(str(stats["total_theoretical_profit_usd"])) == Decimal("0")
+    assert stats["theoretical_profit_by_quote"] == {}
     assert stats["top_pair"] is None
 
 
@@ -350,17 +367,29 @@ async def test_timeseries_rejects_non_positive_bucket(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_rollup_backfills_a_database_written_before_it_existed(tmp_path: Path) -> None:
-    """History predating the rollup must still be reported by the statistics."""
+async def test_legacy_usd_profit_schema_is_discarded(tmp_path: Path) -> None:
+    """USDT amounts stored as USD cannot be migrated safely."""
     import sqlite3
-
-    from arb.persistence import CREATE_INDEX_SQL, CREATE_TABLE_SQL
 
     path = str(tmp_path / "legacy.sqlite3")
     now_ns = time.time_ns()
     legacy = sqlite3.connect(path)
-    legacy.executescript(CREATE_TABLE_SQL)
-    legacy.executescript(CREATE_INDEX_SQL)
+    legacy.executescript(
+        """
+        CREATE TABLE opportunities (
+            id INTEGER PRIMARY KEY,
+            timestamp_ns INTEGER NOT NULL,
+            pair TEXT NOT NULL,
+            buy_exchange TEXT NOT NULL,
+            sell_exchange TEXT NOT NULL,
+            buy_price TEXT NOT NULL,
+            sell_price TEXT NOT NULL,
+            spread_pct TEXT NOT NULL,
+            max_size TEXT NOT NULL,
+            theoretical_profit_usd TEXT NOT NULL
+        );
+        """
+    )
     legacy.executemany(
         "INSERT INTO opportunities (timestamp_ns, pair, buy_exchange, sell_exchange,"
         " buy_price, sell_price, spread_pct, max_size, theoretical_profit_usd)"
@@ -378,15 +407,18 @@ async def test_rollup_backfills_a_database_written_before_it_existed(tmp_path: P
     await store.initialize()
 
     stats = await store.extended_stats(window_ns=None)
-    assert stats["count"] == 3
-    assert Decimal(str(stats["max_spread_pct"])) == Decimal("6")
-    assert Decimal(str(stats["mean_spread_pct"])) == Decimal("4")
-    assert Decimal(str(stats["total_theoretical_profit_usd"])) == Decimal("6")
-    assert stats["top_pair"] == "BTC-USD"
+    assert stats["count"] == 0
+    assert stats["theoretical_profit_by_quote"] == {}
 
-    # Backfilling twice would double every total.
+    # Migration is one-time and later startup preserves v2 data.
+    runner = asyncio.create_task(store.run())
+    await store.enqueue(make_opp(now_ns, profit="2", pair="BTC-USDT"))
+    await store.close()
+    await runner
     await store.initialize()
-    assert (await store.extended_stats(window_ns=None))["count"] == 3
+    assert (await store.extended_stats(window_ns=None))["theoretical_profit_by_quote"] == {
+        "USDT": "2.0"
+    }
 
 
 @pytest.mark.asyncio
@@ -407,7 +439,7 @@ async def test_rollup_stays_consistent_across_separate_write_batches(tmp_path: P
     assert stats["count"] == 5
     assert Decimal(str(stats["max_spread_pct"])) == Decimal("5")
     assert Decimal(str(stats["mean_spread_pct"])) == Decimal("3")
-    assert Decimal(str(stats["total_theoretical_profit_usd"])) == Decimal("5")
+    assert Decimal(str(stats["theoretical_profit_by_quote"]["USD"])) == Decimal("5")
     assert (await store.peak_minute(window_ns=None)) == {
         "minute_start_ns": (now_ns // 60_000_000_000) * 60_000_000_000,
         "count": 5,
@@ -436,7 +468,7 @@ async def test_window_starting_mid_minute_excludes_earlier_rows_in_that_minute(
     stats = await store.extended_stats(window_ns=time.time_ns() - cutoff_ns)
     assert stats["count"] == 1
     assert Decimal(str(stats["max_spread_pct"])) == Decimal("2")
-    assert Decimal(str(stats["total_theoretical_profit_usd"])) == Decimal("1")
+    assert Decimal(str(stats["theoretical_profit_by_quote"]["USD"])) == Decimal("1")
     assert (await store.peak_minute(window_ns=time.time_ns() - cutoff_ns)) == {
         "minute_start_ns": minute_start,
         "count": 1,

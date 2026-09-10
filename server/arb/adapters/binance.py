@@ -15,7 +15,7 @@ from arb.types import EventKind, MarketEvent, PriceLevel
 def normalize_binance_symbol(symbol: str) -> str:
     upper = symbol.upper()
     if upper.endswith("USDT"):
-        return f"{upper[:-4]}-USD"
+        return f"{upper[:-4]}-USDT"
     return upper
 
 
@@ -267,7 +267,7 @@ class BinanceAdapter(ExchangeAdapter):
         self.request_reconnect()
 
     async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
-        symbol = pair.replace("-USD", "USDT")
+        symbol = pair.replace("-", "")
         payload = await self.client_get_json(f"{self.snapshot_url}?symbol={symbol}&limit=5000")
         received_monotonic_ns = time.monotonic_ns()
         sequence = int(payload.get("lastUpdateId", trigger_sequence))

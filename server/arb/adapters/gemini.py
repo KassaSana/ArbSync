@@ -12,7 +12,7 @@ from arb.types import EventKind, MarketEvent, PriceLevel
 def normalize_gemini_symbol(symbol: str) -> str:
     s = symbol.upper()
     if s.endswith("USDT"):
-        return f"{s[:-4]}-USD"
+        return f"{s[:-4]}-USDT"
     if s.endswith("USD"):
         return f"{s[:-3]}-USD"
     return s

@@ -35,6 +35,26 @@ export function usd(value: string | number | null | undefined): string {
   })}`;
 }
 
+export function quoteAmount(
+  value: string | number | null | undefined,
+  quoteAsset: string,
+): string {
+  if (quoteAsset === "USD") {
+    return usd(value);
+  }
+  if (value === null || value === undefined) {
+    return DASH;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed === 0) {
+    return DASH;
+  }
+  return `${parsed.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} ${quoteAsset}`;
+}
+
 /** Book prices keep precision proportional to magnitude so columns stay aligned. */
 export function price(value: string | null | undefined): string {
   if (value === null || value === undefined) {

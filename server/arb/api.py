@@ -265,7 +265,7 @@ def create_app(
         return [{**row, "timestamp_ns": str(row["timestamp_ns"])} for row in rows]
 
     @app.get("/api/stats")
-    async def stats(window: Window = "1h") -> dict[str, str | int]:
+    async def stats(window: Window = "1h") -> dict[str, object]:
         return await store.stats(window_to_ns(window))
 
     @app.get("/api/system/overview")

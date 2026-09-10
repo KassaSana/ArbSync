@@ -29,7 +29,7 @@ class ControlledSocket:
 def binance_snapshot(sequence: int) -> MarketEvent:
     return MarketEvent(
         exchange="binance",
-        pair="BTC-USD",
+        pair="BTC-USDT",
         kind=EventKind.SNAPSHOT,
         sequence=sequence,
         timestamp_ns=1,
@@ -51,7 +51,7 @@ def test_binance_depth_update_parsing() -> None:
     events = asyncio.run(adapter.parse_message(payload))
     assert len(events) == 1
     assert events[0].kind is EventKind.DELTA
-    assert events[0].pair == "BTC-USD"
+    assert events[0].pair == "BTC-USDT"
 
 
 def test_binance_subsequent_deltas_are_sequential() -> None:
@@ -260,10 +260,10 @@ async def test_binance_buffers_updates_while_snapshot_is_in_flight() -> None:
     await socket.push('{"s":"BTCUSDT","U":99,"u":105,"b":[["100","2"]],"a":[]}')
 
     for _ in range(10):
-        if len(adapter._buffers["BTC-USD"]) == 2:
+        if len(adapter._buffers["BTC-USDT"]) == 2:
             break
         await asyncio.sleep(0)
-    assert len(adapter._buffers["BTC-USD"]) == 2
+    assert len(adapter._buffers["BTC-USDT"]) == 2
 
     release_snapshot.set()
     snapshot = await first_event
@@ -303,7 +303,7 @@ async def test_binance_buffer_overflow_aborts_synchronization() -> None:
     with pytest.raises(RuntimeError, match="requested reconnect"):
         await pending
     assert adapter._reconnect_requested is True
-    assert "BTC-USD" not in adapter._buffers
+    assert "BTC-USDT" not in adapter._buffers
 
 
 @pytest.mark.asyncio
@@ -366,7 +366,7 @@ def test_binance_initial_update_must_span_snapshot_id() -> None:
         adapter._decode_depth_update({"s": "BTCUSDT", "U": 101, "u": 105, "b": [], "a": []})
     )
 
-    events = adapter._align_snapshot("BTC-USD", binance_snapshot(100))
+    events = adapter._align_snapshot("BTC-USDT", binance_snapshot(100))
 
     assert events == []
     assert adapter.gap_count == 1
@@ -398,12 +398,12 @@ def test_binance_snapshot_requests_documented_depth_limit() -> None:
         return {"lastUpdateId": 1, "bids": [], "asks": []}
 
     adapter.client_get_json = get_json  # type: ignore[method-assign]
-    asyncio.run(adapter.fetch_snapshot("BTC-USD", trigger_sequence=0))
+    asyncio.run(adapter.fetch_snapshot("BTC-USDT", trigger_sequence=0))
     assert requested_url.endswith("symbol=BTCUSDT&limit=5000")
 
 
 def test_binance_symbol_normalization_handles_non_usdt() -> None:
-    assert normalize_binance_symbol("ethusdt") == "ETH-USD"
-    assert normalize_binance_symbol("BTCUSDT") == "BTC-USD"
+    assert normalize_binance_symbol("ethusdt") == "ETH-USDT"
+    assert normalize_binance_symbol("BTCUSDT") == "BTC-USDT"
     # Non-USDT pairs pass through uppercased.
     assert normalize_binance_symbol("btcbusd") == "BTCBUSD"
