@@ -21,7 +21,8 @@ import uvicorn
 from arb.adapters.binance import BinanceAdapter
 from arb.adapters.coinbase import CoinbaseAdapter
 from arb.adapters.gemini import GeminiAdapter
-from arb.api import LiveBroadcaster, create_app
+from arb.api import create_app
+from arb.broadcast import LiveBroadcaster
 from arb.detector import ArbitrageDetector
 from arb.main import BackgroundTaskSupervisor, process_market_event
 from arb.orderbook import OrderBookManager

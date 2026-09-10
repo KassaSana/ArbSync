@@ -15,7 +15,8 @@ from arb.adapters.base import ExchangeAdapter
 from arb.adapters.binance import BinanceAdapter, normalize_binance_symbol
 from arb.adapters.coinbase import CoinbaseAdapter, normalize_coinbase_symbol
 from arb.adapters.gemini import GeminiAdapter, normalize_gemini_symbol
-from arb.api import LiveBroadcaster, create_app
+from arb.api import create_app
+from arb.broadcast import LiveBroadcaster
 from arb.config import load_config
 from arb.detector import ArbitrageDetector
 from arb.metrics import (
