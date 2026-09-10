@@ -124,7 +124,7 @@ Acceptance criteria:
 - Add frontend tests for disconnect, age expiry, crossed/incomplete status, reconnect, and
   a state snapshot that omits a previously eligible book.
 
-### [ ] ARB-005 — Repair the pre-commit backend hook paths
+### [x] ARB-005 — Repair the pre-commit backend hook paths
 
 - Priority: P0
 - Estimate: 1 hour

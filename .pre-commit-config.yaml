@@ -10,21 +10,21 @@ repos:
 
       - id: ruff-check
         name: ruff-check
-        entry: python server/scripts/run_backend_tool.py ruff check server
+        entry: python tools/run_backend_tool.py ruff check server
         language: system
         pass_filenames: false
         files: ^(server/|pyproject\.toml)
 
       - id: ruff-format
         name: ruff-format
-        entry: python server/scripts/run_backend_tool.py ruff format --check server
+        entry: python tools/run_backend_tool.py ruff format --check server
         language: system
         pass_filenames: false
         files: ^(server/|pyproject\.toml)
 
       - id: mypy
         name: mypy
-        entry: python server/scripts/run_backend_tool.py mypy --strict server/arb
+        entry: python tools/run_backend_tool.py mypy --strict server/arb
         language: system
         pass_filenames: false
         files: ^(server/|pyproject\.toml)

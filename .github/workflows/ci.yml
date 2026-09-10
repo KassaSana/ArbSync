@@ -24,6 +24,8 @@ jobs:
         run: uv run ruff check server
       - name: Check backend formatting
         run: uv run ruff format --check server
+      - name: Exercise repository hooks
+        run: uv run pre-commit run --all-files
 
   frontend:
     runs-on: ubuntu-latest
