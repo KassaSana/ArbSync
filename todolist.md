@@ -269,7 +269,7 @@ P0 total: **43 engineer-hours**.
 
 ## Reliability and maintainability (P1)
 
-### [ ] ARB-009 — Validate runtime configuration and preserve boundedness
+### [x] ARB-009 — Validate runtime configuration and preserve boundedness
 
 - Priority: P1
 - Estimate: 5 hours

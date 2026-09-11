@@ -14,13 +14,11 @@ from typing import Any
 import structlog
 import uvicorn
 
+from arb.adapters import ADAPTER_TYPES
 from arb.adapters.base import ExchangeAdapter
-from arb.adapters.binance import BinanceAdapter
-from arb.adapters.coinbase import CoinbaseAdapter
-from arb.adapters.gemini import GeminiAdapter
 from arb.api import create_app
 from arb.broadcast import LiveBroadcaster
-from arb.config import load_config
+from arb.config import ConfigError, load_config
 from arb.detector import ArbitrageDetector
 from arb.metrics import (
     background_task_failures_total,
@@ -175,9 +173,7 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
         queue_maxsize=config.persistence.queue_maxsize,
     )
     adapters = [
-        GeminiAdapter(config.exchanges.get("gemini", [])),
-        CoinbaseAdapter(config.exchanges.get("coinbase", [])),
-        BinanceAdapter(config.exchanges.get("binance", [])),
+        adapter_type(config.exchanges.get(adapter_type.name, [])) for adapter_type in ADAPTER_TYPES
     ]
     broadcaster = LiveBroadcaster()
     supervisor = BackgroundTaskSupervisor()
@@ -296,7 +292,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             f"configuration file not found: {config_path}. "
             "Pass --config PATH, set ARB_CONFIG, or create one with --init-config PATH."
         )
-    asyncio.run(run_pipeline(config_path))
+    try:
+        asyncio.run(run_pipeline(config_path))
+    except ConfigError as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

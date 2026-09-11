@@ -29,6 +29,7 @@ The suite covers:
   mid-minute, documented binary64 tolerance, and sub-minute buckets bypassing the rollup
 - WebSocket reconnection and state restoration
 - REST, readiness, metrics, persistence, and statistics behavior
+- runtime configuration type, range, exchange, symbol, and normalized-duplicate validation
 - installed-wheel metadata, package contents, console startup outside the checkout,
   missing-configuration errors, and safe example generation
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.resources
 from pathlib import Path
 
 import pytest
@@ -75,3 +76,18 @@ def test_init_config_refuses_to_overwrite(tmp_path: Path) -> None:
         main_module.main(["--init-config", str(destination)])
 
     assert destination.read_text() == "owner content"
+
+
+def test_invalid_config_is_reported_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = tmp_path / "config.toml"
+    example = importlib.resources.files("arb").joinpath("config.example.toml").read_text()
+    config_path.write_text(example.replace("queue_maxsize = 10000", "queue_maxsize = 0"))
+
+    with pytest.raises(SystemExit, match="2"):
+        main_module.main(["--config", str(config_path)])
+
+    error = capsys.readouterr().err
+    assert "persistence.queue_maxsize must be greater than zero; got 0" in error
+    assert "Traceback" not in error
