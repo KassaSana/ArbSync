@@ -67,8 +67,21 @@ function Probe() {
         {Object.keys(live.bookStatuses).sort().join(",") || "(none)"}
       </span>
       <span data-testid="connection">{live.status}</span>
+      <span data-testid="pairs">
+        {live.pairs.state === "ready"
+          ? live.pairs.data.map((p) => `${p.exchange}:${p.pair}`).join(",") || "(empty)"
+          : live.pairs.state}
+      </span>
+      <button type="button" onClick={live.refreshPairs}>
+        refresh pairs
+      </button>
     </div>
   );
+}
+
+function pairsRequestCount(): number {
+  const calls = (globalThis.fetch as unknown as { mock: { calls: [string][] } }).mock.calls;
+  return calls.filter(([url]) => url.includes("/api/pairs")).length;
 }
 
 beforeEach(() => {
@@ -188,6 +201,59 @@ describe("live state", () => {
     socket.emit({ type: "top_of_book", stream_sequence: 3, payload: book("coinbase", "102", 2) });
     socket.emit({ type: "book_status", stream_sequence: 4, payload: status("coinbase", true) });
     await expectBooks("coinbase:BTC-USD,gemini:BTC-USD");
+  });
+
+  it("re-requests the pair roster on every connection", async () => {
+    render(
+      <LiveProvider>
+        <Probe />
+      </LiveProvider>,
+    );
+    const first = await socketCount(1);
+    await waitFor(() => expect(pairsRequestCount()).toBe(1));
+
+    // A dashboard opened before the backend was answering gets another chance
+    // as soon as the socket comes up, and again after any reconnect.
+    first.onopen?.();
+    await waitFor(() => expect(pairsRequestCount()).toBe(2));
+
+    first.close();
+    const second = await socketCount(2);
+    second.onopen?.();
+    await waitFor(() => expect(pairsRequestCount()).toBe(3));
+  });
+
+  it("recovers an empty pair roster when asked to retry", async () => {
+    let pairs: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => ({
+        ok: true,
+        json: async () => {
+          if (input.includes("/api/pairs")) {
+            return pairs;
+          }
+          return input.includes("/api/stats") ? {} : [];
+        },
+        text: async () => "",
+      })),
+    );
+
+    render(
+      <LiveProvider>
+        <Probe />
+      </LiveProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("pairs")).toHaveTextContent("(empty)"));
+
+    // The roster is configuration, so a later request can succeed where the
+    // first returned nothing. Retrying must actually re-read it.
+    pairs = [{ exchange: "gemini", pair: "BTC-USD" }];
+    screen.getByRole("button", { name: "refresh pairs" }).click();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pairs")).toHaveTextContent("gemini:BTC-USD"),
+    );
   });
 
   it("rebuilds state from the snapshot delivered after a reconnect", async () => {

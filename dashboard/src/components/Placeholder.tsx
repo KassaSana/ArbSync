@@ -12,6 +12,9 @@ type Props = {
 
 export function Placeholder({ state, title, detail, onRetry }: Props) {
   const failed = state === "failed";
+  // An empty result is usually final and needs no button. It is offered one only
+  // where the caller knows emptiness is recoverable and passes a retry.
+  const retryable = (failed || state === "empty") && onRetry !== undefined;
   return (
     <div
       className={`flex flex-col items-start gap-2 rounded border border-dashed px-4 py-6 ${
@@ -22,7 +25,7 @@ export function Placeholder({ state, title, detail, onRetry }: Props) {
         {state === "loading" ? `${title}\u2026` : title}
       </p>
       {detail !== undefined ? <p className="text-micro text-ink-3">{detail}</p> : null}
-      {failed && onRetry !== undefined ? (
+      {retryable ? (
         <button
           type="button"
           onClick={onRetry}

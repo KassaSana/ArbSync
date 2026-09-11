@@ -85,7 +85,7 @@ Acceptance criteria:
 - Add detector, adapter, API, persistence, and dashboard tests covering mixed quote assets.
 - Update the README and architecture documentation so no claim implies USD/USDT parity.
 
-### [ ] ARB-003 — Make configured pairs available during cold start
+### [x] ARB-003 — Make configured pairs available during cold start
 
 - Priority: P0
 - Estimate: 4 hours
@@ -103,6 +103,13 @@ Acceptance criteria:
 - Add a backend test for `/api/pairs` before any market event is received.
 - Add a dashboard recovery path for a failed or empty initial pair request.
 - Verify cold start, partial exchange initialization, and reconnect behavior.
+
+Resolution: `/api/pairs` returns the configured roster union the books actually seen,
+sorted and deduplicated, so it is complete before any market event arrives. The dashboard
+re-requests the roster whenever a socket connects, and offers a retry on both a failed and
+an empty response rather than presenting emptiness as final. Cold start, partial
+initialization and the unconfigured-symbol case are covered in `test_api.py`; reconnect
+and empty-roster recovery in `live.test.tsx`.
 
 ### [x] ARB-004 — Exclude ineligible and stale books from dashboard spread calculations
 

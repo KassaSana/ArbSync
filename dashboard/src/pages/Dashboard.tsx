@@ -55,6 +55,17 @@ export default function Dashboard() {
               state="failed"
               title="Could not load the tracked pair list"
               detail={live.pairs.error}
+              onRetry={live.refreshPairs}
+            />
+          ) : live.pairs.state === "ready" && live.pairs.data.length === 0 ? (
+            // The backend publishes configured pairs before any market data
+            // arrives, so an empty roster means it is still starting rather
+            // than that nothing is tracked. Offer a way out of that state.
+            <Placeholder
+              state="empty"
+              title="No pairs are being tracked yet"
+              detail="The backend reported an empty roster. It normally lists configured pairs before the first market data arrives."
+              onRetry={live.refreshPairs}
             />
           ) : (
             <LiveSpreads

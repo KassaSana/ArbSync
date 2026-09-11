@@ -68,6 +68,7 @@ type LiveValue = {
   refreshStats: () => void;
   refreshOpportunities: () => void;
   refreshAdapters: () => void;
+  refreshPairs: () => void;
 };
 
 const LiveContext = createContext<LiveValue | null>(null);
@@ -149,10 +150,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       .catch((error: unknown) => setAdapters(failed(error)));
   }, []);
 
-  useEffect(() => {
+  const refreshPairs = useCallback(() => {
     fetchPairs()
       .then((data) => setPairs(ready(data)))
       .catch((error: unknown) => setPairs(failed(error)));
+  }, []);
+
+  useEffect(() => {
+    refreshPairs();
 
     // One fallback read so the table is populated even if the socket never opens.
     fetchBookStatus()
@@ -173,7 +178,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       window.clearInterval(adapterTimer);
       window.clearInterval(statsTimer);
     };
-  }, [refreshAdapters, refreshOpportunities, refreshStats]);
+  }, [refreshAdapters, refreshOpportunities, refreshPairs, refreshStats]);
 
   // Socket frames are coalesced into one state commit per animation frame.
   // At 27 subscriptions a setState per tick is the fastest way to fail INP.
@@ -315,13 +320,22 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // A fresh connection means we may have missed writes while we were away.
+  // A fresh connection means we may have missed writes while we were away. It
+  // also means the backend is answering now, which may not have been true when
+  // the pair roster was first requested.
   useEffect(() => {
     if (websocket.status === "connected") {
       refreshOpportunities();
       refreshStats();
+      refreshPairs();
     }
-  }, [websocket.connectionId, websocket.status, refreshOpportunities, refreshStats]);
+  }, [
+    websocket.connectionId,
+    websocket.status,
+    refreshOpportunities,
+    refreshPairs,
+    refreshStats,
+  ]);
 
   const value = useMemo<LiveValue>(
     () => ({
@@ -338,6 +352,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       refreshStats,
       refreshOpportunities,
       refreshAdapters,
+      refreshPairs,
     }),
     [
       websocket.status,
