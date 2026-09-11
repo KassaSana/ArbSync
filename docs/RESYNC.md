@@ -4,6 +4,8 @@ This project uses adapter-driven resync on sequence gaps.
 
 Chosen strategy:
 - Drop the local sequence chain for the affected `(exchange, pair)` stream
+- Reject normalized snapshots that do not contain a usable bid and ask or whose best bid
+  is greater than or equal to the best ask
 - Reinitialize from the exchange-defined snapshot source
 - Validate buffered updates against that snapshot before emitting normalized events
 - Resume processing only after exchange continuity is established
@@ -11,6 +13,14 @@ Chosen strategy:
 Why this approach:
 - It keeps the recovery logic close to the exchange adapter, which is where exchange-specific sequence semantics already live.
 - It gives the `OrderBookManager` a clean snapshot boundary instead of forcing it to recover from partially trusted delta streams.
+- It prevents later deltas from making an incomplete or crossed snapshot chain eligible.
+
+`OrderBookManager` owns the shared validity check. When it rejects a snapshot or otherwise
+clears a normalized chain, it returns a resynchronization signal to the pipeline. The
+pipeline asks the originating adapter to reconnect; the adapter still owns connection reset,
+snapshot acquisition, buffering, and exchange-native sequence alignment. Because each
+adapter currently uses one connection for all configured pairs, recovery invalidates that
+exchange's other books until the new connection rebuilds them.
 
 Tradeoffs:
 - Binance's REST snapshot introduces extra latency during its resync window.

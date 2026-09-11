@@ -39,6 +39,50 @@ def test_snapshot_initializes_book() -> None:
     assert manager.best_ask("gemini", "BTC-USD") == Decimal("101")
 
 
+def test_incomplete_snapshot_clears_chain_and_cannot_be_healed_by_delta() -> None:
+    manager = OrderBookManager()
+    manager.apply(
+        event(kind=EventKind.SNAPSHOT, sequence=10, bids=[("100", "2")], asks=[("101", "3")])
+    )
+
+    result = manager.apply(
+        event(kind=EventKind.SNAPSHOT, sequence=20, bids=[("99", "1")], asks=[("101", "0")])
+    )
+
+    assert result.accepted is False
+    assert result.reason == "snapshot_incomplete"
+    assert result.stale is True
+    assert result.requires_resync is True
+    assert manager.best_bid("gemini", "BTC-USD") is None
+    assert manager.eligibility("gemini", "BTC-USD").reason == "uninitialized"
+
+    delta = manager.apply(event(kind=EventKind.DELTA, sequence=21, bids=[], asks=[("101", "1")]))
+    assert delta.accepted is False
+    assert delta.reason == "book_stale"
+    assert delta.requires_resync is False
+
+    recovered = manager.apply(
+        event(kind=EventKind.SNAPSHOT, sequence=30, bids=[("99", "1")], asks=[("100", "1")])
+    )
+    assert recovered.accepted is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
+
+
+def test_crossed_snapshot_clears_chain_and_requires_resync() -> None:
+    manager = OrderBookManager()
+
+    result = manager.apply(
+        event(kind=EventKind.SNAPSHOT, sequence=1, bids=[("101", "1")], asks=[("101", "1")])
+    )
+
+    assert result.accepted is False
+    assert result.reason == "snapshot_crossed"
+    assert result.stale is True
+    assert result.requires_resync is True
+    assert manager.top_of_book("gemini", "BTC-USD") is None
+    assert manager.eligibility("gemini", "BTC-USD").reason == "uninitialized"
+
+
 def test_delta_updates_best_levels() -> None:
     manager = OrderBookManager()
     manager.apply(
@@ -83,6 +127,7 @@ def test_gap_detection_marks_book_stale() -> None:
     result = manager.apply(event(kind=EventKind.DELTA, sequence=12, bids=[("100.5", "1")], asks=[]))
     assert result.accepted is False
     assert result.reason == "sequence_gap"
+    assert result.requires_resync is True
     assert manager.eligibility("gemini", "BTC-USD").eligible is False
 
 
@@ -105,6 +150,26 @@ def test_crossed_book_resets_book() -> None:
     result = manager.apply(event(kind=EventKind.DELTA, sequence=11, bids=[("102", "1")], asks=[]))
     assert result.accepted is False
     assert result.reason == "crossed_book"
+    assert result.requires_resync is True
+
+
+def test_incomplete_delta_can_be_healed_by_next_contiguous_delta() -> None:
+    manager = OrderBookManager()
+    manager.apply(
+        event(kind=EventKind.SNAPSHOT, sequence=10, bids=[("100", "2")], asks=[("101", "3")])
+    )
+
+    incomplete = manager.apply(
+        event(kind=EventKind.DELTA, sequence=11, bids=[], asks=[("101", "0")])
+    )
+    assert incomplete.accepted is False
+    assert incomplete.reason == "book_incomplete"
+    assert incomplete.requires_resync is False
+    assert manager.eligibility("gemini", "BTC-USD").reason == "incomplete"
+
+    healed = manager.apply(event(kind=EventKind.DELTA, sequence=12, bids=[], asks=[("102", "1")]))
+    assert healed.accepted is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
 
 
 def test_cold_start_delta_is_rejected_until_snapshot() -> None:
@@ -210,12 +275,13 @@ def test_level_snapshot_none_when_book_stale() -> None:
     assert manager.level_snapshot("gemini", "BTC-USD") is None
 
 
-def test_top_of_book_none_when_empty_side() -> None:
+def test_incomplete_snapshot_leaves_book_uninitialized() -> None:
     manager = OrderBookManager()
-    manager.apply(event(kind=EventKind.SNAPSHOT, sequence=1, bids=[("100", "1")], asks=[]))
+    result = manager.apply(event(kind=EventKind.SNAPSHOT, sequence=1, bids=[("100", "1")], asks=[]))
+    assert result.reason == "snapshot_incomplete"
     assert manager.top_of_book("gemini", "BTC-USD") is None
     assert manager.eligibility("gemini", "BTC-USD").eligible is False
-    assert manager.eligibility("gemini", "BTC-USD").reason == "incomplete"
+    assert manager.eligibility("gemini", "BTC-USD").reason == "uninitialized"
 
 
 def test_size_zero_in_snapshot_does_not_create_level() -> None:

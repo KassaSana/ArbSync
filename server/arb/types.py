@@ -95,6 +95,7 @@ class BookUpdateResult:
     reason: str | None = None
     top_of_book: TopOfBook | None = None
     stale: bool = False
+    requires_resync: bool = False
 
 
 @dataclass(frozen=True)

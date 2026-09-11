@@ -39,6 +39,14 @@ class ReceiptTimeAdapter(ExchangeAdapter):
         raise AssertionError("not used")
 
 
+class MultiEventAdapter(ReceiptTimeAdapter):
+    async def parse_message(self, message: str) -> list[MarketEvent]:
+        return [
+            MarketEvent(self.name, "BTC-USD", EventKind.SNAPSHOT, 1, 1),
+            MarketEvent(self.name, "ETH-USD", EventKind.SNAPSHOT, 1, 1),
+        ]
+
+
 class OneMessageSocket:
     async def __aenter__(self) -> OneMessageSocket:
         return self
@@ -69,6 +77,19 @@ async def test_connect_stamps_receipt_time_before_parsing(monkeypatch) -> None:
     await events.aclose()
 
     assert event.received_monotonic_ns == 123
+
+
+@pytest.mark.asyncio
+async def test_stream_stops_between_events_when_consumer_requests_reconnect() -> None:
+    adapter = MultiEventAdapter(["BTC-USD", "ETH-USD"])
+    events = adapter.stream_events(OneMessageSocket())
+
+    first = await anext(events)
+    adapter.request_reconnect()
+
+    assert first.pair == "BTC-USD"
+    with pytest.raises(RuntimeError, match="adapter requested reconnect"):
+        await anext(events)
 
 
 def test_status_snapshot_reports_age_and_counters() -> None:

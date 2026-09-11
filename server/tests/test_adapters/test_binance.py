@@ -278,6 +278,28 @@ async def test_binance_buffers_updates_while_snapshot_is_in_flight() -> None:
 
 
 @pytest.mark.asyncio
+async def test_binance_stops_before_buffered_delta_after_reconnect_request() -> None:
+    adapter = BinanceAdapter(["BTCUSDT"])
+    socket = ControlledSocket()
+
+    async def snapshot_at_100(
+        self: BinanceAdapter, pair: str, trigger_sequence: int
+    ) -> MarketEvent:
+        return binance_snapshot(100)
+
+    adapter.fetch_snapshot = types.MethodType(snapshot_at_100, adapter)
+    await socket.push('{"s":"BTCUSDT","U":99,"u":105,"b":[["100","2"]],"a":[["101","1"]]}')
+    stream = adapter.stream_events(socket)
+
+    snapshot = await anext(stream)
+    adapter.request_reconnect()
+
+    assert snapshot.kind is EventKind.SNAPSHOT
+    with pytest.raises(RuntimeError, match="adapter requested reconnect"):
+        await anext(stream)
+
+
+@pytest.mark.asyncio
 async def test_binance_buffer_overflow_aborts_synchronization() -> None:
     adapter = BinanceAdapter(["BTCUSDT"])
     adapter.max_buffered_updates = 2

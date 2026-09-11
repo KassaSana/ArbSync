@@ -124,6 +124,8 @@ class BinanceAdapter(ExchangeAdapter):
                         else:
                             for event in await self.parse_message(text_message):
                                 yield event
+                                if self._reconnect_requested:
+                                    raise RuntimeError("adapter requested reconnect")
 
                         if self._reconnect_requested:
                             raise RuntimeError("adapter requested reconnect")
@@ -152,6 +154,8 @@ class BinanceAdapter(ExchangeAdapter):
                     snapshot_attempts.pop(pair, None)
                     for event in events:
                         yield event
+                        if self._reconnect_requested:
+                            raise RuntimeError("adapter requested reconnect")
                     if self._reconnect_requested:
                         raise RuntimeError("adapter requested reconnect")
         finally:

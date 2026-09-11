@@ -32,7 +32,7 @@ from arb.metrics import (
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
 from arb.reconcile import SnapshotReconciler
-from arb.types import LiveMessage, MarketEvent
+from arb.types import BookUpdateResult, LiveMessage, MarketEvent
 
 logger = structlog.get_logger(__name__)
 
@@ -87,7 +87,7 @@ async def process_market_event(
     detector: ArbitrageDetector,
     store: OpportunityStore,
     broadcaster: LiveBroadcaster,
-) -> None:
+) -> BookUpdateResult:
     """Apply one event, publish its book, then detect and deliver opportunities."""
     received_monotonic_ns = (
         event.received_monotonic_ns
@@ -103,7 +103,7 @@ async def process_market_event(
         await broadcaster.broadcast_book_now(
             event.exchange, event.pair, LiveMessage(type="book_status", payload=status.as_payload())
         )
-        return
+        return result
 
     book_updates_total.labels(exchange=event.exchange, pair=event.pair).inc()
     if status.age_ns is not None:
@@ -115,7 +115,7 @@ async def process_market_event(
         await broadcaster.broadcast_book_now(
             event.exchange, event.pair, LiveMessage(type="book_status", payload=status.as_payload())
         )
-        return
+        return result
 
     await broadcaster.broadcast_book(
         event.exchange,
@@ -139,6 +139,7 @@ async def process_market_event(
     # whole burst without yielding. Let senders and persistence drain their
     # bounded queues before consuming another update.
     await asyncio.sleep(0)
+    return result
 
 
 async def consume_adapter(
@@ -151,13 +152,21 @@ async def consume_adapter(
 ) -> None:
     """Process each normalized event from an adapter in sequence."""
     async for event in adapter.connect():
-        await process_market_event(
+        result = await process_market_event(
             event,
             book_manager=book_manager,
             detector=detector,
             store=store,
             broadcaster=broadcaster,
         )
+        if result.requires_resync:
+            logger.warning(
+                "book_resync_requested",
+                exchange=event.exchange,
+                pair=event.pair,
+                reason=result.reason,
+            )
+            adapter.request_reconnect()
 
 
 async def run_pipeline(config_path: str | Path = "config.toml") -> None:

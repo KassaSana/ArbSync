@@ -345,7 +345,7 @@ Acceptance criteria:
 - Retain guaranteed cleanup and add tests for expected disconnect, serialization failure,
   queue overflow, and cancellation.
 
-### [ ] ARB-013 — Validate snapshots before allowing delta-based recovery
+### [x] ARB-013 — Validate snapshots before allowing delta-based recovery
 
 - Priority: P1
 - Estimate: 4 hours

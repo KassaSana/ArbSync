@@ -114,7 +114,11 @@ A book is eligible only when all of the following are true:
 
 A disconnect or normalized sequence gap clears the affected book, so later deltas cannot
 silently continue an untrusted chain. A crossed book produced by a delta is also cleared.
-Recovery requires a new adapter-established snapshot boundary.
+An incomplete snapshot or one whose best bid is greater than or equal to its best ask is
+rejected and cleared as an invalid baseline. These chain-invalidating outcomes signal the
+originating adapter to reconnect, and recovery requires a new adapter-established snapshot
+boundary. An incomplete state produced by a contiguous delta remains ineligible but may be
+repopulated by a later contiguous delta.
 
 Freshness uses monotonic receipt time rather than an exchange timestamp. That avoids
 clock-skew and wall-clock adjustment errors when deciding whether local data is too old.
@@ -223,6 +227,7 @@ The system makes degraded state visible instead of treating it as valid market d
 | --- | --- |
 | Adapter disconnect | Its books are cleared and immediately marked ineligible |
 | Native or normalized sequence gap | The chain is invalidated; later deltas are rejected until a new snapshot arrives |
+| Incomplete or crossed snapshot | The baseline is rejected and adapter-owned reconnection is requested |
 | Old, incomplete, or crossed book | The book is excluded from detection, readiness, metrics eligibility, and spread calculations |
 | REST reconciliation mismatch | A metric and warning are emitted; reconciliation is currently observational |
 | Full persistence queue | The row is dropped and counted without blocking ingestion |

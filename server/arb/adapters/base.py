@@ -126,6 +126,8 @@ class ExchangeAdapter(abc.ABC):
                     if event.received_monotonic_ns is not None
                     else replace(event, received_monotonic_ns=received_monotonic_ns)
                 )
+                if self._reconnect_requested:
+                    raise RuntimeError("adapter requested reconnect")
             if self._reconnect_requested:
                 raise RuntimeError("adapter requested reconnect")
 

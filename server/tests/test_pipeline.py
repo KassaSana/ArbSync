@@ -197,6 +197,7 @@ async def test_consumer_continues_after_rejected_event() -> None:
 
     adapter = Mock()
     adapter.connect.return_value = events()
+    adapter.request_reconnect = Mock()
     broadcaster = RecordingBroadcaster()
     manager = OrderBookManager()
     await main.consume_adapter(
@@ -212,6 +213,40 @@ async def test_consumer_continues_after_rejected_event() -> None:
         in broadcaster.messages
     )
     assert len(broadcaster.messages) == 3
+    adapter.request_reconnect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_consumer_requests_adapter_resync_after_invalid_snapshot() -> None:
+    invalid = MarketEvent(
+        "gemini",
+        "BTC-USD",
+        EventKind.SNAPSHOT,
+        1,
+        1,
+        bids=(PriceLevel(Decimal("100"), Decimal("1")),),
+    )
+
+    async def events():
+        yield invalid
+
+    adapter = Mock()
+    adapter.name = "gemini"
+    adapter.connect.return_value = events()
+    adapter.request_reconnect = Mock()
+    broadcaster = RecordingBroadcaster()
+
+    await main.consume_adapter(
+        adapter,
+        book_manager=OrderBookManager(),
+        detector=ArbitrageDetector(Decimal("0.1")),
+        store=Mock(enqueue=AsyncMock()),
+        broadcaster=broadcaster,
+    )
+
+    adapter.request_reconnect.assert_called_once_with()
+    assert len(broadcaster.messages) == 1
+    assert broadcaster.messages[0].payload["eligible"] is False
 
 
 @pytest.mark.asyncio

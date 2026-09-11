@@ -128,6 +128,22 @@ class OrderBookManager:
         if event.kind is EventKind.SNAPSHOT:
             self._apply_snapshot(book, event, received_at)
             top = self.top_of_book(event.exchange, event.pair)
+            if top is None:
+                book.clear()
+                return BookUpdateResult(
+                    accepted=False,
+                    reason="snapshot_incomplete",
+                    stale=True,
+                    requires_resync=True,
+                )
+            if top.best_bid_price >= top.best_ask_price:
+                book.clear()
+                return BookUpdateResult(
+                    accepted=False,
+                    reason="snapshot_crossed",
+                    stale=True,
+                    requires_resync=True,
+                )
             return BookUpdateResult(accepted=True, top_of_book=top)
 
         if not book.initialized or not book.continuous or book.stale or book.sequence is None:
@@ -138,7 +154,12 @@ class OrderBookManager:
 
         if event.sequence != book.sequence + 1:
             book.clear()
-            return BookUpdateResult(accepted=False, reason="sequence_gap", stale=True)
+            return BookUpdateResult(
+                accepted=False,
+                reason="sequence_gap",
+                stale=True,
+                requires_resync=True,
+            )
 
         self._apply_delta(book, event, received_at)
         top = self.top_of_book(event.exchange, event.pair)
@@ -146,7 +167,12 @@ class OrderBookManager:
             return BookUpdateResult(accepted=False, reason="book_incomplete")
         if top.best_bid_price >= top.best_ask_price:
             book.clear()
-            return BookUpdateResult(accepted=False, reason="crossed_book", stale=True)
+            return BookUpdateResult(
+                accepted=False,
+                reason="crossed_book",
+                stale=True,
+                requires_resync=True,
+            )
         return BookUpdateResult(accepted=True, top_of_book=top)
 
     def best_bid(self, exchange: str, pair: str) -> Decimal | None:

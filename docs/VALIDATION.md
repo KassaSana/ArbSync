@@ -16,6 +16,8 @@ The suite covers:
 - duplicate, overlapping, out-of-order, and missing exchange updates
 - exchange-specific snapshot recovery
 - disconnect invalidation and cold-start delta rejection
+- incomplete and crossed snapshot rejection, including adapter resynchronization before
+  later deltas can restore eligibility
 - stale, incomplete, and crossed-book exclusion
 - detection using only eligible venues
 - synthetic fixture replay for Gemini, Coinbase, and Binance.US
