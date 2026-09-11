@@ -31,7 +31,12 @@ reconcile_mismatches_total = Counter(
 )
 persistence_queue_drops_total = Counter(
     "arb_persistence_queue_drops_total",
-    "Dropped persistence events when the queue is full",
+    "Opportunities not accepted for persistence",
+    ["reason"],
+)
+persistence_unflushed_rows = Gauge(
+    "arb_persistence_unflushed_rows",
+    "Accepted opportunities not yet committed to SQLite",
 )
 background_task_failures_total = Counter(
     "arb_background_task_failures_total",

@@ -19,7 +19,8 @@ The suite covers:
 - stale, incomplete, and crossed-book exclusion
 - detection using only eligible venues
 - synthetic fixture replay for Gemini, Coinbase, and Binance.US
-- bounded persistence and WebSocket queues
+- bounded persistence and WebSocket queues, including initialization, flush, commit,
+  full-queue, worker-failure, and shutdown fault paths
 - coalesced dashboard delivery, immediate invalidation ordering, and suppression
   of unchanged book updates, including a sequence-gap storm
 - cached top-of-book invalidation across size changes, level deletion, sequence

@@ -5,8 +5,11 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 
+import aiosqlite
 import pytest
+from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
 from arb.persistence import OpportunityStore
 from arb.types import ArbitrageOpportunity
 
@@ -117,6 +120,9 @@ async def test_close_drains_every_accepted_opportunity(tmp_path: Path) -> None:
     await store.close()
     await asyncio.wait_for(runner, timeout=1.0)
 
+    assert store.state == "closed"
+    assert store.failure is None
+    assert store.unflushed_count == 0
     rows = await store.recent(limit=10)
     assert [row["timestamp_ns"] for row in rows] == [5, 4, 3, 2, 1]
 
@@ -130,20 +136,139 @@ async def test_enqueue_rejects_new_work_after_close(tmp_path: Path) -> None:
     await store.close()
     await runner
 
+    before = persistence_queue_drops_total.labels(reason="store_closed")._value.get()
     assert await store.enqueue(make_opp(1)) is False
+    after = persistence_queue_drops_total.labels(reason="store_closed")._value.get()
+    assert after - before == 1
 
 
 @pytest.mark.asyncio
 async def test_queue_full_returns_false_and_increments_drop_metric(tmp_path: Path) -> None:
-    from arb.metrics import persistence_queue_drops_total
-
-    before = persistence_queue_drops_total._value.get()
+    before = persistence_queue_drops_total.labels(reason="queue_full")._value.get()
     store = OpportunityStore(str(tmp_path / "db.sqlite3"), queue_maxsize=1)
     # No runner — queue stays full.
     assert await store.enqueue(make_opp(1)) is True
     assert await store.enqueue(make_opp(2)) is False
-    after = persistence_queue_drops_total._value.get()
+    after = persistence_queue_drops_total.labels(reason="queue_full")._value.get()
     assert after - before == 1
+
+
+@pytest.mark.asyncio
+async def test_initialize_failure_closes_store_and_reports_dropped_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    failure = OSError("database unavailable")
+    logged = Mock()
+
+    def fail_connect(_path: str) -> aiosqlite.Connection:
+        raise failure
+
+    monkeypatch.setattr("arb.persistence.aiosqlite.connect", fail_connect)
+    monkeypatch.setattr("arb.persistence.logger", Mock(error=logged))
+    store = OpportunityStore(str(tmp_path / "db.sqlite3"))
+
+    with pytest.raises(OSError, match="database unavailable"):
+        await store.initialize()
+
+    assert store.state == "failed"
+    assert store.failure is failure
+    assert store.failure_reason == "initialize_failed"
+    before = persistence_queue_drops_total.labels(reason="initialize_failed")._value.get()
+    assert await store.enqueue(make_opp(1)) is False
+    after = persistence_queue_drops_total.labels(reason="initialize_failed")._value.get()
+    assert after - before == 1
+    logged.assert_called_once_with(
+        "persistence_store_failed",
+        reason="initialize_failed",
+        error="OSError('database unavailable')",
+        unflushed_rows=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_flush_failure_is_terminal_and_rejects_new_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = OpportunityStore(str(tmp_path / "db.sqlite3"), batch_size=1)
+    await store.initialize()
+    failure = RuntimeError("flush failed")
+    monkeypatch.setattr(store, "_flush", AsyncMock(side_effect=failure))
+    runner = asyncio.create_task(store.run())
+
+    assert await store.enqueue(make_opp(1)) is True
+    with pytest.raises(RuntimeError, match="flush failed"):
+        await runner
+
+    assert store.state == "failed"
+    assert store.failure is failure
+    assert store.failure_reason == "worker_failed"
+    assert store.unflushed_count == 1
+    assert persistence_unflushed_rows._value.get() == 1
+    before = persistence_queue_drops_total.labels(reason="worker_failed")._value.get()
+    assert await store.enqueue(make_opp(2)) is False
+    after = persistence_queue_drops_total.labels(reason="worker_failed")._value.get()
+    assert after - before == 1
+
+
+@pytest.mark.asyncio
+async def test_commit_failure_marks_worker_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = OpportunityStore(str(tmp_path / "db.sqlite3"), batch_size=1)
+    await store.initialize()
+
+    async def fail_commit(_connection: aiosqlite.Connection) -> None:
+        raise OSError("commit failed")
+
+    monkeypatch.setattr(aiosqlite.Connection, "commit", fail_commit)
+    runner = asyncio.create_task(store.run())
+    assert await store.enqueue(make_opp(1)) is True
+
+    with pytest.raises(OSError, match="commit failed"):
+        await runner
+
+    assert store.state == "failed"
+    assert store.failure_reason == "worker_failed"
+    assert store.unflushed_count == 1
+
+
+@pytest.mark.asyncio
+async def test_close_is_non_blocking_after_worker_failure_with_full_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = OpportunityStore(str(tmp_path / "db.sqlite3"), batch_size=1, queue_maxsize=2)
+    await store.initialize()
+    flush_started = asyncio.Event()
+    release_flush = asyncio.Event()
+    logged = Mock()
+
+    async def fail_flush(_batch: object) -> None:
+        flush_started.set()
+        await release_flush.wait()
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(store, "_flush", fail_flush)
+    monkeypatch.setattr("arb.persistence.logger", Mock(error=logged))
+    runner = asyncio.create_task(store.run())
+    assert await store.enqueue(make_opp(1)) is True
+    await asyncio.wait_for(flush_started.wait(), timeout=1.0)
+    assert await store.enqueue(make_opp(2)) is True
+    assert await store.enqueue(make_opp(3)) is True
+    closing = asyncio.create_task(store.close())
+    await asyncio.sleep(0)
+    assert not closing.done()
+    release_flush.set()
+    with pytest.raises(RuntimeError, match="disk full"):
+        await runner
+
+    assert store.unflushed_count == 3
+    await asyncio.wait_for(closing, timeout=0.1)
+    logged.assert_called_with(
+        "persistence_shutdown_incomplete",
+        reason="worker_failed",
+        error="RuntimeError('disk full')",
+        unflushed_rows=3,
+    )
 
 
 @pytest.mark.asyncio

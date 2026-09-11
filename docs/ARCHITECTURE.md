@@ -165,8 +165,11 @@ canonical rows and rollups in one transaction, so the two representations cannot
 different subsets of that batch.
 
 If the persistence queue is full, ingestion does not wait for disk capacity. The new
-opportunity is rejected from the queue and a drop metric is incremented. This preserves
-the market-data path at the cost of an explicitly observable persistence gap.
+opportunity is rejected from the queue and a reason-labelled drop metric is incremented.
+An initialization or worker failure is terminal for that store: the exception and failure
+phase are retained, all later rows are rejected immediately, and the accepted-but-unflushed
+count remains available as a metric and shutdown log field. This preserves the market-data
+path at the cost of an explicitly observable persistence gap.
 
 ## Live API and backpressure
 
@@ -223,6 +226,7 @@ The system makes degraded state visible instead of treating it as valid market d
 | Old, incomplete, or crossed book | The book is excluded from detection, readiness, metrics eligibility, and spread calculations |
 | REST reconciliation mismatch | A metric and warning are emitted; reconciliation is currently observational |
 | Full persistence queue | The row is dropped and counted without blocking ingestion |
+| Persistence initialization or worker failure | The store enters a terminal failed state, rejects and counts later rows by reason, and reports unflushed work |
 | Full client queue | The slow WebSocket client is disconnected and counted |
 | Supervised background task exits | The failure is recorded, logged, counted, and exposed through readiness |
 | Browser socket disconnects | Last-known values are visibly marked stale while reconnecting |
@@ -239,8 +243,9 @@ supervisor. Adapter consumers, persistence, reconciliation, and the HTTP server 
 asyncio event loop.
 
 During shutdown, adapter and reconciliation tasks are cancelled, pending coalesced live
-state is flushed, and the persistence store is asked to drain accepted work before the
-process exits.
+state is flushed, and a healthy persistence store drains accepted work before the process
+exits. If the worker fails while shutdown is waiting to enqueue its sentinel, a failure
+event releases that wait immediately and the unflushed count is logged.
 
 ## Related documentation
 

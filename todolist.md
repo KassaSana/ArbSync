@@ -309,7 +309,7 @@ Acceptance criteria:
 - Record mismatch, confirmation, recovery start, recovery completion, and failure metrics.
 - Test transient mismatch, persistent mismatch, cooldown, recovery, and multi-pair cadence.
 
-### [ ] ARB-011 — Make persistence-worker failure and shutdown non-blocking
+### [x] ARB-011 — Make persistence-worker failure and shutdown non-blocking
 
 - Priority: P1
 - Estimate: 5 hours

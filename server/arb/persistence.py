@@ -5,12 +5,18 @@ import time
 from collections.abc import Iterable
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import aiosqlite
+import structlog
 
-from arb.metrics import persistence_queue_drops_total
+from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
 from arb.types import ArbitrageOpportunity
+
+logger = structlog.get_logger(__name__)
+
+PersistenceFailureReason = Literal["initialize_failed", "worker_failed"]
+PersistenceState = Literal["open", "failed", "closed"]
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS opportunities (
@@ -126,59 +132,137 @@ class OpportunityStore:
             maxsize=queue_maxsize
         )
         self._closed = False
+        self._failure: Exception | None = None
+        self._failure_reason: PersistenceFailureReason | None = None
+        self._failure_event = asyncio.Event()
+        self._accepted_count = 0
+        self._flushed_count = 0
+        persistence_unflushed_rows.set(0)
+
+    @property
+    def state(self) -> PersistenceState:
+        if self._failure is not None:
+            return "failed"
+        return "closed" if self._closed else "open"
+
+    @property
+    def failure(self) -> Exception | None:
+        return self._failure
+
+    @property
+    def failure_reason(self) -> PersistenceFailureReason | None:
+        return self._failure_reason
+
+    @property
+    def unflushed_count(self) -> int:
+        return self._accepted_count - self._flushed_count
 
     async def initialize(self) -> None:
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL;")
-            cursor = await db.execute("PRAGMA table_info(opportunities)")
-            columns = {str(row[1]) for row in await cursor.fetchall()}
-            if columns and {"quote_asset", "theoretical_profit"} - columns:
-                # Earlier releases recorded Binance.US USDT amounts as USD. Their
-                # historical opportunities and rollups cannot be relabelled safely.
-                await db.executescript(
-                    "DROP TABLE IF EXISTS opportunity_minutes; DROP TABLE opportunities;"
-                )
-            await db.executescript(CREATE_TABLE_SQL + CREATE_INDEX_SQL + CREATE_ROLLUP_SQL)
-            await db.execute("PRAGMA user_version = 2")
-            await db.commit()
+        try:
+            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("PRAGMA journal_mode=WAL;")
+                cursor = await db.execute("PRAGMA table_info(opportunities)")
+                columns = {str(row[1]) for row in await cursor.fetchall()}
+                if columns and {"quote_asset", "theoretical_profit"} - columns:
+                    # Earlier releases recorded Binance.US USDT amounts as USD. Their
+                    # historical opportunities and rollups cannot be relabelled safely.
+                    await db.executescript(
+                        "DROP TABLE IF EXISTS opportunity_minutes; DROP TABLE opportunities;"
+                    )
+                await db.executescript(CREATE_TABLE_SQL + CREATE_INDEX_SQL + CREATE_ROLLUP_SQL)
+                await db.execute("PRAGMA user_version = 2")
+                await db.commit()
+        except Exception as exc:
+            self._mark_failed("initialize_failed", exc)
+            raise
 
     async def enqueue(self, opportunity: ArbitrageOpportunity) -> bool:
         if self._closed:
+            persistence_queue_drops_total.labels(
+                reason=self._failure_reason or "store_closed"
+            ).inc()
             return False
         try:
             self._queue.put_nowait(opportunity)
         except asyncio.QueueFull:
-            persistence_queue_drops_total.inc()
+            persistence_queue_drops_total.labels(reason="queue_full").inc()
             return False
+        self._accepted_count += 1
+        persistence_unflushed_rows.set(self.unflushed_count)
         return True
 
     async def run(self) -> None:
         batch: list[ArbitrageOpportunity] = []
-        while True:
-            try:
-                item = await asyncio.wait_for(
-                    self._queue.get(), timeout=self.flush_interval_seconds
-                )
-                if item is None:
-                    break
-                batch.append(item)
-                if len(batch) >= self.batch_size:
-                    await self._flush(batch)
-                    batch.clear()
-            except TimeoutError:
-                if batch:
-                    await self._flush(batch)
-                    batch.clear()
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(
+                        self._queue.get(), timeout=self.flush_interval_seconds
+                    )
+                    if item is None:
+                        break
+                    batch.append(item)
+                    if len(batch) >= self.batch_size:
+                        await self._flush(batch)
+                        batch.clear()
+                except TimeoutError:
+                    if batch:
+                        await self._flush(batch)
+                        batch.clear()
 
-        if batch:
-            await self._flush(batch)
+            if batch:
+                await self._flush(batch)
+        except Exception as exc:
+            self._mark_failed("worker_failed", exc)
+            raise
+
+    def _mark_failed(self, reason: PersistenceFailureReason, exception: Exception) -> None:
+        if self._failure is not None:
+            return
+        self._failure = exception
+        self._failure_reason = reason
+        self._closed = True
+        self._failure_event.set()
+        persistence_unflushed_rows.set(self.unflushed_count)
+        logger.error(
+            "persistence_store_failed",
+            reason=reason,
+            error=repr(exception),
+            unflushed_rows=self.unflushed_count,
+        )
 
     async def close(self) -> None:
+        if self._failure is not None:
+            self._report_incomplete_shutdown()
+            return
         if self._closed:
             return
         self._closed = True
-        await self._queue.put(None)
+        try:
+            self._queue.put_nowait(None)
+        except asyncio.QueueFull:
+            put_sentinel = asyncio.create_task(self._queue.put(None))
+            wait_for_failure = asyncio.create_task(self._failure_event.wait())
+            try:
+                await asyncio.wait(
+                    {put_sentinel, wait_for_failure}, return_when=asyncio.FIRST_COMPLETED
+                )
+            finally:
+                for task in (put_sentinel, wait_for_failure):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(put_sentinel, wait_for_failure, return_exceptions=True)
+            if self._failure is not None:
+                self._report_incomplete_shutdown()
+
+    def _report_incomplete_shutdown(self) -> None:
+        logger.error(
+            "persistence_shutdown_incomplete",
+            reason=self._failure_reason,
+            error=repr(self._failure),
+            unflushed_rows=self.unflushed_count,
+        )
 
     async def recent(self, limit: int = 100) -> list[dict[str, Any]]:
         query = """
@@ -408,3 +492,5 @@ class OpportunityStore:
             # One transaction, so the rollup can never record opportunities the
             # table does not hold, or miss ones it does.
             await db.commit()
+        self._flushed_count += len(batch)
+        persistence_unflushed_rows.set(self.unflushed_count)
