@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
+import importlib.resources
 import logging
 import os
 import time
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Sequence
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -159,9 +162,9 @@ async def consume_adapter(
         )
 
 
-async def run_pipeline() -> None:
+async def run_pipeline(config_path: str | Path = "config.toml") -> None:
     configure_logging()
-    config = load_config()
+    config = load_config(config_path)
     started_at_holder: list[int] = [time.time_ns()]
     book_manager = OrderBookManager(max_age_seconds=config.order_books.max_age_seconds)
     detector = ArbitrageDetector(threshold_pct=Decimal(str(config.detector.threshold_pct)))
@@ -249,5 +252,52 @@ async def run_pipeline() -> None:
         await persistence_task
 
 
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="arbsync",
+        description="Stream public exchange books and report theoretical arbitrage opportunities.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="TOML configuration path (default: ARB_CONFIG, then ./config.toml)",
+    )
+    parser.add_argument(
+        "--init-config",
+        type=Path,
+        metavar="PATH",
+        help="write a safe example configuration to PATH and exit",
+    )
+    return parser
+
+
+def _write_example_config(path: Path, parser: argparse.ArgumentParser) -> None:
+    destination = path.expanduser().resolve()
+    if destination.exists():
+        parser.error(f"refusing to overwrite existing file: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    example = importlib.resources.files("arb").joinpath("config.example.toml").read_text()
+    destination.write_text(example)
+    print(f"Wrote example configuration to {destination}")
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.init_config is not None:
+        if args.config is not None:
+            parser.error("--config and --init-config cannot be used together")
+        _write_example_config(args.init_config, parser)
+        return
+
+    config_path = args.config or Path(os.getenv("ARB_CONFIG", "config.toml"))
+    if not config_path.expanduser().is_file():
+        parser.error(
+            f"configuration file not found: {config_path}. "
+            "Pass --config PATH, set ARB_CONFIG, or create one with --init-config PATH."
+        )
+    asyncio.run(run_pipeline(config_path))
+
+
 if __name__ == "__main__":
-    asyncio.run(run_pipeline())
+    main()

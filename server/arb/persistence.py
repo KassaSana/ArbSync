@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections.abc import Iterable
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
@@ -127,6 +128,7 @@ class OpportunityStore:
         self._closed = False
 
     async def initialize(self) -> None:
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA journal_mode=WAL;")
             cursor = await db.execute("PRAGMA table_info(opportunities)")

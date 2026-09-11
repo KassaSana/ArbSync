@@ -47,14 +47,14 @@ PowerShell:
 
 ```powershell
 uv sync --locked --extra dev
-uv run python -m arb.main
+uv run arbsync --config config.toml
 ```
 
 macOS/Linux:
 
 ```bash
 uv sync --locked --extra dev
-uv run python -m arb.main
+uv run arbsync --config config.toml
 ```
 
 The API listens only on `http://127.0.0.1:8000` by default. Hosting platforms that
@@ -83,7 +83,21 @@ traffic to the local backend. Set `VITE_API_URL` when the backend uses another o
 
 ## Configuration
 
-Runtime settings live in [`config.toml`](config.toml):
+Runtime settings live in [`config.toml`](config.toml). The `arbsync` command selects
+configuration in this order: `--config PATH`, `ARB_CONFIG`, then `./config.toml`. It
+does not silently fall back to packaged settings. Relative SQLite paths are resolved
+from the selected configuration file's directory, so they do not change when the
+application is launched from another working directory.
+
+An installed package can generate a documented, loopback-only starting point:
+
+```bash
+arbsync --init-config ./config.toml
+arbsync --config ./config.toml
+```
+
+Generation refuses to overwrite an existing file. Review the exchange symbols, CORS
+origins, persistence limits, and freshness threshold before running it.
 
 | Section | Controls |
 | --- | --- |
@@ -98,6 +112,7 @@ Environment variables used by the application:
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `ARB_LOG_LEVEL` | Backend log level | `INFO` |
+| `ARB_CONFIG` | Configuration file used when `--config` is absent | `./config.toml` |
 | `ARB_HOST` | Explicit backend bind-address override | `config.toml`, or `0.0.0.0` when `PORT` is supplied |
 | `ARB_CORS_ALLOWED_ORIGINS` | Comma-separated browser origins allowed to call the API | `server.cors_allowed_origins` from `config.toml` |
 | `PORT` | Hosted-platform port override and external-bind signal | `server.port` from `config.toml` |

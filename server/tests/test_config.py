@@ -46,7 +46,7 @@ def test_load_config_parses_all_sections(tmp_path: Path) -> None:
     assert config.exchanges["binance"] == ["BTCUSDT"]
     assert config.server.host == "0.0.0.0"
     assert config.server.port == 8000
-    assert config.server.database_path == "arb.sqlite3"
+    assert config.server.database_path == str((tmp_path / "arb.sqlite3").resolve())
     assert config.server.cors_allowed_origins == ("https://dashboard.example.test",)
     assert config.persistence.batch_size == 500
     assert config.persistence.flush_interval_seconds == 1.0
@@ -60,6 +60,19 @@ def test_load_config_defaults_queue_maxsize_when_missing(tmp_path: Path) -> None
     path.write_text(config_text)
     config = load_config(path)
     assert config.persistence.queue_maxsize == 10_000
+
+
+def test_database_path_is_resolved_relative_to_config(tmp_path: Path) -> None:
+    config_dir = tmp_path / "settings"
+    config_dir.mkdir()
+    path = config_dir / "config.toml"
+    path.write_text(
+        VALID_CONFIG.replace('database_path = "arb.sqlite3"', 'database_path = "var/arb.sqlite3"')
+    )
+
+    config = load_config(path)
+
+    assert config.server.database_path == str((config_dir / "var" / "arb.sqlite3").resolve())
 
 
 def test_load_config_defaults_book_age_when_section_missing(tmp_path: Path) -> None:

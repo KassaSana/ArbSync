@@ -42,7 +42,8 @@ class AppConfig:
 
 
 def load_config(path: str | Path = "config.toml") -> AppConfig:
-    raw = tomllib.loads(Path(path).read_text())
+    config_path = Path(path).expanduser().resolve()
+    raw = tomllib.loads(config_path.read_text())
     platform_port = os.getenv("PORT")
     configured_origins = raw["server"].get("cors_allowed_origins", [])
     origin_override = os.getenv("ARB_CORS_ALLOWED_ORIGINS")
@@ -58,13 +59,16 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         port = int(platform_port) if platform_port is not None else int(raw["server"]["port"])
     except ValueError as exc:
         raise ValueError("PORT must be an integer") from exc
+    database_path = Path(str(raw["server"]["database_path"])).expanduser()
+    if not database_path.is_absolute():
+        database_path = config_path.parent / database_path
     return AppConfig(
         detector=DetectorConfig(threshold_pct=float(raw["detector"]["threshold_pct"])),
         exchanges={name: list(symbols) for name, symbols in raw["exchanges"].items()},
         server=ServerConfig(
             host=host,
             port=port,
-            database_path=raw["server"]["database_path"],
+            database_path=str(database_path.resolve()),
             cors_allowed_origins=_validate_cors_origins(origins),
         ),
         persistence=PersistenceConfig(

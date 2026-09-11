@@ -5,6 +5,19 @@ description = "Cross-exchange crypto arbitrage detector with FastAPI backend and
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
+authors = [
+  { name = "KassaSana", email = "87040046+KassaSana@users.noreply.github.com" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Office/Business :: Financial",
+]
 dependencies = [
   "aiosqlite>=0.20.0",
   "fastapi>=0.115.0",
@@ -15,8 +28,16 @@ dependencies = [
   "websockets>=13.0",
 ]
 
+[project.scripts]
+arbsync = "arb.main:main"
+
+[project.urls]
+Repository = "https://github.com/KassaSana/ArbSync"
+Issues = "https://github.com/KassaSana/ArbSync/issues"
+
 [project.optional-dependencies]
 dev = [
+  "build>=1.2.2",
   # Required by starlette.testclient, which `fastapi.testclient.TestClient`
   # wraps: it does `import httpx2 as httpx` and falls back to httpx with a
   # deprecation warning. Nothing in this repository imports it directly, so a
@@ -30,6 +51,8 @@ dev = [
   "pytest-asyncio>=0.24.0",
   "pytest-cov>=7.1.0",
   "ruff>=0.15.0",
+  # Used with build's --no-isolation option by the installed-wheel smoke test.
+  "setuptools>=68.0",
 ]
 perf = [
     "playwright>=1.62.0",
@@ -67,6 +90,11 @@ source = ["server/arb"]
 
 [tool.setuptools]
 package-dir = {"" = "server"}
+include-package-data = true
+
+[tool.setuptools.package-data]
+arb = ["config.example.toml"]
 
 [tool.setuptools.packages.find]
 where = ["server"]
+exclude = ["tests*"]

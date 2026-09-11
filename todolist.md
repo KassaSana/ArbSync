@@ -439,7 +439,7 @@ Acceptance criteria:
 - Grant the CI workflow only the permissions it needs.
 - Add secret scanning guidance and enable repository-native scanning where available.
 
-### [ ] ARB-018 — Make the installed application runnable outside the repository root
+### [x] ARB-018 — Make the installed application runnable outside the repository root
 
 - Priority: P1
 - Estimate: 6 hours

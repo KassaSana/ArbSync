@@ -29,6 +29,8 @@ The suite covers:
   mid-minute, documented binary64 tolerance, and sub-minute buckets bypassing the rollup
 - WebSocket reconnection and state restoration
 - REST, readiness, metrics, persistence, and statistics behavior
+- installed-wheel metadata, package contents, console startup outside the checkout,
+  missing-configuration errors, and safe example generation
 
 CI also runs strict mypy, Ruff, frontend type checking, ESLint, the production
 dashboard build, and coverage checks for the order-book and detector modules.

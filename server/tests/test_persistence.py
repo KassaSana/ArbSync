@@ -62,6 +62,16 @@ async def test_initialize_is_idempotent(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_initialize_creates_database_parent_directories(tmp_path: Path) -> None:
+    database_path = tmp_path / "deployment" / "var" / "db.sqlite3"
+    store = OpportunityStore(str(database_path))
+
+    await store.initialize()
+
+    assert database_path.is_file()
+
+
+@pytest.mark.asyncio
 async def test_batched_flush_by_size_writes_all_rows(tmp_path: Path) -> None:
     store = OpportunityStore(str(tmp_path / "db.sqlite3"), batch_size=3, flush_interval_seconds=5.0)
     await store.initialize()
