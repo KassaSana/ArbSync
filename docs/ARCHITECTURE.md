@@ -126,8 +126,8 @@ The same eligibility result feeds four consumers:
 - `/readyz` reports the service ready only when expected books and adapters are healthy
   and supervised background tasks have not failed;
 - Prometheus metrics expose book eligibility and age; and
-- the live API sends `book_status` values that the dashboard uses to decide whether a
-  cached quote may contribute to displayed spreads.
+- the live API sends `book_status` values that the dashboard uses both to decide whether a
+  quote may contribute to displayed spreads and to age the books that do.
 
 ## Detection model
 
@@ -195,17 +195,22 @@ clients.
 
 The React `LiveProvider` owns one WebSocket for the whole application so navigation does
 not discard live state. On startup it also requests tracked pairs, current book status,
-recent opportunities, summary statistics, and adapter status through REST.
+recent opportunities, summary statistics, and adapter status through REST. The tracked
+pair roster is requested again whenever a socket connects, so a dashboard opened before
+the backend was answering recovers without a reload.
 
 Incoming WebSocket frames are collected and committed to React state once per animation
 frame. This limits rendering pressure during market bursts. The browser rejects replayed
 or out-of-order stream envelopes within a connection and refreshes persisted
 opportunities and statistics after reconnecting.
 
-The dashboard may retain the last quote it received for a book, but that quote may
-contribute to a displayed spread only while the corresponding canonical `book_status`
-is eligible. When the browser socket itself is interrupted, the dashboard labels the
-remaining values as last-known state while reconnecting.
+The dashboard holds only quotes it is allowed to display. A `state_snapshot` replaces the
+books and statuses it holds rather than merging into them, and a `book_status` reporting a
+book ineligible discards that book's quote immediately. Displayed book age comes from the
+canonical `age_ms` plus locally elapsed time, not from the exchange timestamp on a quote,
+so the dashboard and the backend judge freshness by the same clock. When the browser
+socket itself is interrupted, the dashboard labels the remaining values as last-known
+state while reconnecting.
 
 ## Observability and failure behavior
 
