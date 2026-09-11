@@ -342,6 +342,87 @@ def test_window_to_ns_known_and_unknown_values() -> None:
     assert window_to_ns("nonsense") == 3_600_000_000_000
 
 
+def test_pairs_endpoint_lists_tracked_pairs_before_any_market_event() -> None:
+    """Cold start: the roster is configuration, not a consequence of traffic."""
+    client = TestClient(
+        create_app(
+            OpportunityStore(":memory:"),
+            OrderBookManager(),
+            LiveBroadcaster(),
+            expected_pairs=[("gemini", "BTC-USD"), ("coinbase", "BTC-USD")],
+        )
+    )
+
+    response = client.get("/api/pairs")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"exchange": "coinbase", "pair": "BTC-USD"},
+        {"exchange": "gemini", "pair": "BTC-USD"},
+    ]
+
+
+def test_pairs_endpoint_is_stable_when_one_exchange_initializes() -> None:
+    """Partial initialization must not add, drop, or reorder entries."""
+    manager = OrderBookManager()
+    expected = [("gemini", "BTC-USD"), ("coinbase", "BTC-USD"), ("binance", "BTC-USDT")]
+    client = TestClient(
+        create_app(
+            OpportunityStore(":memory:"), manager, LiveBroadcaster(), expected_pairs=expected
+        )
+    )
+    cold = client.get("/api/pairs").json()
+
+    manager.apply(
+        MarketEvent(
+            exchange="gemini",
+            pair="BTC-USD",
+            kind=EventKind.SNAPSHOT,
+            sequence=1,
+            timestamp_ns=time.time_ns(),
+            bids=(PriceLevel(price=Decimal("100"), size=Decimal("1")),),
+            asks=(PriceLevel(price=Decimal("101"), size=Decimal("1")),),
+        )
+    )
+
+    assert client.get("/api/pairs").json() == cold
+    assert cold == [
+        {"exchange": "binance", "pair": "BTC-USDT"},
+        {"exchange": "coinbase", "pair": "BTC-USD"},
+        {"exchange": "gemini", "pair": "BTC-USD"},
+    ]
+
+
+def test_pairs_endpoint_reports_an_unconfigured_book_once() -> None:
+    """A symbol an exchange sends but nobody configured stays visible, not doubled."""
+    manager = OrderBookManager()
+    for exchange in ("gemini", "kraken"):
+        manager.apply(
+            MarketEvent(
+                exchange=exchange,
+                pair="BTC-USD",
+                kind=EventKind.SNAPSHOT,
+                sequence=1,
+                timestamp_ns=time.time_ns(),
+                bids=(PriceLevel(price=Decimal("100"), size=Decimal("1")),),
+                asks=(PriceLevel(price=Decimal("101"), size=Decimal("1")),),
+            )
+        )
+    client = TestClient(
+        create_app(
+            OpportunityStore(":memory:"),
+            manager,
+            LiveBroadcaster(),
+            expected_pairs=[("gemini", "BTC-USD")],
+        )
+    )
+
+    assert client.get("/api/pairs").json() == [
+        {"exchange": "gemini", "pair": "BTC-USD"},
+        {"exchange": "kraken", "pair": "BTC-USD"},
+    ]
+
+
 def test_pairs_endpoint_lists_known_books() -> None:
     manager = OrderBookManager()
     manager.apply(

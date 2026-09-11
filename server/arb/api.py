@@ -106,9 +106,15 @@ def create_app(
 
     @app.get("/api/pairs")
     async def pairs() -> list[dict[str, str]]:
-        return [
-            {"exchange": exchange, "pair": pair} for exchange, pair in book_manager.known_pairs()
-        ]
+        """Every tracked pair, whether or not a book for it has received data yet.
+
+        Reporting only initialized books meant a dashboard opened before the
+        first snapshots arrived saw an empty table and had no reason to ask
+        again. Books seen but not configured are still included, so an
+        unexpected symbol from an exchange remains visible.
+        """
+        tracked = sorted({*tracked_pairs, *book_manager.known_pairs()})
+        return [{"exchange": exchange, "pair": pair} for exchange, pair in tracked]
 
     @app.get("/api/book-status")
     async def book_status() -> list[dict[str, object]]:
