@@ -106,12 +106,14 @@ origins, persistence limits, and freshness threshold before running it.
 | `server` | Bind address, port, SQLite path, and browser CORS allowlist |
 | `persistence` | Batch size, flush interval, and bounded queue size |
 | `order_books` | Maximum accepted age for otherwise trusted books |
+| `reconciliation` | Full-cycle cadence, mismatch confirmations, and recovery cooldown |
 
 Startup rejects invalid settings before opening exchange connections. Ports must be
 between 1 and 65535; the detector threshold must be non-negative; persistence limits,
-flush intervals, and book age must be positive. Supported exchange keys are `gemini`,
-`coinbase`, and `binance`. Symbols must be nonblank and unique within an exchange after
-that exchange's normalization rules are applied.
+flush intervals, book age, reconciliation cadence, confirmation count, and cooldown must
+be positive. Supported exchange keys are `gemini`, `coinbase`, and `binance`. Symbols must
+be nonblank and unique within an exchange after that exchange's normalization rules are
+applied.
 
 Environment variables used by the application:
 

@@ -22,6 +22,11 @@ snapshot acquisition, buffering, and exchange-native sequence alignment. Because
 adapter currently uses one connection for all configured pairs, recovery invalidates that
 exchange's other books until the new connection rebuilds them.
 
+The periodic reconciler uses the same boundary after repeated live-versus-REST divergence.
+It clears the affected book before requesting reconnection, but does not apply the REST
+comparison snapshot as stream state. Reconciliation confirmation and cooldown prevent a
+single non-atomic comparison from causing a recovery storm.
+
 Tradeoffs:
 - Binance's REST snapshot introduces extra latency during its resync window.
 - Books stay ineligible throughout reconnect and reconstruction.

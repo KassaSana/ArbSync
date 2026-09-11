@@ -6,7 +6,7 @@ import importlib.resources
 import logging
 import os
 import time
-from collections.abc import Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -32,7 +32,7 @@ from arb.metrics import (
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
 from arb.reconcile import SnapshotReconciler
-from arb.types import BookUpdateResult, LiveMessage, MarketEvent
+from arb.types import BookEligibility, BookUpdateResult, LiveMessage, MarketEvent
 
 logger = structlog.get_logger(__name__)
 
@@ -149,6 +149,7 @@ async def consume_adapter(
     detector: ArbitrageDetector,
     store: OpportunityStore,
     broadcaster: LiveBroadcaster,
+    on_book_update: Callable[[str, str], None] | None = None,
 ) -> None:
     """Process each normalized event from an adapter in sequence."""
     async for event in adapter.connect():
@@ -167,6 +168,8 @@ async def consume_adapter(
                 reason=result.reason,
             )
             adapter.request_reconnect()
+        if on_book_update is not None:
+            on_book_update(event.exchange, event.pair)
 
 
 async def run_pipeline(config_path: str | Path = "config.toml") -> None:
@@ -187,23 +190,34 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
     broadcaster = LiveBroadcaster()
     supervisor = BackgroundTaskSupervisor()
 
+    async def publish_book_status(status: BookEligibility) -> None:
+        book_eligible.labels(exchange=status.exchange, pair=status.pair).set(
+            1 if status.eligible else 0
+        )
+        await broadcaster.broadcast_book_now(
+            status.exchange,
+            status.pair,
+            LiveMessage(type="book_status", payload=status.as_payload()),
+        )
+
     async def report_connection_state(exchange: str, connected: bool) -> None:
-        statuses = book_manager.set_exchange_connected(exchange, connected)
-        for status in statuses:
-            book_eligible.labels(exchange=status.exchange, pair=status.pair).set(
-                1 if status.eligible else 0
-            )
-            await broadcaster.broadcast_book_now(
-                status.exchange,
-                status.pair,
-                LiveMessage(type="book_status", payload=status.as_payload()),
-            )
+        for status in book_manager.set_exchange_connected(exchange, connected):
+            await publish_book_status(status)
 
     for adapter in adapters:
         adapter.set_connection_state_callback(report_connection_state)
     expected_pairs = [
         (adapter.name, pair) for adapter in adapters for pair in adapter.expected_pairs()
     ]
+    reconciler = SnapshotReconciler(
+        adapters,
+        book_manager,
+        expected_pairs,
+        cycle_seconds=config.reconciliation.cycle_seconds,
+        confirmation_count=config.reconciliation.confirmation_count,
+        cooldown_seconds=config.reconciliation.cooldown_seconds,
+        on_book_invalidated=publish_book_status,
+    )
     app = create_app(
         store,
         book_manager,
@@ -219,7 +233,7 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
     persistence_task = supervisor.create("persistence", store.run())
     reconcile_task = supervisor.create(
         "snapshot_reconciler",
-        SnapshotReconciler(adapters, book_manager, expected_pairs).run(),
+        reconciler.run(),
     )
 
     adapter_tasks = [
@@ -231,6 +245,7 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
                 detector=detector,
                 store=store,
                 broadcaster=broadcaster,
+                on_book_update=reconciler.observe_book,
             ),
         )
         for adapter in adapters

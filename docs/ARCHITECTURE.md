@@ -53,7 +53,7 @@ never persisted there.
 | Exchange adapters | Protocol parsing, native sequence validation, reconnects, and snapshot recovery | Cross-exchange eligibility or detection |
 | `OrderBookManager` | In-memory L2 state, normalized continuity, freshness, and canonical eligibility | Exchange-native recovery |
 | `ArbitrageDetector` | Pairwise spread, maximum-size, and theoretical-profit calculations | Book trust or trade execution |
-| `SnapshotReconciler` | Periodic comparison of live levels with REST snapshots | Automatic recovery from a mismatch |
+| `SnapshotReconciler` | Confirmed live-versus-REST divergence and recovery coordination | Exchange-native recovery |
 | `OpportunityStore` | Bounded queuing, batched SQLite writes, and statistics queries | Order-book storage |
 | `LiveBroadcaster` | State envelopes, book-update coalescing, and bounded per-client delivery | Market-data ingestion or detection |
 | FastAPI application | REST, WebSocket, health, readiness, and metrics interfaces | Exchange protocol semantics |
@@ -154,6 +154,24 @@ serialize them as decimal strings.
 These calculations exclude fees, slippage, latency, inventory, partial fills, transfer
 constraints, and execution risk. They are observations, not executable trade quotes.
 
+## Confirmed reconciliation recovery
+
+The reconciler checks one target at a time and spreads those checks across the configured
+`reconciliation.cycle_seconds`, so the setting describes a nominal full pass rather than
+the delay between individual books. Network time can make a pass slightly longer.
+
+Each comparison reads the top ten live and REST levels. It treats ordered price divergence
+above 0.5% or aggregate side-size divergence above 50% as a mismatch. The wider size
+tolerance accounts for normal depth churn between non-atomic reads. A matching comparison
+or fetch failure resets the consecutive-mismatch streak.
+
+After `confirmation_count` consecutive mismatches for the same book, the reconciler clears
+that canonical chain and broadcasts its ineligibility before asking the adapter to reconnect.
+The adapter still owns connection reset, snapshot acquisition, and native sequence recovery.
+A cooldown prevents another recovery storm for the same target and is also the deadline for
+reporting a started recovery as unresolved. Started, completed, timed-out, confirmed-mismatch,
+raw-mismatch, and reconciliation-failure events are logged and counted.
+
 ## Persistence and statistics
 
 `OpportunityStore` separates ingestion from SQLite writes with a bounded `asyncio`
@@ -229,7 +247,8 @@ The system makes degraded state visible instead of treating it as valid market d
 | Native or normalized sequence gap | The chain is invalidated; later deltas are rejected until a new snapshot arrives |
 | Incomplete or crossed snapshot | The baseline is rejected and adapter-owned reconnection is requested |
 | Old, incomplete, or crossed book | The book is excluded from detection, readiness, metrics eligibility, and spread calculations |
-| REST reconciliation mismatch | A metric and warning are emitted; reconciliation is currently observational |
+| Transient REST reconciliation mismatch | The mismatch is counted but the book remains eligible while confirmation is pending |
+| Confirmed REST reconciliation mismatch | The affected book is cleared before adapter-owned reconnection; cooldown suppresses recovery storms |
 | Full persistence queue | The row is dropped and counted without blocking ingestion |
 | Persistence initialization or worker failure | The store enters a terminal failed state, rejects and counts later rows by reason, and reports unflushed work |
 | Full client queue | The slow WebSocket client is disconnected and counted |

@@ -18,6 +18,9 @@ The suite covers:
 - disconnect invalidation and cold-start delta rejection
 - incomplete and crossed snapshot rejection, including adapter resynchronization before
   later deltas can restore eligibility
+- reconciliation price and aggregate-size comparison, transient mismatch reset, confirmed
+  invalidation, recovery cooldown, completion and timeout observation, REST failure isolation,
+  and multi-pair cadence
 - stale, incomplete, and crossed-book exclusion
 - detection using only eligible venues
 - synthetic fixture replay for Gemini, Coinbase, and Binance.US

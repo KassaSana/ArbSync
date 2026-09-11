@@ -22,3 +22,10 @@ queue_maxsize = 10000
 
 [order_books]
 max_age_seconds = 60.0
+
+[reconciliation]
+# Checks are spread across the cycle rather than launched as one REST burst.
+cycle_seconds = 60.0
+confirmation_count = 3
+# Also serves as the deadline for reporting a started recovery as unresolved.
+cooldown_seconds = 300.0

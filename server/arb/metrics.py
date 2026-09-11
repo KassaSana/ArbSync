@@ -29,6 +29,21 @@ ws_client_queue_overflows_total = Counter(
 reconcile_mismatches_total = Counter(
     "arb_reconcile_mismatches_total", "Snapshot reconciliation mismatches", ["exchange", "pair"]
 )
+reconcile_confirmations_total = Counter(
+    "arb_reconcile_confirmations_total",
+    "Snapshot reconciliation mismatches that reached the confirmation threshold",
+    ["exchange", "pair"],
+)
+reconcile_recoveries_total = Counter(
+    "arb_reconcile_recoveries_total",
+    "Reconciliation-triggered recovery lifecycle events",
+    ["exchange", "pair", "outcome"],
+)
+reconcile_failures_total = Counter(
+    "arb_reconcile_failures_total",
+    "Failures while reconciling or requesting recovery",
+    ["exchange", "pair", "phase"],
+)
 persistence_queue_drops_total = Counter(
     "arb_persistence_queue_drops_total",
     "Opportunities not accepted for persistence",

@@ -288,7 +288,7 @@ Acceptance criteria:
 - Emit actionable startup errors that identify the field and bad value.
 - Add table-driven tests for valid boundaries and every rejected category.
 
-### [ ] ARB-010 — Turn reconciliation into safe, confirmed recovery
+### [x] ARB-010 — Turn reconciliation into safe, confirmed recovery
 
 - Priority: P1
 - Estimate: 10 hours

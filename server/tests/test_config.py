@@ -27,6 +27,11 @@ queue_maxsize = 1000
 
 [order_books]
 max_age_seconds = 12.5
+
+[reconciliation]
+cycle_seconds = 90.0
+confirmation_count = 4
+cooldown_seconds = 600.0
 """
 
 
@@ -52,6 +57,9 @@ def test_load_config_parses_all_sections(tmp_path: Path) -> None:
     assert config.persistence.flush_interval_seconds == 1.0
     assert config.persistence.queue_maxsize == 1000
     assert config.order_books.max_age_seconds == 12.5
+    assert config.reconciliation.cycle_seconds == 90.0
+    assert config.reconciliation.confirmation_count == 4
+    assert config.reconciliation.cooldown_seconds == 600.0
 
 
 def test_load_config_defaults_queue_maxsize_when_missing(tmp_path: Path) -> None:
@@ -83,6 +91,22 @@ def test_load_config_defaults_book_age_when_section_missing(tmp_path: Path) -> N
     assert config.order_books.max_age_seconds == 30.0
 
 
+def test_load_config_defaults_reconciliation_when_section_missing(tmp_path: Path) -> None:
+    config_text = VALID_CONFIG.replace(
+        "\n[reconciliation]\ncycle_seconds = 90.0\nconfirmation_count = 4\n"
+        "cooldown_seconds = 600.0\n",
+        "",
+    )
+    path = tmp_path / "config.toml"
+    path.write_text(config_text)
+
+    config = load_config(path)
+
+    assert config.reconciliation.cycle_seconds == 60.0
+    assert config.reconciliation.confirmation_count == 3
+    assert config.reconciliation.cooldown_seconds == 300.0
+
+
 @pytest.mark.parametrize("port", [1, 65_535])
 def test_port_boundaries_are_valid(tmp_path: Path, port: int) -> None:
     path = tmp_path / "config.toml"
@@ -98,6 +122,9 @@ def test_valid_numeric_boundaries_are_accepted(tmp_path: Path) -> None:
         .replace("flush_interval_seconds = 1.0", "flush_interval_seconds = 0.000001")
         .replace("queue_maxsize = 1000", "queue_maxsize = 1")
         .replace("max_age_seconds = 12.5", "max_age_seconds = 0.000001")
+        .replace("cycle_seconds = 90.0", "cycle_seconds = 0.000001")
+        .replace("confirmation_count = 4", "confirmation_count = 1")
+        .replace("cooldown_seconds = 600.0", "cooldown_seconds = 0.000001")
     )
     path = tmp_path / "config.toml"
     path.write_text(config_text)
@@ -109,6 +136,9 @@ def test_valid_numeric_boundaries_are_accepted(tmp_path: Path) -> None:
     assert config.persistence.flush_interval_seconds == 0.000001
     assert config.persistence.queue_maxsize == 1
     assert config.order_books.max_age_seconds == 0.000001
+    assert config.reconciliation.cycle_seconds == 0.000001
+    assert config.reconciliation.confirmation_count == 1
+    assert config.reconciliation.cooldown_seconds == 0.000001
 
 
 @pytest.mark.parametrize(
@@ -139,6 +169,21 @@ def test_valid_numeric_boundaries_are_accepted(tmp_path: Path) -> None:
         ("max_age_seconds = 12.5", "max_age_seconds = 0", "order_books.max_age_seconds"),
         ("max_age_seconds = 12.5", "max_age_seconds = -1", "order_books.max_age_seconds"),
         ("max_age_seconds = 12.5", "max_age_seconds = nan", "order_books.max_age_seconds"),
+        (
+            "cycle_seconds = 90.0",
+            "cycle_seconds = 0",
+            "reconciliation.cycle_seconds",
+        ),
+        (
+            "confirmation_count = 4",
+            "confirmation_count = 0",
+            "reconciliation.confirmation_count",
+        ),
+        (
+            "cooldown_seconds = 600.0",
+            "cooldown_seconds = inf",
+            "reconciliation.cooldown_seconds",
+        ),
         ("port = 8000", "port = 0", "server.port"),
         ("port = 8000", "port = 65536", "server.port"),
     ],
@@ -166,6 +211,12 @@ def test_invalid_numeric_ranges_identify_field_and_value(
             'queue_maxsize = "100"',
             "persistence.queue_maxsize",
             "'100'",
+        ),
+        (
+            "confirmation_count = 4",
+            "confirmation_count = 1.5",
+            "reconciliation.confirmation_count",
+            "1.5",
         ),
     ],
 )
@@ -202,6 +253,19 @@ def test_unsupported_exchange_is_rejected(tmp_path: Path) -> None:
     path.write_text(VALID_CONFIG.replace("[exchanges]\n", '[exchanges]\nkraken = ["BTC/USD"]\n'))
 
     with pytest.raises(ValueError, match="unsupported exchange 'kraken'"):
+        load_config(path)
+
+
+def test_reconciliation_must_be_a_table(tmp_path: Path) -> None:
+    config_text = VALID_CONFIG.replace(
+        "\n[reconciliation]\ncycle_seconds = 90.0\nconfirmation_count = 4\n"
+        "cooldown_seconds = 600.0\n",
+        "",
+    ).replace("[detector]", 'reconciliation = "invalid"\n\n[detector]')
+    path = tmp_path / "config.toml"
+    path.write_text(config_text)
+
+    with pytest.raises(ValueError, match="reconciliation must be a table"):
         load_config(path)
 
 

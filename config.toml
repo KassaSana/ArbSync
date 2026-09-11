@@ -24,3 +24,11 @@ queue_maxsize = 10000
 # dashboard spreads. Omitting this section falls back to the stricter 30.0s
 # built into `load_config`, not to the value shipped here.
 max_age_seconds = 60.0
+
+[reconciliation]
+# One target is checked at a time, evenly spread across this nominal full-cycle
+# duration. With 27 targets, 60 seconds means one REST comparison about every 2.2s.
+cycle_seconds = 60.0
+confirmation_count = 3
+# Also serves as the deadline for reporting a started recovery as unresolved.
+cooldown_seconds = 300.0

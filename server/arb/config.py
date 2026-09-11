@@ -46,12 +46,20 @@ class OrderBookConfig:
 
 
 @dataclass(frozen=True)
+class ReconciliationConfig:
+    cycle_seconds: float
+    confirmation_count: int
+    cooldown_seconds: float
+
+
+@dataclass(frozen=True)
 class AppConfig:
     detector: DetectorConfig
     exchanges: dict[str, list[str]]
     server: ServerConfig
     persistence: PersistenceConfig
     order_books: OrderBookConfig
+    reconciliation: ReconciliationConfig
 
 
 def load_config(path: str | Path = "config.toml") -> AppConfig:
@@ -96,6 +104,20 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         "order_books.max_age_seconds",
         raw.get("order_books", {}).get("max_age_seconds", 30.0),
     )
+    reconciliation = raw.get("reconciliation", {})
+    if not isinstance(reconciliation, dict):
+        raise ConfigError(f"reconciliation must be a table; got {reconciliation!r}")
+    cycle_seconds = _positive_number(
+        "reconciliation.cycle_seconds", reconciliation.get("cycle_seconds", 60.0)
+    )
+    confirmation_count = _positive_integer(
+        "reconciliation.confirmation_count",
+        reconciliation.get("confirmation_count", 3),
+    )
+    cooldown_seconds = _positive_number(
+        "reconciliation.cooldown_seconds",
+        reconciliation.get("cooldown_seconds", 300.0),
+    )
     database_path = Path(str(raw["server"]["database_path"])).expanduser()
     if not database_path.is_absolute():
         database_path = config_path.parent / database_path
@@ -115,6 +137,11 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         ),
         order_books=OrderBookConfig(
             max_age_seconds=max_age_seconds,
+        ),
+        reconciliation=ReconciliationConfig(
+            cycle_seconds=cycle_seconds,
+            confirmation_count=confirmation_count,
+            cooldown_seconds=cooldown_seconds,
         ),
     )
 

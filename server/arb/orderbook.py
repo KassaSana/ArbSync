@@ -112,6 +112,13 @@ class OrderBookManager:
         now = self._clock()
         return [self.eligibility(exchange, pair, now) for exchange, pair in pairs]
 
+    def invalidate(self, exchange: str, pair: str) -> BookEligibility:
+        """Clear one normalized chain before adapter-owned recovery begins."""
+        book = self._books.get((exchange, pair))
+        if book is not None:
+            book.clear()
+        return self.eligibility(exchange, pair)
+
     def apply(
         self, event: MarketEvent, received_monotonic_ns: int | None = None
     ) -> BookUpdateResult:
