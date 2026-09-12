@@ -62,3 +62,27 @@ cannot substitute for a Unix-like runner when only Windows has been exercised.
 
 CI/status badges should link to workflows with reviewed, stable public executions.
 Do not add a passing badge merely because a workflow file exists.
+
+## Automated content and artifact checks
+
+From the candidate checkout, run:
+
+```powershell
+uv run python tools/check_release.py --require-clean
+uv run python -m build --no-isolation --outdir var/release
+uv run python tools/check_release.py --require-clean --artifacts var/release --output var/release/checks.json
+```
+
+Use a fresh artifact directory; the checker requires exactly one wheel and one source
+distribution. It checks inline Markdown filesystem links, required release documents,
+the package/lock version, packaged code/configuration/license/metadata, and accidental
+runtime content. It reads archives without extracting them. JSON output records the
+candidate commit, dirty state, findings, and exact artifact hashes.
+The recorded commit identifies the checkout being checked; it cannot independently
+prove which source commit produced supplied artifacts. Preserve the build log as well.
+Heading anchors, external links, dependency licenses, secret values, hosted CI outcomes and live behavior
+remain separate checklist items. A successful content check is not release approval.
+
+CI runs backend and dashboard checks on Windows and Ubuntu, builds the package pair,
+and prints the same artifact inspection record. Retain the corresponding hosted job
+logs for a release candidate; configured jobs still require actual successful execution.

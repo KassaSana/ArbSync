@@ -566,6 +566,9 @@ Progress: added an Unreleased changelog with migration and limitation notes, alp
 versioning rules, and a candidate checklist covering both operating systems, packages,
 licenses, scans, and artifact provenance. Publication remains gated on verified runner
 evidence and owner review; no release tag has been created.
+The content/artifact checker now validates filesystem links, package/lock versions,
+archive contents and SHA-256 hashes. Windows checks and package inspection pass locally;
+the expanded Windows/Ubuntu CI matrix still needs hosted execution after an owner-requested push.
 
 Acceptance criteria:
 

@@ -9,7 +9,12 @@ permissions:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -42,9 +47,20 @@ jobs:
         run: uv run ruff format --check server
       - name: Exercise repository hooks
         run: uv run pre-commit run --all-files
+      - name: Check release content
+        run: uv run python tools/check_release.py
+      - name: Build candidate packages
+        run: uv run python -m build --no-isolation --outdir var/release
+      - name: Inspect and fingerprint candidate packages
+        run: uv run python tools/check_release.py --artifacts var/release --output var/release/checks.json
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         working-directory: dashboard

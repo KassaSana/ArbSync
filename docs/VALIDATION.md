@@ -48,6 +48,17 @@ The suite covers:
 CI also runs strict mypy, Ruff, frontend type checking, ESLint, the production
 dashboard build, and coverage checks for the order-book and detector modules.
 
+### Release preparation verification (2026-09-12)
+
+Local Windows verification passed the backend suite, strict mypy, Ruff, dashboard
+typecheck/lint/tests/build, Markdown filesystem-link checks, and a wheel plus source
+distribution build and content/hash inspection. The new release checker also rejects
+version drift, missing artifact metadata, and accidental runtime/environment files.
+Actionlint accepted the expanded Windows/Ubuntu workflow matrix. Hosted execution of
+that matrix, a fresh candidate secret/license review, and final publication remain
+outstanding; these checks do not establish a published release. See
+[the release process](RELEASING.md) for the reproducible commands and evidence limits.
+
 ### Dependency maintenance verification (2026-09-12)
 
 The ARB-017 refresh passed dashboard type checking, ESLint, tests (including direct
