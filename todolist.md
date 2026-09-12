@@ -403,7 +403,7 @@ Acceptance criteria:
   exact representation if exact aggregate output is required.
 - Add a precision regression test using values that are awkward in binary floating point.
 
-### [ ] ARB-016 — Add contributor and security documentation
+### [x] ARB-016 — Add contributor and security documentation
 
 - Priority: P1
 - Estimate: 5 hours
@@ -421,6 +421,14 @@ Acceptance criteria:
 - Add a code of conduct appropriate to the chosen community model.
 - Add bug, protocol-correctness, and feature-request issue templates plus a PR checklist.
 - Include the detection-only/non-execution scope in contribution guidance.
+
+Resolution: added contributor setup/checks and review guidance, an alpha support and
+private vulnerability-reporting policy, a maintainer-led code of conduct, three issue
+templates, and a PR checklist. README links these entry points. Local documentation
+links and issue-template metadata were checked. GitHub private vulnerability reporting
+was confirmed disabled; SECURITY.md includes a contact-request fallback that keeps
+vulnerability details private. Enabling the native reporting form remains an owner
+setting decision.
 
 ### [ ] ARB-017 — Add automated dependency and supply-chain maintenance
 

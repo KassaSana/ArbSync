@@ -211,6 +211,7 @@ Run frontend checks from `dashboard/`:
 ```bash
 npm run typecheck
 npm run lint
+npm run test
 npm run build
 ```
 
@@ -275,6 +276,13 @@ liquidity and is an observability project, not an execution engine or trading sy
 The largest remaining validation gap is a documented 24-hour live soak covering
 memory stability, reconnect recovery, sequence gaps, and the 60-second freshness
 threshold.
+
+## Contributing and support
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and review expectations,
+and follow the [code of conduct](CODE_OF_CONDUCT.md). Use the repository's issue
+templates for bugs, protocol correctness, and feature requests. Report vulnerabilities
+privately using [SECURITY.md](SECURITY.md), which also defines supported versions.
 
 ## License
 
