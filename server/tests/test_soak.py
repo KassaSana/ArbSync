@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -197,7 +198,11 @@ async def test_soak_samples_metrics_and_checkpoints_failures(
     client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
     monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
     output = tmp_path / "report.md"
-    report = await soak.run_soak("http://test", 0, 1, None, output)
+    evidence = tmp_path / "raw" / "samples.jsonl"
+    config = Path(__file__).resolve().parents[2] / "config.toml"
+    report = await soak.run_soak(
+        "http://test", 0, 1, None, output, config=config, samples_output=evidence
+    )
     assert paths.count("/metrics") == 1
     assert report.completed
     assert output.read_text(encoding="utf-8") == report.markdown()
@@ -208,3 +213,23 @@ async def test_soak_samples_metrics_and_checkpoints_failures(
         assert report.background_failures == {"persistence": "failed"}
     assert "observer_checkout_commit" in report.metadata
     assert "observer_checkout_dirty" in report.metadata
+    sample = json.loads(evidence.read_text(encoding="utf-8"))
+    assert ("error" in sample) == metrics_fail
+    assert len(report.expected_books) == 27
+    assert len(report.metadata["config_sha256"]) == 64
+    if not metrics_fail:
+        assert len(report.missing_book_samples) == 27
+        assert sample["metrics"] == "arb_ws_sender_failures_total 2\n"
+
+
+@pytest.mark.asyncio
+async def test_soak_refuses_to_overwrite_or_mix_evidence(tmp_path: Path) -> None:
+    evidence = tmp_path / "samples.jsonl"
+    evidence.write_text("previous run\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        await soak.run_soak(
+            "http://unused", 0, 1, None, tmp_path / "report.md", samples_output=evidence
+        )
+    assert evidence.read_text(encoding="utf-8") == "previous run\n"
+    with pytest.raises(ValueError, match="different paths"):
+        await soak.run_soak("http://unused", 0, 1, None, evidence, samples_output=evidence)

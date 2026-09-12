@@ -81,6 +81,11 @@ roughly 1,441 samples. Shorter runs take `-DurationSeconds` and `-SampleSeconds`
 Use `-Config <path>` to select a configuration (paths containing spaces are supported).
 It defaults to the repository's `config.toml`. Default report and backend log names
 include the start time to distinguish runs on the same day.
+The launcher also writes a sibling `.jsonl` file containing each successful sample's
+API payloads, metrics, timestamp, and RSS, or the sampling error. Raw evidence is
+ignored by Git and refuses to overwrite an existing file. The Markdown report records
+the configuration SHA-256 and missing configured-book observations. Keep the selected
+configuration with the raw artifacts when archiving a run.
 
 The observer can also be driven directly:
 
@@ -89,6 +94,8 @@ uv run python tools/soak.py \
   --duration-seconds 86400 \
   --sample-seconds 60 \
   --pid <backend-pid> \
+  --config config.toml \
+  --samples-output artifacts/benchmarks/soak/soak_YYYY-MM-DD.jsonl \
   --output artifacts/benchmarks/soak/soak_YYYY-MM-DD.md
 ```
 

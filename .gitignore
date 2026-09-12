@@ -19,4 +19,5 @@ var/*
 !var/.gitkeep
 dashboard/dist-perf/
 artifacts/benchmarks/performance/raw/
+artifacts/benchmarks/soak/*.jsonl
 .claude/settings.local.json

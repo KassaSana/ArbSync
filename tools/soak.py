@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import ctypes
+import hashlib
 import json
 import platform
 import re
@@ -150,6 +151,8 @@ class SoakReport:
     process_restarts: int = 0
     process_started_at: str | None = None
     missing_rss_samples: int = 0
+    expected_books: set[str] = field(default_factory=set)
+    missing_book_samples: Counter[str] = field(default_factory=Counter)
 
     def observe(
         self,
@@ -164,6 +167,8 @@ class SoakReport:
         counters: dict[str, int] | None = None,
     ) -> None:
         self.samples += 1
+        observed_books = {f"{book['exchange']}:{book['pair']}" for book in books}
+        self.missing_book_samples.update(self.expected_books - observed_books)
         if readiness.get("status") == "ready":
             self.ready_samples += 1
         for failure in readiness.get("background_task_failures", []):
@@ -223,6 +228,8 @@ class SoakReport:
             f"- Observed process restarts: `{self.process_restarts}`",
             f"- Counter resets (invalidate deltas): `{self.counter_resets}`",
             f"- Missing RSS samples: `{self.missing_rss_samples}`",
+            f"- Expected books: `{len(self.expected_books)}` (zero means configuration not supplied)",
+            f"- Missing configured book observations: `{sum(self.missing_book_samples.values())}`",
             "",
             "## Adapters",
             "",
@@ -312,6 +319,12 @@ class SoakReport:
             lines.append("- No operational counter series observed.")
         lines.extend(["", "## Run provenance", ""])
         lines.extend(f"- {name}: `{value}`" for name, value in sorted(self.metadata.items()))
+        if self.missing_book_samples:
+            lines.extend(["", "## Missing configured books", ""])
+            lines.extend(
+                f"- `{book}`: `{count}` samples"
+                for book, count in sorted(self.missing_book_samples.items())
+            )
         lines.append("")
         return "\n".join(lines)
 
@@ -372,6 +385,9 @@ async def run_soak(
     sample_interval_seconds: float,
     pid: int | None,
     output: Path,
+    *,
+    config: Path | None = None,
+    samples_output: Path | None = None,
 ) -> SoakReport:
     report = SoakReport(utc_now(), duration_seconds, sample_interval_seconds)
     report.metadata = {
@@ -380,6 +396,25 @@ async def run_soak(
         "backend_pid": str(pid),
         "base_url": base_url,
     }
+    if config is not None:
+        from arb.config import SYMBOL_NORMALIZERS, load_config
+
+        settings = load_config(config)
+        report.expected_books = {
+            f"{exchange}:{SYMBOL_NORMALIZERS[exchange](symbol)}"
+            for exchange, symbols in settings.exchanges.items()
+            for symbol in symbols
+        }
+        report.metadata["config_sha256"] = hashlib.sha256(config.read_bytes()).hexdigest()
+        report.metadata["config_path"] = str(config.resolve())
+    if samples_output is not None:
+        if samples_output.resolve() == output.resolve():
+            raise ValueError("sample evidence and Markdown report must use different paths")
+        samples_output.parent.mkdir(parents=True, exist_ok=True)
+        # Never silently combine separate runs or overwrite existing evidence.
+        with samples_output.open("x", encoding="utf-8"):
+            pass
+        report.metadata["samples_path"] = str(samples_output.resolve())
     try:
         report.metadata["observer_checkout_commit"] = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -405,6 +440,7 @@ async def run_soak(
     async with httpx.AsyncClient(base_url=base_url, timeout=10) as client:
         while True:
             elapsed = loop.time() - started
+            evidence: dict[str, Any] = {"sampled_at": utc_now(), "elapsed_seconds": elapsed}
             try:
                 adapters = await fetch_json(client, "/api/adapters")
                 books = await fetch_json(client, "/api/book-status")
@@ -418,6 +454,15 @@ async def run_soak(
                 assert isinstance(readiness, dict)
                 assert isinstance(overview, dict)
                 assert isinstance(event_counts, dict)
+                rss = None if pid is None else process_rss_bytes(pid)
+                evidence.update(
+                    adapters=adapters,
+                    books=books,
+                    readiness=readiness,
+                    overview=overview,
+                    metrics=metrics.text,
+                    rss_bytes=rss,
+                )
                 report.observe(
                     adapters=adapters,
                     books=books,
@@ -425,11 +470,17 @@ async def run_soak(
                     overview=overview,
                     event_counts=event_counts,
                     elapsed_seconds=elapsed,
-                    rss=None if pid is None else process_rss_bytes(pid),
+                    rss=rss,
                     counters=parse_operational_counters(metrics.text),
                 )
             except (httpx.HTTPError, KeyError, TypeError, ValueError, AssertionError) as exc:
-                report.http_failures.append(f"{utc_now()}: {type(exc).__name__}: {exc}")
+                failure = f"{utc_now()}: {type(exc).__name__}: {exc}"
+                report.http_failures.append(failure)
+                evidence["error"] = failure
+
+            if samples_output is not None:
+                with samples_output.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(evidence) + "\n")
 
             report.actual_duration_seconds = loop.time() - started
             report.ended_at = utc_now()
@@ -454,6 +505,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-seconds", type=float, default=300)
     parser.add_argument("--pid", type=int)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--config", type=Path, help="Configuration to fingerprint and check book coverage"
+    )
+    parser.add_argument(
+        "--samples-output", type=Path, help="New JSONL file for raw sampling evidence"
+    )
     return parser.parse_args()
 
 
@@ -468,6 +525,8 @@ def main() -> None:
             args.sample_seconds,
             args.pid,
             args.output,
+            config=args.config,
+            samples_output=args.samples_output,
         )
     )
     print(json.dumps({"output": str(args.output), "samples": report.samples}))

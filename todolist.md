@@ -515,6 +515,8 @@ Progress: the observer captures labeled operational failure counters, observed p
 restarts, missing RSS samples, and checkout/environment provenance. Restarted runs mark
 counter deltas invalid, and the Windows launcher accepts an explicit configuration.
 The uninterrupted 24-hour run, anomaly review, and published summary remain outstanding.
+Raw JSONL sampling evidence, configuration fingerprints, and explicit missing-book
+coverage are now available through the observer and Windows launcher.
 
 Acceptance criteria:
 

@@ -126,6 +126,8 @@ try {
         --duration-seconds $DurationSeconds `
         --sample-seconds $SampleSeconds `
         --pid $samplePid `
+        --config $Config `
+        --samples-output ([System.IO.Path]::ChangeExtension($Output, '.jsonl')) `
         --output $Output
     if ($LASTEXITCODE -ne 0) {
         throw "Observer exited with code $LASTEXITCODE."
