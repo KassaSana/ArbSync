@@ -128,6 +128,9 @@ Environment variables used by the application:
 
 Restart the backend after changing `config.toml` or these backend environment variables.
 
+History is retained until explicitly pruned. See [SQLite maintenance](docs/STORAGE.md)
+for bounded pruning, disk-growth estimates, backups, vacuum, and migration precautions.
+
 ## Hosted deployment
 
 Binding to `0.0.0.0` exposes the service beyond the local machine. Put it behind a TLS-

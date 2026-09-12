@@ -42,6 +42,8 @@ The suite covers:
 - runtime configuration type, range, exchange, symbol, and normalized-duplicate validation
 - installed-wheel metadata, package contents, console startup outside the checkout,
   missing-configuration errors, and safe example generation
+- explicit history pruning: exact boundaries, partial-minute rollup repair, active writes,
+  restart/statistics, lock contention, query-budget expiry, and atomic failure rollback
 
 CI also runs strict mypy, Ruff, frontend type checking, ESLint, the production
 dashboard build, and coverage checks for the order-book and detector modules.

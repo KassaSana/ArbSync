@@ -30,6 +30,7 @@ dependencies = [
 
 [project.scripts]
 arbsync = "arb.main:main"
+arbsync-prune = "arb.maintenance:main"
 
 [project.urls]
 Repository = "https://github.com/KassaSana/ArbSync"

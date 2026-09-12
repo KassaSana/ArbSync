@@ -478,7 +478,7 @@ P1 total: **54 engineer-hours**.
 
 ## Operational hardening and evidence (P2)
 
-### [ ] ARB-019 — Define SQLite retention and maintenance behavior
+### [x] ARB-019 — Define SQLite retention and maintenance behavior
 
 - Priority: P2
 - Estimate: 5 hours
@@ -494,6 +494,12 @@ Acceptance criteria:
 - Prune canonical rows and rollups transactionally without blocking ingestion for an
   unbounded period.
 - Test pruning boundaries, active writes, restart, and statistics after retention.
+
+Resolution: added the explicit `arbsync-prune` command with row and SQL-work limits,
+atomic rollup rebuilding, and bounded lock waits. History remains opt-in to pruning.
+`docs/STORAGE.md` covers measured synthetic growth, backup, vacuum, and migration.
+Boundary, concurrent-write, rollback, restart, statistics, and installed CLI checks
+pass with the full backend suite and static checks.
 
 ### [ ] ARB-021 — Complete and publish the 24-hour live soak
 

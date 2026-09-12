@@ -73,6 +73,17 @@ def test_installed_wheel_console_command_works_outside_checkout(tmp_path: Path) 
     assert command is not None
 
     command_environment = environment | {"PYTHONPATH": str(install_dir)}
+    prune_command = shutil.which("arbsync-prune", path=str(scripts_dir))
+    assert prune_command is not None
+    prune_help = subprocess.run(
+        [prune_command, "--help"],
+        cwd=run_dir,
+        env=command_environment,
+        capture_output=True,
+        text=True,
+    )
+    assert prune_help.returncode == 0
+    assert "--before" in prune_help.stdout
     help_result = subprocess.run(
         [command, "--help"],
         cwd=run_dir,
