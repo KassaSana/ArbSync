@@ -1,0 +1,2 @@
+# Isolated audit tooling; maintained by Dependabot separately from application dependencies.
+pip-audit==2.10.1

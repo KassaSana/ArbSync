@@ -46,6 +46,27 @@ The suite covers:
 CI also runs strict mypy, Ruff, frontend type checking, ESLint, the production
 dashboard build, and coverage checks for the order-book and detector modules.
 
+### Dependency maintenance verification (2026-09-12)
+
+The ARB-017 refresh passed dashboard type checking, ESLint, tests (including direct
+statistics loading and navigation after the React Router upgrade), and production
+build on Windows with Node.js 26.5.1. A fresh `npm ci --ignore-scripts --no-audit`
+also passed, followed by `npm audit --include=dev --audit-level=low` with no known
+vulnerabilities. The initial npm audit reported 14 affected packages; patched direct
+and transitive dependencies resolved the findings without suppressions.
+
+`pip-audit` 2.10.1 found no known vulnerabilities in the all-extras export of the
+unchanged Python lockfile, including a run explicitly using local Python 3.12.
+Actionlint 1.7.12 accepted both workflows, and static checks verified Dependabot
+ecosystems, SHA pins, read-only permissions, and disabled checkout credential storage.
+GitHub secret scanning and push protection were confirmed enabled by the repository API.
+
+The new scheduled/PR audit workflow is committed locally; hosted execution on Linux
+and Windows with Python 3.11 and Node.js 20 remains to be verified after pushing.
+Advisory results are a point-in-time check, not evidence that every dependency is safe.
+See the [security policy](../SECURITY.md#dependency-maintenance-and-audit-triage) for
+coverage limits, reproduction commands, and triage rules.
+
 ## Synthetic performance
 
 The committed detector and ingest-to-detection measurements are documented in

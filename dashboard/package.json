@@ -14,7 +14,7 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.30.3",
+    "react-router-dom": "^7.18.3",
     "recharts": "^2.12.7"
   },
   "devDependencies": {
@@ -32,7 +32,7 @@
     "postcss": "^8.4.39",
     "tailwindcss": "^3.4.7",
     "typescript": "^5.5.4",
-    "vite": "^5.4.0",
-    "vitest": "^3.2.6"
+    "vite": "^6.4.3",
+    "vitest": "^4.1.11"
   }
 }

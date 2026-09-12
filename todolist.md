@@ -430,7 +430,7 @@ was confirmed disabled; SECURITY.md includes a contact-request fallback that kee
 vulnerability details private. Enabling the native reporting form remains an owner
 setting decision.
 
-### [ ] ARB-017 — Add automated dependency and supply-chain maintenance
+### [x] ARB-017 — Add automated dependency and supply-chain maintenance
 
 - Priority: P1
 - Estimate: 5 hours
@@ -446,6 +446,14 @@ Acceptance criteria:
 - Pin third-party actions to immutable SHAs while retaining readable version comments.
 - Grant the CI workflow only the permissions it needs.
 - Add secret scanning guidance and enable repository-native scanning where available.
+
+Resolution: configured weekly Dependabot updates for uv, npm, Actions, and isolated
+audit tooling. Added push/PR/weekly/manual Python and npm audit jobs with read-only
+permissions, immutable action pins, and no retained checkout credentials. Documented
+triage and secret handling; GitHub secret scanning and push protection were confirmed
+enabled. Initial npm findings were remediated with patched React Router, Vite, Vitest,
+and compatible transitive updates, with navigation regression coverage. Local audits
+report no known vulnerabilities; hosted Linux/Windows audit execution awaits a push.
 
 ### [x] ARB-018 — Make the installed application runnable outside the repository root
 

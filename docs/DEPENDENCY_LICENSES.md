@@ -3,7 +3,8 @@
 This is a compatibility review of the dependencies resolved by `uv.lock` and
 `dashboard/package-lock.json` as of September 9, 2026. It is not legal advice and does
 not replace the license terms shipped by each dependency. Re-run the review whenever a
-lockfile changes; ARB-017 tracks automating that maintenance.
+lockfile changes. Dependabot updates and vulnerability audits are configured by ARB-017;
+license review remains a separate manual check.
 
 ArbSync is licensed under Apache-2.0. The resolved Python and dashboard dependencies
 use permissive MIT, BSD, ISC, Apache-2.0, PSF, Blue Oak, or similarly permissive terms,
@@ -22,3 +23,12 @@ Router packages declare MIT.
 Dependencies are not vendored in this repository. Distributors remain responsible for
 preserving applicable third-party license and attribution notices when redistributing
 dependencies or bundled artifacts.
+
+## Dashboard security refresh, September 12, 2026
+
+Rechecked every license declaration in the refreshed dashboard lockfile after upgrading
+React Router to 7.18.3, Vite to 6.4.3, Vitest to 4.1.11, and affected transitive packages.
+All entries declare a license: MIT, MIT-0, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause,
+BlueOak-1.0.0, MIT AND ISC, or the existing CC-BY-4.0 browser data. No new license
+category requires changing the project's license. The Python application lockfile is
+unchanged; the earlier Python review still applies.
