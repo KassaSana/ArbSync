@@ -562,6 +562,11 @@ Acceptance criteria:
 Problem: The README is technically strong, but the repository has no release tag,
 changelog/release notes, support policy, or concise verified-release checklist.
 
+Progress: added an Unreleased changelog with migration and limitation notes, alpha
+versioning rules, and a candidate checklist covering both operating systems, packages,
+licenses, scans, and artifact provenance. Publication remains gated on verified runner
+evidence and owner review; no release tag has been created.
+
 Acceptance criteria:
 
 - Add a changelog or release-note process and document versioning policy.

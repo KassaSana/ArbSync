@@ -167,7 +167,7 @@ the dashboard suitable for trading or accounting decisions.
 | `GET /readyz` | Adapter, book, and background-task readiness |
 | `GET /api/adapters` | Connection age, reconnects, gaps, and last errors |
 | `GET /api/book-status` | Eligibility and freshness for every configured book |
-| `GET /api/pairs` | Every `(exchange, pair)` the book manager has seen |
+| `GET /api/pairs` | Configured and observed `(exchange, pair)` roster, including cold start |
 | `GET /api/opportunities/recent?limit=50` | Recent theoretical opportunities (`limit`: 1–500) |
 | `GET /api/stats?window=1h` | Basic opportunity statistics |
 | `GET /api/system/overview` | Uptime and all-time peaks |
@@ -286,6 +286,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and review expectation
 and follow the [code of conduct](CODE_OF_CONDUCT.md). Use the repository's issue
 templates for bugs, protocol correctness, and feature requests. Report vulnerabilities
 privately using [SECURITY.md](SECURITY.md), which also defines supported versions.
+User-facing changes are in [CHANGELOG.md](CHANGELOG.md); versioning and candidate
+checks are defined in the [release process](docs/RELEASING.md).
 
 ## License
 
