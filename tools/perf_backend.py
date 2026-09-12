@@ -29,7 +29,8 @@ from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
 from arb.types import LiveMessage
 from fastapi.staticfiles import StaticFiles
-from perf_feed import ASSETS, EXCHANGES
+from perf_feed import ASSETS
+from perf_stages import decimal_value, summarize_stages
 from prometheus_client import REGISTRY
 
 
@@ -91,7 +92,7 @@ async def run(args) -> None:
     for adapter in adapters:
         adapter.ws_url = f"ws://127.0.0.1:{args.feed_port}/{adapter.name}"
     adapters[2].snapshot_url = f"http://127.0.0.1:{args.feed_port}/snapshot"
-    expected = [(e, f"{a}-USD") for e in EXCHANGES for a in ASSETS]
+    expected = [(adapter.name, pair) for adapter in adapters for pair in adapter.expected_pairs()]
     supervisor = BackgroundTaskSupervisor()
     rows: list = []
     queue_samples: list = []
@@ -99,6 +100,12 @@ async def run(args) -> None:
     active = False
     initial_counters: dict = {}
     profiler = cProfile.Profile()
+    if args.profile:
+        # Keep conversion instrumentation isolated to this disposable worker.
+        from arb.adapters import binance, coinbase, gemini
+
+        for module in (binance, coinbase, gemini):
+            module.Decimal = decimal_value
 
     async def connection_state(exchange, connected):
         for status in manager.set_exchange_connected(exchange, connected):
@@ -181,6 +188,9 @@ async def run(args) -> None:
         if args.profile:
             profiler.disable()
             profiler.dump_stats(str(output / "backend.pstats"))
+            (output / "stages.json").write_text(
+                json.dumps(summarize_stages(pstats.Stats(profiler)), indent=2)
+            )
             with (output / "backend-profile.txt").open("w") as stream:
                 stats = pstats.Stats(profiler, stream=stream).strip_dirs()
                 stats.sort_stats("tottime").print_stats(50)
@@ -202,6 +212,11 @@ async def run(args) -> None:
         server.should_exit = True
         return {"stopping": True}
 
+    # The production API serves service metadata at GET /. This isolated worker
+    # serves the built dashboard there so browser measurements exercise React.
+    app.router.routes[:] = [
+        route for route in app.router.routes if getattr(route, "path", None) != "/"
+    ]
     app.mount("/", StaticFiles(directory="dashboard/dist-perf", html=True), name="dashboard")
     for adapter in adapters:
         adapter.set_connection_state_callback(connection_state)

@@ -28,7 +28,7 @@ import httpx
 import psutil
 import websockets
 from perf_feed import Feed
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,7 +42,7 @@ def source_fingerprint() -> str:
         ROOT / "dashboard/vite.config.ts",
         *[
             ROOT / "tools" / name
-            for name in ("perf_feed.py", "perf_backend.py", "profile_pipeline.py")
+            for name in ("perf_feed.py", "perf_backend.py", "perf_stages.py", "profile_pipeline.py")
         ],
     ]
     for path in sorted(files):
@@ -260,8 +260,14 @@ async def scenario(args, rate, browser, output):
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=30) as client:
             await wait_ready(client, process)
             await page.goto(f"http://127.0.0.1:{port}")
-            await page.get_by_text("Dashboard stream: connected").wait_for()
-            await page.wait_for_function("document.querySelectorAll('tbody tr').length === 9")
+            await page.locator("header").get_by_text("Live", exact=True).wait_for()
+            roster = (await client.get("/api/pairs")).json()
+            spread_rows = (
+                page.locator("section")
+                .filter(has=page.get_by_role("heading", name="Live spreads", exact=True))
+                .locator("tbody tr")
+            )
+            await expect(spread_rows).to_have_count(len({record["pair"] for record in roster}))
             await feed.run(110, 5, record=False)
             await asyncio.sleep(1.5)
             cdp = await context.new_cdp_session(page)
@@ -311,6 +317,9 @@ async def scenario(args, rate, browser, output):
             output / "opportunities.sqlite3",
         )
         result["browser"]["errors"] = errors
+        result["browser"]["react_profile_available"] = bool(result["browser"]["react_render_ms"])
+        if args.profile:
+            result["self_time_attribution"] = json.loads((output / "stages.json").read_text())
         result["rate_per_second"] = rate
         result["profile_enabled"] = args.profile
         result["valid"] = (
@@ -320,8 +329,6 @@ async def scenario(args, rate, browser, output):
             and result["unmatched_events"] == 0
             and all(a["gap_count"] == 0 and a["reconnect_count"] == 0 for a in result["adapters"])
         )
-        if args.profile and not result["browser"]["react_render_ms"]:
-            raise RuntimeError("Profiling build produced no React samples")
         (output / "summary.json").write_text(json.dumps(result, indent=2))
         return result
     finally:

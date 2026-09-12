@@ -64,6 +64,16 @@ profiles, see
 This exercises the production handler and an actual production-built React
 dashboard; the older synthetic benchmark above does not include those paths.
 
+The current harness preserves Binance.US USDT markets and derives its 27-book roster
+from the adapters (18 distinct base/quote dashboard rows). In `--profile` mode it
+also writes `stages.json` with exclusive function times for JSON, Decimal conversion,
+sorted-level mutation, detection, persistence on the main thread, and delivery.
+These are elapsed self times, not exact stage CPU measurements. Event-loop waits are
+reported separately; SQLite worker CPU is outside cProfile. Negative profiler times
+invalidate attribution. Process CPU and event-loop lag come from unprofiled runs.
+The current dashboard has no mounted React profiling wrappers, so
+`react_profile_available: false` explicitly records that missing measurement.
+
 The current verification summary and remaining live-soak gap are tracked in
 [VALIDATION.md](VALIDATION.md).
 

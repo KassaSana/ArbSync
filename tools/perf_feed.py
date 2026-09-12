@@ -16,6 +16,10 @@ EXCHANGES = ("gemini", "coinbase", "binance")
 VENUE_CYCLE = ("coinbase",) * 88 + ("gemini",) * 6 + ("binance",) * 6
 
 
+def market_pair(exchange: str, asset: str) -> str:
+    return f"{asset}-{'USDT' if exchange == 'binance' else 'USD'}"
+
+
 def levels(exchange: str, asset: str, depth: int) -> tuple[list, list]:
     # Narrow markets with one persistently crossed *cross-venue* pair. This
     # deliberately exercises opportunities and SQLite, unlike the zero-opp soak.
@@ -147,6 +151,6 @@ class Feed:
                 sent_ns = time.perf_counter_ns()
                 await self.clients[exchange].send(message)
                 if record:
-                    self.sent.append([exchange, f"{asset}-USD", sequence, sent_ns])
+                    self.sent.append([exchange, market_pair(exchange, asset), sequence, sent_ns])
                 self.counter += 1
         await asyncio.sleep(max(0, started + ticks * tick_seconds - time.perf_counter()))
