@@ -1,8 +1,9 @@
 import pstats
+import threading
 from decimal import Decimal
 
 import pytest
-from perf_stages import decimal_value, stage_for, summarize_stages
+from perf_stages import ThreadCpuAccumulator, decimal_value, stage_for, summarize_stages
 
 
 def test_profile_preserves_decimal_values_and_partitions_self_time() -> None:
@@ -28,3 +29,22 @@ def test_negative_profiler_times_are_rejected() -> None:
     stats.stats = {("test.py", 1, "bad_timer"): (1, 1, -1.0, 1.0, {})}
     with pytest.raises(ValueError, match="Negative profiler"):
         summarize_stages(stats)
+
+
+def test_thread_cpu_accumulator_only_measures_active_worker_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readings = iter((1_000, 4_000))
+    monkeypatch.setattr("perf_stages.time.thread_time_ns", lambda: next(readings))
+    accumulator = ThreadCpuAccumulator()
+    calls: list[int] = []
+    measured = accumulator.measure(lambda value: calls.append(value) or value * 2)
+
+    assert measured(1) == 2
+    accumulator.start()
+    worker = threading.Thread(target=lambda: measured(2))
+    worker.start()
+    worker.join()
+
+    assert accumulator.stop() == 0.000003
+    assert calls == [1, 2]

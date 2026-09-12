@@ -111,12 +111,13 @@ database per scenario. They are not live-traffic evidence and do not replace the
 soak below.
 
 The [2026-09-12 decision record](../artifacts/benchmarks/performance/ARB-022.md)
-adds four valid short runs against the current USD/USDT roster and dashboard,
-with no missing events or queue losses. It records process CPU, scheduling lag,
-exclusive function-time attribution, and explicit gates for future optimizations.
-Exact SQLite worker CPU attribution and longer/deeper repeated measurements remain
-open; an invalid Windows CPU-timer diagnostic was excluded. The new profile reports
-elapsed self time, not exact per-stage CPU.
+adds four valid short runs and three 60-second repeated profiles against the current
+USD/USDT roster and dashboard, with no missing events or queue losses. It records
+process CPU, scheduling lag, exclusive function-time attribution, SQLite worker-thread
+CPU, and explicit gates for future optimizations. The worker used 0.094-0.203 seconds
+of CPU per 60-second run at 1,100 events/second, so persistence does not cross its
+investigation gate. The main-thread profile reports elapsed self time rather than exact
+per-stage CPU; the worker measurement uses a quantized Windows per-thread CPU clock.
 
 ## Statistics query scaling
 

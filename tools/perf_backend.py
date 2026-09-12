@@ -30,7 +30,12 @@ from arb.persistence import OpportunityStore
 from arb.types import LiveMessage
 from fastapi.staticfiles import StaticFiles
 from perf_feed import ASSETS
-from perf_stages import decimal_value, summarize_stages
+from perf_stages import (
+    ThreadCpuAccumulator,
+    decimal_value,
+    instrument_aiosqlite_worker_cpu,
+    summarize_stages,
+)
 from prometheus_client import REGISTRY
 
 
@@ -79,6 +84,9 @@ async def run(args) -> None:
         raise RuntimeError(
             "Use a fresh output directory; benchmark databases are never overwritten"
         )
+    sqlite_worker_cpu = ThreadCpuAccumulator()
+    if args.profile:
+        instrument_aiosqlite_worker_cpu(sqlite_worker_cpu)
     store = OpportunityStore(str(database))
     await store.initialize()
     manager = OrderBookManager(max_age_seconds=60, clock=time.perf_counter_ns)
@@ -169,6 +177,7 @@ async def run(args) -> None:
         initial_counters = counters()
         active = True
         if args.profile:
+            sqlite_worker_cpu.start()
             profiler.enable()
         return {"started": True}
 
@@ -187,9 +196,16 @@ async def run(args) -> None:
         active = False
         if args.profile:
             profiler.disable()
+            worker_cpu_seconds = sqlite_worker_cpu.stop()
             profiler.dump_stats(str(output / "backend.pstats"))
             (output / "stages.json").write_text(
-                json.dumps(summarize_stages(pstats.Stats(profiler)), indent=2)
+                json.dumps(
+                    summarize_stages(
+                        pstats.Stats(profiler),
+                        sqlite_worker_cpu_seconds=worker_cpu_seconds,
+                    ),
+                    indent=2,
+                )
             )
             with (output / "backend-profile.txt").open("w") as stream:
                 stats = pstats.Stats(profiler, stream=stream).strip_dirs()

@@ -528,7 +528,7 @@ Acceptance criteria:
 - Commit the summarized report and update `VALIDATION.md` with exact environment, commit,
   dates, limitations, and links to evidence.
 
-### [ ] ARB-022 — Benchmark before changing the event loop, JSON parser, or book structure
+### [x] ARB-022 — Benchmark before changing the event loop, JSON parser, or book structure
 
 - Priority: P2
 - Estimate: 4 hours
@@ -538,11 +538,15 @@ Problem: The earlier reviews suggest `orjson`, `sortedcontainers`, threads/proce
 other scaling changes, but no current result isolates these as bottlenecks at the configured
 27 subscriptions. Premature changes would add dependencies and concurrency complexity.
 
-Progress: repaired the current-market/browser harness, ran four valid short scenarios,
-and published exclusive function-time diagnostics and measurable optimization gates in
-[`ARB-022.md`](artifacts/benchmarks/performance/ARB-022.md). No new dependency is justified.
-Full SQLite worker CPU attribution and longer/deeper repeat measurements remain open;
-the elapsed-time profile is explicitly not exact stage CPU attribution.
+Resolution: repaired the current-market/browser harness, published four valid short
+scenarios and three 60-second repeated profiles, and measured exclusive main-thread
+function time plus SQLite worker-thread CPU. The worker used 0.094-0.203 seconds of CPU
+per minute at 1,100 events/second; all repeats processed 66,000 events without loss.
+The measurable optimization gates in
+[`ARB-022.md`](artifacts/benchmarks/performance/ARB-022.md) justify no dependency or
+architecture change. Main-thread attribution remains elapsed self time, and the Windows
+worker CPU clock is quantized; deeper book sweeps are required if a future measurement
+crosses the mutation gate and motivates a replacement structure.
 
 Acceptance criteria:
 
