@@ -1,0 +1,257 @@
+{
+  "label": "arb022",
+  "mode": "profile",
+  "created_utc": "20260912T084115Z",
+  "command": [
+    "tools/profile_pipeline.py",
+    "--label",
+    "arb022",
+    "--rates",
+    "1100",
+    "--seconds",
+    "10",
+    "--repeats",
+    "1",
+    "--profile"
+  ],
+  "source_sha256_before": "9170fc502834141fa8e1976dfe843e81e171f42af0ab2c0382694e5ad574071d",
+  "source_sha256_after": "9170fc502834141fa8e1976dfe843e81e171f42af0ab2c0382694e5ad574071d",
+  "clock": "perf_counter_ns for sender and worker receipt/freshness/detection; benchmark-only substitution",
+  "machine": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+    "cpu": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+    "logical_cpus": 16,
+    "memory_gib": 15.648784637451172,
+    "browser": "152.0.7977.83"
+  },
+  "workload": {
+    "initial_levels_per_side": 500,
+    "books": 27,
+    "seconds": 10,
+    "burst_ms": 100,
+    "pattern": "4 seconds at 0.25x followed by 1 second at 4x",
+    "warmup_seconds": 5,
+    "repeats": 1
+  },
+  "raw_directory": "artifacts\\benchmarks\\performance\\raw\\arb022-profile-20260912T084115Z",
+  "results": [
+    {
+      "sent_events": 11000,
+      "processed_events": 11000,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 13.130686400007107,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 11000,
+          "mean": 0.3651337818181818,
+          "p50": 0.3109,
+          "p95": 0.6683,
+          "p99": 1.1219,
+          "max": 6.1256
+        },
+        "receive_to_handler_complete": {
+          "count": 11000,
+          "mean": 0.6773775818181819,
+          "p50": 0.4664,
+          "p95": 1.5247,
+          "p99": 2.5774,
+          "max": 70.2435
+        },
+        "send_to_receive": {
+          "count": 11000,
+          "mean": 742.0006378181818,
+          "p50": 776.4525,
+          "p95": 1597.6587,
+          "p99": 1683.7234,
+          "max": 1733.0187
+        },
+        "send_to_detection": {
+          "count": 11000,
+          "mean": 742.3657716,
+          "p50": 776.9972,
+          "p95": 1598.0477,
+          "p99": 1684.0819,
+          "max": 1733.4683
+        },
+        "event_loop_lag": {
+          "count": 257,
+          "mean": 3.8310334620705593,
+          "p50": 0,
+          "p95": 15.0976000004448,
+          "p99": 38.050000002840534,
+          "max": 61.216899994178675
+        },
+        "generator_schedule_lag": {
+          "count": 100,
+          "mean": 3.3877599965489935,
+          "p50": 0,
+          "p95": 14.675300000817515,
+          "p99": 18.81660000071861,
+          "max": 21.254899984342046
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 50,
+        "mean": 45.544,
+        "p50": 23.5,
+        "p95": 100.0,
+        "p99": 100.0,
+        "max": 100.0
+      },
+      "backend_rss_mib": {
+        "count": 50,
+        "mean": 76.149375,
+        "p50": 76.47265625,
+        "p95": 78.90625,
+        "p99": 79.625,
+        "max": 79.625
+      },
+      "backend_rss_change_mib": 5.78125,
+      "browser_cpu_percent_one_core": {
+        "count": 50,
+        "mean": 96.686,
+        "p50": 72.3,
+        "p95": 176.89999999999998,
+        "p99": 215.6,
+        "max": 215.6
+      },
+      "browser_rss_sum_mib": {
+        "count": 50,
+        "mean": 661.703046875,
+        "p50": 675.51171875,
+        "p95": 677.51953125,
+        "p99": 678.109375,
+        "max": 678.109375
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1149.0,
+        "arb_events_ingested_total": 11000.0
+      },
+      "sampled_queue_max": {
+        "persistence": 18,
+        "dashboard": 20
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1208,
+      "database_mib": 0.19140625,
+      "browser": {
+        "messages": 2724,
+        "payload_bytes": 735769,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 1575,
+          "mean": 8.404063492063493,
+          "p50": 7,
+          "p95": 14,
+          "p99": 14.099999999998545,
+          "max": 20.900000000001455
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {
+          "App": {
+            "count": 670,
+            "mean": 4.446865672006536,
+            "p50": 4.4000000059604645,
+            "p95": 5.299999997019768,
+            "p99": 6.199999988079071,
+            "max": 9.099999994039536,
+            "total": 2979.400000244379
+          }
+        },
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 7.571149,
+          "ScriptDuration": 3.477475,
+          "LayoutDuration": 0.529924,
+          "RecalcStyleDuration": 1.173203
+        },
+        "js_heap_start_mib": 5.702880859375,
+        "js_heap_end_mib": 5.452003479003906,
+        "errors": [],
+        "react_profile_available": true
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 3240,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1580,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 3189,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "self_time_attribution": {
+        "timer": "cProfile default high-resolution elapsed timer; self time, not exact CPU",
+        "total_self_seconds": 12.744535300000003,
+        "stages": {
+          "json_decode_encode": {
+            "self_seconds": 0.2784999,
+            "percent": 2.1852495477022216
+          },
+          "decimal_conversion": {
+            "self_seconds": 0.07124480000000001,
+            "percent": 0.5590223442670366
+          },
+          "sorted_level_mutation": {
+            "self_seconds": 0.1190409,
+            "percent": 0.934054457050309
+          },
+          "detection": {
+            "self_seconds": 0.0775522,
+            "percent": 0.6085133602321301
+          },
+          "persistence_main_thread": {
+            "self_seconds": 0.018852699999999997,
+            "percent": 0.14792771612472988
+          },
+          "websocket_delivery": {
+            "self_seconds": 0.2542226,
+            "percent": 1.9947577060734412
+          },
+          "event_loop_wait": {
+            "self_seconds": 6.614507400000001,
+            "percent": 51.900734270005124
+          },
+          "other": {
+            "self_seconds": 5.3106148000000015,
+            "percent": 41.66974059854501
+          }
+        },
+        "limits": "Diagnostic overhead and scheduling included; event-loop wait is separate. SQLite worker CPU is excluded; process CPU in unprofiled runs includes all threads. Scheduling lag is measured separately and cannot be causally assigned to a stage from this profile."
+      },
+      "rate_per_second": 1100,
+      "profile_enabled": true,
+      "valid": true
+    }
+  ]
+}

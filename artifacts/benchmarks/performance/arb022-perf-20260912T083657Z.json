@@ -1,0 +1,712 @@
+{
+  "label": "arb022",
+  "mode": "perf",
+  "created_utc": "20260912T083657Z",
+  "command": [
+    "tools/profile_pipeline.py",
+    "--label",
+    "arb022",
+    "--rates",
+    "110",
+    "1100",
+    "--seconds",
+    "10",
+    "--repeats",
+    "2"
+  ],
+  "source_sha256_before": "2aa2d184c88bcc49bb013b2c89b5bfc3fc7d92f6b24e3b7a9db8f25e113b6cfa",
+  "source_sha256_after": "2aa2d184c88bcc49bb013b2c89b5bfc3fc7d92f6b24e3b7a9db8f25e113b6cfa",
+  "clock": "perf_counter_ns for sender and worker receipt/freshness/detection; benchmark-only substitution",
+  "machine": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+    "cpu": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+    "logical_cpus": 16,
+    "memory_gib": 15.648784637451172,
+    "browser": "152.0.7977.83"
+  },
+  "workload": {
+    "initial_levels_per_side": 500,
+    "books": 27,
+    "seconds": 10,
+    "burst_ms": 100,
+    "pattern": "4 seconds at 0.25x followed by 1 second at 4x",
+    "warmup_seconds": 5,
+    "repeats": 2
+  },
+  "raw_directory": "artifacts\\benchmarks\\performance\\raw\\arb022-perf-20260912T083657Z",
+  "results": [
+    {
+      "sent_events": 1100,
+      "processed_events": 1100,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 11.5063375000027,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 1100,
+          "mean": 0.20339936363636363,
+          "p50": 0.166,
+          "p95": 0.3699,
+          "p99": 0.7621,
+          "max": 2.5967
+        },
+        "receive_to_handler_complete": {
+          "count": 1100,
+          "mean": 0.3263260909090909,
+          "p50": 0.2288,
+          "p95": 0.771,
+          "p99": 1.3081,
+          "max": 2.7149
+        },
+        "send_to_receive": {
+          "count": 1100,
+          "mean": 6.880017909090909,
+          "p50": 6.7573,
+          "p95": 14.2297,
+          "p99": 22.3859,
+          "max": 27.1895
+        },
+        "send_to_detection": {
+          "count": 1100,
+          "mean": 7.083417272727273,
+          "p50": 6.9045,
+          "p95": 14.4632,
+          "p99": 22.5144,
+          "max": 27.4073
+        },
+        "event_loop_lag": {
+          "count": 214,
+          "mean": 5.9218658861257,
+          "p50": 5.147499992744997,
+          "p95": 16.927500008023344,
+          "p99": 23.67529999173712,
+          "max": 26.292099995771423
+        },
+        "generator_schedule_lag": {
+          "count": 100,
+          "mean": 5.901058003655635,
+          "p50": 4.1489000141154975,
+          "p95": 16.520800010766834,
+          "p99": 20.251100009772927,
+          "max": 30.148100006044842
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 43,
+        "mean": 3.4046511627906977,
+        "p50": 0.0,
+        "p95": 17.6,
+        "p99": 23.6,
+        "max": 23.6
+      },
+      "backend_rss_mib": {
+        "count": 43,
+        "mean": 74.82776162790698,
+        "p50": 74.77734375,
+        "p95": 75.0234375,
+        "p99": 75.0234375,
+        "max": 75.0234375
+      },
+      "backend_rss_change_mib": 0.24609375,
+      "browser_cpu_percent_one_core": {
+        "count": 43,
+        "mean": 25.92325581395349,
+        "p50": 23.6,
+        "p95": 53.1,
+        "p99": 66.7,
+        "max": 66.7
+      },
+      "browser_rss_sum_mib": {
+        "count": 43,
+        "mean": 626.9719295058139,
+        "p50": 626.41796875,
+        "p95": 636.7421875,
+        "p99": 636.76953125,
+        "max": 636.76953125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 115.0,
+        "arb_events_ingested_total": 1100.0
+      },
+      "sampled_queue_max": {
+        "persistence": 1,
+        "dashboard": 16
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 174,
+      "database_mib": 0.04296875,
+      "browser": {
+        "messages": 341,
+        "payload_bytes": 89686,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 1637,
+          "mean": 7.060109957238852,
+          "p50": 6.900000000001455,
+          "p95": 7.199999999998909,
+          "p99": 13.600000000000364,
+          "max": 14
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 1.566522,
+          "ScriptDuration": 0.68197,
+          "LayoutDuration": 0.078511,
+          "RecalcStyleDuration": 0.161156
+        },
+        "js_heap_start_mib": 5.257774353027344,
+        "js_heap_end_mib": 6.7274017333984375,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1714,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1609,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1711,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 110,
+      "profile_enabled": false,
+      "valid": true
+    },
+    {
+      "sent_events": 1100,
+      "processed_events": 1100,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 11.520477000012761,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 1100,
+          "mean": 0.19976,
+          "p50": 0.1641,
+          "p95": 0.364,
+          "p99": 0.7653,
+          "max": 2.3393
+        },
+        "receive_to_handler_complete": {
+          "count": 1100,
+          "mean": 0.3230087272727273,
+          "p50": 0.2353,
+          "p95": 0.7675,
+          "p99": 1.3423,
+          "max": 2.8049
+        },
+        "send_to_receive": {
+          "count": 1100,
+          "mean": 7.887842818181818,
+          "p50": 6.6488,
+          "p95": 24.1838,
+          "p99": 43.7847,
+          "max": 48.7093
+        },
+        "send_to_detection": {
+          "count": 1100,
+          "mean": 8.087602818181818,
+          "p50": 6.8247,
+          "p95": 24.3052,
+          "p99": 44.0915,
+          "max": 48.891
+        },
+        "event_loop_lag": {
+          "count": 208,
+          "mean": 6.7250466321498745,
+          "p50": 5.259999990812503,
+          "p95": 19.68539999506902,
+          "p99": 24.86299999873154,
+          "max": 30.497599989757873
+        },
+        "generator_schedule_lag": {
+          "count": 100,
+          "mean": 6.449761996627785,
+          "p50": 5.1875999924959615,
+          "p95": 17.765299999155104,
+          "p99": 32.509999989997596,
+          "max": 32.77219999290537
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 43,
+        "mean": 3.8255813953488373,
+        "p50": 0.0,
+        "p95": 17.7,
+        "p99": 39.9,
+        "max": 39.9
+      },
+      "backend_rss_mib": {
+        "count": 43,
+        "mean": 73.61337209302326,
+        "p50": 73.55078125,
+        "p95": 74.1171875,
+        "p99": 74.28515625,
+        "max": 74.28515625
+      },
+      "backend_rss_change_mib": -0.6640625,
+      "browser_cpu_percent_one_core": {
+        "count": 43,
+        "mean": 25.295348837209303,
+        "p50": 17.7,
+        "p95": 70.5,
+        "p99": 112.1,
+        "max": 112.1
+      },
+      "browser_rss_sum_mib": {
+        "count": 43,
+        "mean": 630.5179869186046,
+        "p50": 629.3515625,
+        "p95": 639.88671875,
+        "p99": 640.046875,
+        "max": 640.046875
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 115.0,
+        "arb_events_ingested_total": 1100.0
+      },
+      "sampled_queue_max": {
+        "persistence": 1,
+        "dashboard": 18
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 174,
+      "database_mib": 0.04296875,
+      "browser": {
+        "messages": 341,
+        "payload_bytes": 89686,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 1642,
+          "mean": 7.042813641900121,
+          "p50": 6.900000000001455,
+          "p95": 7.19999999999709,
+          "p99": 13.200000000000728,
+          "max": 14
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 1.5167009999999999,
+          "ScriptDuration": 0.624768,
+          "LayoutDuration": 0.076421,
+          "RecalcStyleDuration": 0.146692
+        },
+        "js_heap_start_mib": 4.786102294921875,
+        "js_heap_end_mib": 5.490943908691406,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1696,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1617,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1691,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 110,
+      "profile_enabled": false,
+      "valid": true
+    },
+    {
+      "sent_events": 11000,
+      "processed_events": 11000,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 11.914446900002076,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 11000,
+          "mean": 0.19065986363636364,
+          "p50": 0.1583,
+          "p95": 0.3583,
+          "p99": 0.6839,
+          "max": 5.4106
+        },
+        "receive_to_handler_complete": {
+          "count": 11000,
+          "mean": 0.35426847272727274,
+          "p50": 0.2286,
+          "p95": 0.8822,
+          "p99": 1.5803,
+          "max": 10.8677
+        },
+        "send_to_receive": {
+          "count": 11000,
+          "mean": 213.2967664,
+          "p50": 233.0538,
+          "p95": 425.4244,
+          "p99": 447.5984,
+          "max": 457.4876
+        },
+        "send_to_detection": {
+          "count": 11000,
+          "mean": 213.48742626363637,
+          "p50": 233.2505,
+          "p95": 425.5694,
+          "p99": 447.7389,
+          "max": 457.6163
+        },
+        "event_loop_lag": {
+          "count": 226,
+          "mean": 4.990633626430362,
+          "p50": 0.6741999968653545,
+          "p95": 16.64749998599291,
+          "p99": 20.28849998896476,
+          "max": 29.439599995384924
+        },
+        "generator_schedule_lag": {
+          "count": 100,
+          "mean": 3.683714000508189,
+          "p50": 1.001399999950081,
+          "p95": 13.11889999487903,
+          "p99": 15.173499996308237,
+          "max": 16.236299998126924
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 45,
+        "mean": 27.62,
+        "p50": 11.8,
+        "p95": 100.0,
+        "p99": 112.5,
+        "max": 112.5
+      },
+      "backend_rss_mib": {
+        "count": 45,
+        "mean": 76.68836805555556,
+        "p50": 76.97265625,
+        "p95": 79.58203125,
+        "p99": 79.58203125,
+        "max": 79.58203125
+      },
+      "backend_rss_change_mib": 4.7265625,
+      "browser_cpu_percent_one_core": {
+        "count": 45,
+        "mean": 71.91555555555556,
+        "p50": 58.7,
+        "p95": 179.3,
+        "p99": 193.8,
+        "max": 193.8
+      },
+      "browser_rss_sum_mib": {
+        "count": 45,
+        "mean": 660.0854166666667,
+        "p50": 670.2890625,
+        "p95": 678.74609375,
+        "p99": 679.83203125,
+        "max": 679.83203125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1149.0,
+        "arb_events_ingested_total": 11000.0
+      },
+      "sampled_queue_max": {
+        "persistence": 25,
+        "dashboard": 25
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1208,
+      "database_mib": 0.19140625,
+      "browser": {
+        "messages": 2318,
+        "payload_bytes": 637762,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 1543,
+          "mean": 7.7688917692806205,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 20.899999999997817
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 4.837059,
+          "ScriptDuration": 2.106282,
+          "LayoutDuration": 0.359922,
+          "RecalcStyleDuration": 0.724939
+        },
+        "js_heap_start_mib": 5.417324066162109,
+        "js_heap_end_mib": 4.589786529541016,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1984,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1543,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1954,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "valid": true
+    },
+    {
+      "sent_events": 11000,
+      "processed_events": 11000,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 11.932101700003841,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 11000,
+          "mean": 0.20051940000000001,
+          "p50": 0.1559,
+          "p95": 0.3969,
+          "p99": 0.8996,
+          "max": 7.2659
+        },
+        "receive_to_handler_complete": {
+          "count": 11000,
+          "mean": 0.3679004818181818,
+          "p50": 0.2295,
+          "p95": 0.9334,
+          "p99": 1.8624,
+          "max": 15.6238
+        },
+        "send_to_receive": {
+          "count": 11000,
+          "mean": 198.32998507272728,
+          "p50": 179.5935,
+          "p95": 511.0006,
+          "p99": 653.5143,
+          "max": 679.1873
+        },
+        "send_to_detection": {
+          "count": 11000,
+          "mean": 198.53050447272724,
+          "p50": 179.7391,
+          "p95": 511.2082,
+          "p99": 653.7297,
+          "max": 679.3463
+        },
+        "event_loop_lag": {
+          "count": 230,
+          "mean": 4.3764660854282305,
+          "p50": 0,
+          "p95": 16.968900003121234,
+          "p99": 19.533400001819246,
+          "max": 27.19849998538848
+        },
+        "generator_schedule_lag": {
+          "count": 100,
+          "mean": 3.938236001995392,
+          "p50": 0.3724000125657767,
+          "p95": 16.066500000306405,
+          "p99": 21.374300005845726,
+          "max": 21.416300005512312
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 45,
+        "mean": 27.153333333333336,
+        "p50": 12.5,
+        "p95": 94.3,
+        "p99": 100.0,
+        "max": 100.0
+      },
+      "backend_rss_mib": {
+        "count": 45,
+        "mean": 76.81484375,
+        "p50": 77.09765625,
+        "p95": 79.578125,
+        "p99": 79.578125,
+        "max": 79.578125
+      },
+      "backend_rss_change_mib": 4.8046875,
+      "browser_cpu_percent_one_core": {
+        "count": 45,
+        "mean": 74.68888888888888,
+        "p50": 59.0,
+        "p95": 176.2,
+        "p99": 200.5,
+        "max": 200.5
+      },
+      "browser_rss_sum_mib": {
+        "count": 45,
+        "mean": 660.3536458333333,
+        "p50": 672.21484375,
+        "p95": 680.9765625,
+        "p99": 682.09765625,
+        "max": 682.09765625
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1149.0,
+        "arb_events_ingested_total": 11000.0
+      },
+      "sampled_queue_max": {
+        "persistence": 23,
+        "dashboard": 19
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1208,
+      "database_mib": 0.19140625,
+      "browser": {
+        "messages": 2337,
+        "payload_bytes": 642358,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 1545,
+          "mean": 7.767702265372168,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 21.100000000000364
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 4.941236000000001,
+          "ScriptDuration": 2.136256,
+          "LayoutDuration": 0.374108,
+          "RecalcStyleDuration": 0.746474
+        },
+        "js_heap_start_mib": 5.268638610839844,
+        "js_heap_end_mib": 8.793697357177734,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1996,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1641,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1968,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "valid": true
+    }
+  ]
+}

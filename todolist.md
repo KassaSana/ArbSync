@@ -538,6 +538,12 @@ Problem: The earlier reviews suggest `orjson`, `sortedcontainers`, threads/proce
 other scaling changes, but no current result isolates these as bottlenecks at the configured
 27 subscriptions. Premature changes would add dependencies and concurrency complexity.
 
+Progress: repaired the current-market/browser harness, ran four valid short scenarios,
+and published exclusive function-time diagnostics and measurable optimization gates in
+[`ARB-022.md`](artifacts/benchmarks/performance/ARB-022.md). No new dependency is justified.
+Full SQLite worker CPU attribution and longer/deeper repeat measurements remain open;
+the elapsed-time profile is explicitly not exact stage CPU attribution.
+
 Acceptance criteria:
 
 - Profile representative live-like depth and churn, not only detector permutations.

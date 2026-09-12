@@ -99,6 +99,14 @@ These runs use modeled local bursts, a single dashboard client, and a fresh
 database per scenario. They are not live-traffic evidence and do not replace the
 soak below.
 
+The [2026-09-12 decision record](../artifacts/benchmarks/performance/ARB-022.md)
+adds four valid short runs against the current USD/USDT roster and dashboard,
+with no missing events or queue losses. It records process CPU, scheduling lag,
+exclusive function-time attribution, and explicit gates for future optimizations.
+Exact SQLite worker CPU attribution and longer/deeper repeated measurements remain
+open; an invalid Windows CPU-timer diagnostic was excluded. The new profile reports
+elapsed self time, not exact per-stage CPU.
+
 ## Statistics query scaling
 
 The statistics endpoints previously aggregated every stored opportunity inside
