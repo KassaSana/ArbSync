@@ -30,6 +30,7 @@ param(
     [double] $SampleSeconds = 60,
     [string] $BaseUrl = "http://127.0.0.1:8000",
     [string] $Output,
+    [string] $Config,
     [int] $ReadyTimeoutSeconds = 120
 )
 
@@ -37,6 +38,8 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
+if (-not $Config) { $Config = Join-Path $repoRoot "config.toml" }
+$Config = (Resolve-Path -LiteralPath $Config).Path
 if (-not (Test-Path $python)) {
     throw "Project virtualenv not found at $python. Run 'uv sync --locked --extra dev' first."
 }
@@ -56,7 +59,7 @@ function Resolve-BackendPid {
     return $current
 }
 
-$stamp = (Get-Date).ToString("yyyy-MM-dd")
+$stamp = (Get-Date).ToString("yyyy-MM-dd_HHmmss")
 if (-not $Output) {
     $Output = Join-Path $repoRoot "artifacts\benchmarks\soak\soak_24h_$stamp.md"
 }
@@ -85,7 +88,7 @@ try {
     }
 
     Write-Host "Starting backend from $python"
-    $backend = Start-Process -FilePath $python -ArgumentList "-m", "arb.main" `
+    $backend = Start-Process -FilePath $python -ArgumentList "-m", "arb.main", "--config", ('"{0}"' -f $Config) `
         -WorkingDirectory $repoRoot -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
     Write-Host "Backend pid: $($backend.Id)"

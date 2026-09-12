@@ -78,6 +78,9 @@ system sleep for the duration, samples, and stops the backend on exit:
 
 It defaults to the full 24-hour run at a 60-second sample interval, which gives
 roughly 1,441 samples. Shorter runs take `-DurationSeconds` and `-SampleSeconds`.
+Use `-Config <path>` to select a configuration (paths containing spaces are supported).
+It defaults to the repository's `config.toml`. Default report and backend log names
+include the start time to distinguish runs on the same day.
 
 The observer can also be driven directly:
 
@@ -100,3 +103,19 @@ failures, HTTP failures, recovery durations, and backend RSS. It rewrites the
 report after every sample, so an interrupted run still leaves a readable report
 marked `in progress`. Shorter durations are useful as smoke tests but must not be
 described as the required 24-hour soak.
+
+Reports also capture labeled persistence, WebSocket, reconciliation, and background
+failure counters, observed backend restarts, and missing RSS samples. Counters first
+appearing after the initial sample start at zero; a restart or observed counter reset
+invalidates operational deltas. Adapter deltas are invalid after a restart as well.
+Restart detection compares backend start timestamps at successful samples, so it cannot
+count multiple restarts between samples. Recovery times have the sampling interval's
+resolution, and transient eligibility changes between samples can be missed.
+
+Run provenance records the observer's platform, Python, checkout commit and dirty state,
+target URL, and sampled PID. For a published report, also record the backend's exact
+commit, configuration, and environment; the observer may target a different checkout
+or machine. Review failures and all configured books before drawing conclusions:
+`complete` means the observer finished its requested duration, not that the run passed.
+The observer creates no WebSocket clients, so delivery-load evidence requires separately
+connected clients and a description of that workload.

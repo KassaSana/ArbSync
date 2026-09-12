@@ -4,8 +4,10 @@ import argparse
 import asyncio
 import ctypes
 import json
+import platform
 import re
 import statistics
+import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
@@ -141,6 +143,13 @@ class SoakReport:
     ended_at: str | None = None
     actual_duration_seconds: float = 0
     completed: bool = False
+    metadata: dict[str, str] = field(default_factory=dict)
+    counter_start: dict[str, int] = field(default_factory=dict)
+    counter_last: dict[str, int] = field(default_factory=dict)
+    counter_resets: int = 0
+    process_restarts: int = 0
+    process_started_at: str | None = None
+    missing_rss_samples: int = 0
 
     def observe(
         self,
@@ -152,6 +161,7 @@ class SoakReport:
         event_counts: dict[str, int],
         elapsed_seconds: float,
         rss: int | None,
+        counters: dict[str, int] | None = None,
     ) -> None:
         self.samples += 1
         if readiness.get("status") == "ready":
@@ -164,6 +174,24 @@ class SoakReport:
         self.opportunity_end = count
         if rss is not None:
             self.rss_bytes.append(rss)
+        else:
+            self.missing_rss_samples += 1
+        process_started = overview.get("started_at_ns")
+        if process_started is not None:
+            if (
+                self.process_started_at is not None
+                and str(process_started) != self.process_started_at
+            ):
+                self.process_restarts += 1
+            self.process_started_at = str(process_started)
+        for name, value in (counters or {}).items():
+            # Labeled counters may first appear on their first failure, so their
+            # baseline is zero if they were absent from the first sample.
+            if name not in self.counter_start:
+                self.counter_start[name] = value if self.samples == 1 else 0
+            if value < self.counter_last.get(name, 0):
+                self.counter_resets += 1
+            self.counter_last[name] = value
 
         for payload in adapters:
             exchange = str(payload["exchange"])
@@ -186,11 +214,15 @@ class SoakReport:
             f"- Actual duration: `{self.actual_duration_seconds:.1f}s`",
             f"- Sample interval: `{self.sample_interval_seconds:.1f}s`",
             f"- Status: `{'complete' if self.completed else 'in progress'}`",
+            "- Status describes observer completion only; reliability requires review of failures and coverage.",
             f"- Successful samples: `{self.samples}`",
             f"- Ready samples: `{self.ready_samples}/{self.samples}` ({ready_pct:.1f}%)",
             f"- HTTP failures: `{len(self.http_failures)}`",
             f"- Opportunities observed: `{opportunity_delta}`",
             f"- Background task failures: `{len(self.background_failures)}`",
+            f"- Observed process restarts: `{self.process_restarts}`",
+            f"- Counter resets (invalidate deltas): `{self.counter_resets}`",
+            f"- Missing RSS samples: `{self.missing_rss_samples}`",
             "",
             "## Adapters",
             "",
@@ -201,15 +233,17 @@ class SoakReport:
             reconnect_delta = observation.last_reconnects - (observation.first_reconnects or 0)
             gap_delta = observation.last_gaps - (observation.first_gaps or 0)
             event_delta = observation.last_events - (observation.first_events or 0)
+            deltas = (
+                "invalid | invalid | invalid"
+                if self.process_restarts
+                else f"{event_delta} | {reconnect_delta} | {gap_delta}"
+            )
             age = (
                 "-"
                 if observation.max_message_age_ms is None
                 else f"{observation.max_message_age_ms} ms"
             )
-            lines.append(
-                f"| {exchange} | {event_delta} | {reconnect_delta} | {gap_delta} | {age} | "
-                f"{observation.last_error or '-'} |"
-            )
+            lines.append(f"| {exchange} | {deltas} | {age} | {observation.last_error or '-'} |")
 
         lines.extend(
             [
@@ -220,19 +254,21 @@ class SoakReport:
                 "| --- | ---: | --- | ---: | ---: | --- |",
             ]
         )
-        for key, observation in sorted(self.books.items()):
+        for key, book_observation in sorted(self.books.items()):
             reasons = (
                 ", ".join(
                     f"{reason}={count}"
-                    for reason, count in sorted(observation.ineligible_reasons.items())
+                    for reason, count in sorted(book_observation.ineligible_reasons.items())
                 )
                 or "-"
             )
-            p95_age = percentile(observation.ages_ms, 0.95)
-            max_age = max(observation.ages_ms) if observation.ages_ms else None
-            recoveries = ", ".join(f"{value:.1f}s" for value in observation.recovery_seconds) or "-"
+            p95_age = percentile(book_observation.ages_ms, 0.95)
+            max_age = max(book_observation.ages_ms) if book_observation.ages_ms else None
+            recoveries = (
+                ", ".join(f"{value:.1f}s" for value in book_observation.recovery_seconds) or "-"
+            )
             lines.append(
-                f"| {key} | {observation.eligible_samples}/{self.samples} | {reasons} | "
+                f"| {key} | {book_observation.eligible_samples}/{self.samples} | {reasons} | "
                 f"{'-' if p95_age is None else f'{p95_age} ms'} | "
                 f"{'-' if max_age is None else f'{max_age} ms'} | {recoveries} |"
             )
@@ -260,6 +296,22 @@ class SoakReport:
         if self.http_failures:
             lines.extend(["", "## Sampling failures", ""])
             lines.extend(f"- {failure}" for failure in self.http_failures)
+        lines.extend(["", "## Operational counters", ""])
+        lines.append(
+            "Deltas retain metric labels; resets or process restarts invalidate simple subtraction. "
+            "The observer does not create WebSocket clients; delivery counters only cover independently connected clients."
+        )
+        for name, value in sorted(self.counter_last.items()):
+            delta = (
+                "invalid"
+                if self.counter_resets or self.process_restarts
+                else str(value - self.counter_start[name])
+            )
+            lines.append(f"- `{name}`: `{delta}`")
+        if not self.counter_last:
+            lines.append("- No operational counter series observed.")
+        lines.extend(["", "## Run provenance", ""])
+        lines.extend(f"- {name}: `{value}`" for name, value in sorted(self.metadata.items()))
         lines.append("")
         return "\n".join(lines)
 
@@ -293,6 +345,27 @@ async def fetch_event_counts(client: httpx.AsyncClient) -> dict[str, int]:
     return parse_event_counts(response.text)
 
 
+def parse_operational_counters(metrics: str) -> dict[str, int]:
+    prefixes = (
+        "arb_persistence_queue_drops_total",
+        "arb_ws_client_queue_overflows_total",
+        "arb_ws_sender_failures_total",
+        "arb_background_task_failures_total",
+        "arb_reconcile_mismatches_total",
+        "arb_reconcile_confirmations_total",
+        "arb_reconcile_recoveries_total",
+        "arb_reconcile_failures_total",
+    )
+    result = {}
+    for line in metrics.splitlines():
+        if line.startswith(prefixes):
+            name, value = line.rsplit(maxsplit=1)
+            if name.split("{", 1)[0] not in prefixes:
+                continue
+            result[name] = int(float(value))
+    return result
+
+
 async def run_soak(
     base_url: str,
     duration_seconds: float,
@@ -301,6 +374,32 @@ async def run_soak(
     output: Path,
 ) -> SoakReport:
     report = SoakReport(utc_now(), duration_seconds, sample_interval_seconds)
+    report.metadata = {
+        "platform": platform.platform(),
+        "python": sys.version.replace("\n", " "),
+        "backend_pid": str(pid),
+        "base_url": base_url,
+    }
+    try:
+        report.metadata["observer_checkout_commit"] = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            timeout=10,
+        ).strip()
+        report.metadata["observer_checkout_dirty"] = str(
+            bool(
+                subprocess.check_output(
+                    ["git", "status", "--porcelain", "--untracked-files=normal"],
+                    cwd=Path(__file__).resolve().parents[1],
+                    text=True,
+                    timeout=10,
+                ).strip()
+            )
+        ).lower()
+    except (OSError, subprocess.SubprocessError):
+        report.metadata.setdefault("observer_checkout_commit", "unavailable")
+        report.metadata["observer_checkout_dirty"] = "unavailable"
     loop = asyncio.get_running_loop()
     started = loop.time()
     async with httpx.AsyncClient(base_url=base_url, timeout=10) as client:
@@ -311,7 +410,9 @@ async def run_soak(
                 books = await fetch_json(client, "/api/book-status")
                 readiness = await fetch_json(client, "/readyz")
                 overview = await fetch_json(client, "/api/system/overview")
-                event_counts = await fetch_event_counts(client)
+                metrics = await client.get("/metrics")
+                metrics.raise_for_status()
+                event_counts = parse_event_counts(metrics.text)
                 assert isinstance(adapters, list)
                 assert isinstance(books, list)
                 assert isinstance(readiness, dict)
@@ -325,6 +426,7 @@ async def run_soak(
                     event_counts=event_counts,
                     elapsed_seconds=elapsed,
                     rss=None if pid is None else process_rss_bytes(pid),
+                    counters=parse_operational_counters(metrics.text),
                 )
             except (httpx.HTTPError, KeyError, TypeError, ValueError, AssertionError) as exc:
                 report.http_failures.append(f"{utc_now()}: {type(exc).__name__}: {exc}")

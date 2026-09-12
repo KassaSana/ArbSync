@@ -511,6 +511,11 @@ Problem: [`VALIDATION.md`](docs/VALIDATION.md#L106) correctly identifies the mis
 long-duration evidence. Short smoke runs cannot establish memory stability or recovery
 behavior over a full day.
 
+Progress: the observer captures labeled operational failure counters, observed process
+restarts, missing RSS samples, and checkout/environment provenance. Restarted runs mark
+counter deltas invalid, and the Windows launcher accepts an explicit configuration.
+The uninterrupted 24-hour run, anomaly review, and published summary remain outstanding.
+
 Acceptance criteria:
 
 - Run the documented observer for at least 24 uninterrupted hours against all configured

@@ -3,7 +3,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from soak import SoakReport, parse_event_counts, process_rss_bytes, write_report
+import httpx
+import pytest
+import soak
+from soak import (
+    SoakReport,
+    parse_event_counts,
+    parse_operational_counters,
+    process_rss_bytes,
+    write_report,
+)
 
 
 def test_soak_report_tracks_recovery_and_counters() -> None:
@@ -102,3 +111,100 @@ def test_write_report_creates_missing_directories(tmp_path: Path) -> None:
     write_report(output, report)
 
     assert "- Status: `complete`" in output.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("last_started", "last_value", "restarts", "resets"),
+    [("2", 1, 1, 1), ("2", 5, 1, 0), ("1", 1, 0, 1)],
+)
+def test_operational_counters_first_failure_and_process_restart(
+    last_started: str, last_value: int, restarts: int, resets: int
+) -> None:
+    report = SoakReport("2026-09-12T00:00:00Z", 86400, 60)
+    metric = 'arb_persistence_queue_drops_total{reason="queue_full"}'
+    for started, counters in [("1", {}), ("1", {metric: 3}), (last_started, {metric: last_value})]:
+        report.observe(
+            adapters=[],
+            books=[],
+            readiness={"status": "ready"},
+            overview={"all_time_count": 0, "started_at_ns": started},
+            event_counts={},
+            elapsed_seconds=0,
+            rss=None,
+            counters=counters,
+        )
+    assert report.counter_start[metric] == 0
+    assert report.process_restarts == restarts
+    assert report.counter_resets == resets
+    assert report.missing_rss_samples == 3
+    assert f"- `{metric}`: `invalid`" in report.markdown()
+    assert parse_operational_counters(f"{metric} 3.0\n# ignored\narb_events_ingested_total 2") == {
+        metric: 3
+    }
+
+
+def test_operational_counter_baselines_and_exact_metric_names() -> None:
+    report = SoakReport("2026-09-12T00:00:00Z", 60, 5)
+    metric = "arb_ws_sender_failures_total"
+    late_metric = 'arb_reconcile_failures_total{exchange="gemini",pair="BTC-USD"}'
+    for counters in [{metric: 4}, {metric: 6, late_metric: 3}]:
+        report.observe(
+            adapters=[],
+            books=[],
+            readiness={"status": "ready"},
+            overview={"all_time_count": 0, "started_at_ns": "1"},
+            event_counts={},
+            elapsed_seconds=0,
+            rss=100,
+            counters=counters,
+        )
+    markdown = report.markdown()
+    assert f"- `{metric}`: `2`" in markdown
+    assert f"- `{late_metric}`: `3`" in markdown
+    assert parse_operational_counters(
+        f"{metric}\t6.0\n{metric}_created 123\n{late_metric} 3e0\n"
+    ) == {metric: 6, late_metric: 3}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metrics_fail", [False, True])
+async def test_soak_samples_metrics_and_checkpoints_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metrics_fail: bool
+) -> None:
+    paths: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        if request.url.path == "/metrics":
+            return httpx.Response(
+                503 if metrics_fail else 200,
+                text="arb_ws_sender_failures_total 2\n",
+            )
+        payloads: dict[str, object] = {
+            "/api/adapters": [],
+            "/api/book-status": [],
+            "/readyz": {
+                "status": "not_ready",
+                "background_task_failures": [{"task": "persistence", "error": "failed"}],
+            },
+            "/api/system/overview": {"all_time_count": 0, "started_at_ns": "1"},
+        }
+        return httpx.Response(
+            503 if request.url.path == "/readyz" else 200,
+            json=payloads[request.url.path],
+        )
+
+    client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
+    output = tmp_path / "report.md"
+    report = await soak.run_soak("http://test", 0, 1, None, output)
+    assert paths.count("/metrics") == 1
+    assert report.completed
+    assert output.read_text(encoding="utf-8") == report.markdown()
+    assert report.samples == (0 if metrics_fail else 1)
+    assert len(report.http_failures) == int(metrics_fail)
+    if not metrics_fail:
+        assert report.counter_last == {"arb_ws_sender_failures_total": 2}
+        assert report.background_failures == {"persistence": "failed"}
+    assert "observer_checkout_commit" in report.metadata
+    assert "observer_checkout_dirty" in report.metadata
