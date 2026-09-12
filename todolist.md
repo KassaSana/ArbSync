@@ -327,13 +327,13 @@ Acceptance criteria:
   queue; report any unflushed row count.
 - Add fault-injection tests for initialize, flush, commit, full queue, and shutdown paths.
 
-### [ ] ARB-012 — Surface unexpected WebSocket sender failures
+### [x] ARB-012 — Surface unexpected WebSocket sender failures
 
 - Priority: P1
 - Estimate: 3 hours
 - Dependencies: none
 
-Problem: [`_send_messages`](server/arb/api.py#L211) catches every `Exception` and silently
+Problem: [`_send_messages`](server/arb/broadcast.py) caught every `Exception` and silently
 passes. Expected disconnect errors are routine, but serialization and programming errors
 are currently indistinguishable from client departure.
 

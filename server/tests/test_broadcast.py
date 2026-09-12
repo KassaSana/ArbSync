@@ -1,17 +1,23 @@
 import asyncio
+import json
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
+from arb import broadcast as broadcast_module
 from arb.broadcast import LiveBroadcaster
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
 from arb.types import EventKind, LiveMessage, MarketEvent, PriceLevel
+from fastapi import WebSocketDisconnect
+from websockets.exceptions import ConnectionClosed
 
 
 class FakeWebSocket:
-    def __init__(self, *, fail_on_send: bool = False) -> None:
-        self.fail_on_send = fail_on_send
+    def __init__(self, *, send_error: Exception | None = None) -> None:
+        self.send_error = send_error
         self.accepted = False
         self.closed = False
         self.sent: list[dict[str, object]] = []
@@ -20,8 +26,8 @@ class FakeWebSocket:
         self.accepted = True
 
     async def send_json(self, payload: dict[str, object]) -> None:
-        if self.fail_on_send:
-            raise RuntimeError("client dead")
+        if self.send_error is not None:
+            raise self.send_error
         self.sent.append(payload)
 
     async def close(self, code: int = 1000, reason: str | None = None) -> None:
@@ -62,20 +68,107 @@ async def test_broadcaster_sends_to_all_clients() -> None:
 
 
 @pytest.mark.asyncio
-async def test_broadcaster_drops_dead_clients() -> None:
+async def test_expected_disconnect_quietly_removes_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    failure_metric = Mock()
+    test_logger = Mock()
+    monkeypatch.setattr(broadcast_module, "ws_sender_failures_total", failure_metric)
+    monkeypatch.setattr(broadcast_module, "logger", test_logger)
     broadcaster = LiveBroadcaster()
-    healthy, dead = FakeWebSocket(), FakeWebSocket(fail_on_send=True)
+    healthy, dead = FakeWebSocket(), FakeWebSocket(send_error=WebSocketDisconnect())
     await broadcaster.connect(healthy)  # type: ignore[arg-type]
     await broadcaster.connect(dead)  # type: ignore[arg-type]
+    dead_sender = broadcaster._clients[dead].sender_task
+    assert dead_sender is not None
     await broadcaster.broadcast(LiveMessage(type="top_of_book", payload={"x": 1}))
-    await asyncio.sleep(0)
+    await dead_sender
     # Dead client must be removed from the pool.
     assert dead not in broadcaster._clients
     assert healthy in broadcaster._clients
+    failure_metric.inc.assert_not_called()
+    test_logger.error.assert_not_called()
     # A second broadcast does not raise even though dead is gone.
     await broadcaster.broadcast(LiveMessage(type="top_of_book", payload={"x": 2}))
     await asyncio.sleep(0)
     assert len(healthy.sent) == 2
+    await broadcaster.disconnect(healthy)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_closed_websockets_connection_is_an_expected_departure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure_metric = Mock()
+    test_logger = Mock()
+    monkeypatch.setattr(broadcast_module, "ws_sender_failures_total", failure_metric)
+    monkeypatch.setattr(broadcast_module, "logger", test_logger)
+    broadcaster = LiveBroadcaster()
+    socket = FakeWebSocket(send_error=ConnectionClosed(None, None))
+    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    sender = broadcaster._clients[socket].sender_task
+    assert sender is not None
+
+    await broadcaster.broadcast(LiveMessage(type="top_of_book", payload={"x": 1}))
+    await sender
+
+    assert socket not in broadcaster._clients
+    failure_metric.inc.assert_not_called()
+    test_logger.error.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_serialization_failure_is_counted_and_logged_without_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SerializingSocket(FakeWebSocket):
+        async def send_json(self, payload: dict[str, object]) -> None:
+            json.dumps(payload)
+
+    failure_metric = Mock()
+    test_logger = Mock()
+    monkeypatch.setattr(broadcast_module, "ws_sender_failures_total", failure_metric)
+    monkeypatch.setattr(broadcast_module, "logger", test_logger)
+    broadcaster = LiveBroadcaster()
+    socket = SerializingSocket()
+    socket.client = SimpleNamespace(host="127.0.0.1", port=54321)
+    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    sender = broadcaster._clients[socket].sender_task
+    assert sender is not None
+
+    await broadcaster.broadcast(LiveMessage(type="opportunity", payload={"not_json": Decimal("1")}))
+    await sender
+
+    assert socket not in broadcaster._clients
+    failure_metric.inc.assert_called_once_with()
+    test_logger.error.assert_called_once_with(
+        "websocket_sender_failed",
+        exception_type="TypeError",
+        client_host="127.0.0.1",
+        client_port=54321,
+        message_type="opportunity",
+        stream_sequence=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sender_cancellation_cleans_up_without_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure_metric = Mock()
+    test_logger = Mock()
+    monkeypatch.setattr(broadcast_module, "ws_sender_failures_total", failure_metric)
+    monkeypatch.setattr(broadcast_module, "logger", test_logger)
+    broadcaster = LiveBroadcaster()
+    socket = FakeWebSocket()
+    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    sender = broadcaster._clients[socket].sender_task
+    assert sender is not None
+
+    await broadcaster.disconnect(socket)  # type: ignore[arg-type]
+
+    assert socket not in broadcaster._clients
+    assert sender.cancelled()
+    failure_metric.inc.assert_not_called()
+    test_logger.error.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -104,7 +197,11 @@ async def test_initial_state_is_ordered_before_live_updates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slow_client_queue_overflow_does_not_block_broadcast() -> None:
+async def test_slow_client_queue_overflow_does_not_block_broadcast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure_metric = Mock()
+    monkeypatch.setattr(broadcast_module, "ws_sender_failures_total", failure_metric)
     release_send = asyncio.Event()
 
     class SlowWebSocket(FakeWebSocket):
@@ -127,6 +224,7 @@ async def test_slow_client_queue_overflow_does_not_block_broadcast() -> None:
 
     assert slow not in broadcaster._clients
     assert slow.closed is True
+    failure_metric.inc.assert_not_called()
     release_send.set()
 
 

@@ -26,6 +26,8 @@ The suite covers:
 - synthetic fixture replay for Gemini, Coinbase, and Binance.US
 - bounded persistence and WebSocket queues, including initialization, flush, commit,
   full-queue, worker-failure, and shutdown fault paths
+- WebSocket sender cleanup for expected disconnects, unexpected serialization failures,
+  queue overflow, and cancellation, including metric and payload-safe logging behavior
 - coalesced dashboard delivery, immediate invalidation ordering, and suppression
   of unchanged book updates, including a sequence-gap storm
 - cached top-of-book invalidation across size changes, level deletion, sequence

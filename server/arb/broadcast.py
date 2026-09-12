@@ -4,10 +4,14 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from fastapi import WebSocket
+import structlog
+from fastapi import WebSocket, WebSocketDisconnect
+from websockets.exceptions import ConnectionClosed
 
-from arb.metrics import ws_client_queue_overflows_total, ws_clients
+from arb.metrics import ws_client_queue_overflows_total, ws_clients, ws_sender_failures_total
 from arb.types import LiveMessage
+
+logger = structlog.get_logger(__name__)
 
 # Fields that decide what a book update actually shows. A status also carries
 # `age_ms`, which changes on every event even when nothing about the book has;
@@ -170,11 +174,29 @@ class LiveBroadcaster:
             asyncio.create_task(self._close_slow_client(client))
 
     async def _send_messages(self, websocket: WebSocket, connection: _ClientConnection) -> None:
+        message_type = "unknown"
+        stream_sequence: int | None = None
         try:
             while True:
-                await websocket.send_json(await connection.queue.get())
-        except Exception:
+                payload = await connection.queue.get()
+                payload_type = payload.get("type")
+                message_type = payload_type if isinstance(payload_type, str) else "unknown"
+                payload_sequence = payload.get("stream_sequence")
+                stream_sequence = payload_sequence if isinstance(payload_sequence, int) else None
+                await websocket.send_json(payload)
+        except (WebSocketDisconnect, ConnectionClosed):
             pass
+        except Exception as exc:
+            ws_sender_failures_total.inc()
+            client = getattr(websocket, "client", None)
+            logger.error(
+                "websocket_sender_failed",
+                exception_type=type(exc).__name__,
+                client_host=getattr(client, "host", None),
+                client_port=getattr(client, "port", None),
+                message_type=message_type,
+                stream_sequence=stream_sequence,
+            )
         finally:
             async with self._lock:
                 if self._clients.get(websocket) is connection:

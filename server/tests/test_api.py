@@ -172,6 +172,7 @@ def test_metrics_endpoint_exposes_prometheus_payload() -> None:
     response = client.get("/metrics")
     assert response.status_code == 200
     assert "arb_ws_clients" in response.text
+    assert "arb_ws_sender_failures_total" in response.text
 
 
 def test_adapter_status_returns_runtime_fields() -> None:

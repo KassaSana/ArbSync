@@ -26,6 +26,10 @@ ws_client_queue_overflows_total = Counter(
     "arb_ws_client_queue_overflows_total",
     "Dashboard clients disconnected because their outgoing queue filled",
 )
+ws_sender_failures_total = Counter(
+    "arb_ws_sender_failures_total",
+    "Unexpected failures while sending messages to dashboard clients",
+)
 reconcile_mismatches_total = Counter(
     "arb_reconcile_mismatches_total", "Snapshot reconciliation mismatches", ["exchange", "pair"]
 )

@@ -214,7 +214,10 @@ unchanged display state is suppressed. Opportunity messages are delivered immedi
 Each client has its own bounded outgoing queue and sender task. If a client cannot keep
 up, it is removed and its socket is closed with a retry-later status. A slow browser can
 therefore lose its connection, but it cannot stall market-data processing or other
-clients.
+clients. Expected disconnect and closed-socket exceptions end the sender quietly.
+Unexpected sender failures are counted and logged with the exception class, client
+address, message type, and stream sequence; message payloads are deliberately excluded.
+Every exit path removes the connection from the broadcaster.
 
 ## Dashboard state
 
@@ -252,6 +255,7 @@ The system makes degraded state visible instead of treating it as valid market d
 | Full persistence queue | The row is dropped and counted without blocking ingestion |
 | Persistence initialization or worker failure | The store enters a terminal failed state, rejects and counts later rows by reason, and reports unflushed work |
 | Full client queue | The slow WebSocket client is disconnected and counted |
+| Unexpected WebSocket sender failure | The client is removed; the failure is counted and logged without the message payload |
 | Supervised background task exits | The failure is recorded, logged, counted, and exposed through readiness |
 | Browser socket disconnects | Last-known values are visibly marked stale while reconnecting |
 
