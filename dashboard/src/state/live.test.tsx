@@ -26,6 +26,10 @@ class MockSocket {
   emit(payload: unknown): void {
     this.onmessage?.({ data: JSON.stringify(payload) });
   }
+
+  emitRaw(data: string): void {
+    this.onmessage?.({ data });
+  }
 }
 
 function book(exchange: string, price: string, sequence: number) {
@@ -67,6 +71,7 @@ function Probe() {
         {Object.keys(live.bookStatuses).sort().join(",") || "(none)"}
       </span>
       <span data-testid="connection">{live.status}</span>
+      <span data-testid="invalid-frames">{live.invalidFrameCount}</span>
       <span data-testid="pairs">
         {live.pairs.state === "ready"
           ? live.pairs.data.map((p) => `${p.exchange}:${p.pair}`).join(",") || "(empty)"
@@ -166,6 +171,44 @@ describe("live state", () => {
     });
     await expectBooks("gemini:BTC-USD");
 
+    socket.emit({ type: "top_of_book", stream_sequence: 2, payload: book("coinbase", "101", 1) });
+    await expectBooks("coinbase:BTC-USD,gemini:BTC-USD");
+  });
+
+  it("quarantines malformed frames without advancing the stream", async () => {
+    render(
+      <LiveProvider>
+        <Probe />
+      </LiveProvider>,
+    );
+    const socket = await socketCount(1);
+    socket.onopen?.();
+    socket.emit({
+      type: "state_snapshot",
+      stream_sequence: 1,
+      payload: { books: [book("gemini", "100", 1)], statuses: [status("gemini", true)] },
+    });
+    await expectBooks("gemini:BTC-USD");
+
+    socket.emitRaw("{");
+    socket.emit({ type: "top_of_book", stream_sequence: 2 });
+    socket.emit({
+      type: "top_of_book",
+      stream_sequence: 3,
+      payload: { ...book("coinbase", "101", 1), best_bid_price: "NaN" },
+    });
+    socket.emit({
+      type: "top_of_book",
+      stream_sequence: 4,
+      payload: { ...book("coinbase", "101", 1), timestamp_ns: "1.5" },
+    });
+    socket.emit({ type: "mystery", stream_sequence: 5, payload: {} });
+
+    await waitFor(() => expect(screen.getByTestId("invalid-frames")).toHaveTextContent("5"));
+    expect(screen.getByTestId("books").textContent).toBe("gemini:BTC-USD");
+
+    // Invalid sequence values were quarantined, so the next valid sequence is
+    // still 2 and must be accepted.
     socket.emit({ type: "top_of_book", stream_sequence: 2, payload: book("coinbase", "101", 1) });
     await expectBooks("coinbase:BTC-USD,gemini:BTC-USD");
   });

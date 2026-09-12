@@ -1,95 +1,37 @@
-export type Opportunity = {
-  timestamp_ns: string;
-  pair: string;
-  quote_asset: string;
-  buy_exchange: string;
-  sell_exchange: string;
-  buy_price: string;
-  sell_price: string;
-  spread_pct: string;
-  max_size: string;
-  theoretical_profit: string;
-};
+import {
+  decodeAdapterStatuses,
+  decodeBookStatuses,
+  decodeOpportunities,
+  decodePairs,
+  decodeStats,
+  decodeSystemOverview,
+  decodeTimeseries,
+  decodeWindowStats,
+  type AdapterStatus,
+  type BookStatus,
+  type Opportunity,
+  type PairRecord,
+  type Stats,
+  type SystemOverview,
+  type Timeseries,
+  type WindowKey,
+  type WindowStats,
+} from "./schema";
 
-export type PairRecord = {
-  exchange: string;
-  pair: string;
-};
-
-export type Stats = {
-  count: number;
-  max_spread_pct: string;
-  theoretical_profit_by_quote: Record<string, string>;
-};
-
-export type AdapterStatus = {
-  exchange: string;
-  connected: boolean;
-  last_message_age_ms: number | null;
-  gap_count: number;
-  reconnect_count: number;
-  last_error: string | null;
-};
-
-export type BookStatus = {
-  exchange: string;
-  pair: string;
-  initialized: boolean;
-  continuous: boolean;
-  connected: boolean;
-  age_ms: number | null;
-  max_age_ms: number;
-  eligible: boolean;
-  reason: string | null;
-};
-
-export type TopOfBook = {
-  exchange: string;
-  pair: string;
-  best_bid_price: string;
-  best_bid_size: string;
-  best_ask_price: string;
-  best_ask_size: string;
-  sequence: number;
-  timestamp_ns: string;
-};
-
-export type WindowKey = "1h" | "4h" | "1d" | "1w";
-
-export type PeakMinute = {
-  minute_start_ns: string;
-  count: number;
-};
-
-export type SystemOverview = {
-  started_at_ns: string;
-  uptime_seconds: number;
-  all_time_count: number;
-  all_time_max_spread_pct: string;
-  all_time_peak_minute: PeakMinute | null;
-};
-
-export type WindowStats = {
-  window: string;
-  count: number;
-  max_spread_pct: string;
-  mean_spread_pct: string;
-  theoretical_profit_by_quote: Record<string, string>;
-  top_pair: string | null;
-  peak_minute: PeakMinute | null;
-};
-
-export type TimeseriesPoint = {
-  bucket_start_ns: string;
-  count: number;
-  max_spread_pct: string;
-};
-
-export type Timeseries = {
-  window: string;
-  bucket_seconds: number;
-  points: TimeseriesPoint[];
-};
+export type {
+  AdapterStatus,
+  BookStatus,
+  Opportunity,
+  PairRecord,
+  PeakMinute,
+  Stats,
+  SystemOverview,
+  Timeseries,
+  TimeseriesPoint,
+  TopOfBook,
+  WindowKey,
+  WindowStats,
+} from "./schema";
 
 const HOSTED_API_URL = "https://arb-detector-api.onrender.com";
 const API_BASE = (
@@ -104,55 +46,71 @@ export class ApiError extends Error {
     public readonly status: number,
     public readonly path: string,
     message: string,
+    public readonly cause?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function requestJson<T>(
+  path: string,
+  decode: (value: unknown, location?: string) => T,
+  init?: RequestInit,
+): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
     const suffix = detail ? `: ${detail}` : "";
     throw new ApiError(response.status, path, `Request failed (${response.status})${suffix}`);
   }
-  return (await response.json()) as T;
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (cause) {
+    throw new ApiError(response.status, path, `Invalid JSON response from ${path}`, cause);
+  }
+  try {
+    return decode(payload, "response");
+  } catch (cause) {
+    throw new ApiError(response.status, path, `Invalid response payload from ${path}`, cause);
+  }
 }
 
 export async function fetchRecentOpportunities(): Promise<Opportunity[]> {
-  return requestJson<Opportunity[]>("/api/opportunities/recent?limit=50");
+  return requestJson("/api/opportunities/recent?limit=50", decodeOpportunities);
 }
 
 export async function fetchStats(): Promise<Stats> {
-  return requestJson<Stats>("/api/stats?window=1h");
+  return requestJson("/api/stats?window=1h", decodeStats);
 }
 
 export async function fetchPairs(): Promise<PairRecord[]> {
-  return requestJson<PairRecord[]>("/api/pairs");
+  return requestJson("/api/pairs", decodePairs);
 }
 
 export async function fetchAdapterStatus(): Promise<AdapterStatus[]> {
-  return requestJson<AdapterStatus[]>("/api/adapters");
+  return requestJson("/api/adapters", decodeAdapterStatuses);
 }
 
 export async function fetchBookStatus(): Promise<BookStatus[]> {
-  return requestJson<BookStatus[]>("/api/book-status");
+  return requestJson("/api/book-status", decodeBookStatuses);
 }
 
 export async function fetchSystemOverview(): Promise<SystemOverview> {
-  return requestJson<SystemOverview>("/api/system/overview");
+  return requestJson("/api/system/overview", decodeSystemOverview);
 }
 
 export async function fetchSystemStats(window: WindowKey): Promise<WindowStats> {
-  return requestJson<WindowStats>(`/api/system/stats?window=${window}`);
+  return requestJson(`/api/system/stats?window=${window}`, decodeWindowStats);
 }
 
 export async function fetchSystemTimeseries(
   window: WindowKey,
   bucketSeconds = 60,
 ): Promise<Timeseries> {
-  return requestJson<Timeseries>(
+  return requestJson(
     `/api/system/timeseries?window=${window}&bucket_seconds=${bucketSeconds}`,
+    decodeTimeseries,
   );
 }

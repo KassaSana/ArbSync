@@ -9,10 +9,7 @@ type State = {
   error: Error | null;
 };
 
-/**
- * A malformed frame on the live socket used to take the whole page down.
- * Now it takes down one panel and says so.
- */
+/** Contains render failures to one panel; network payloads are validated separately. */
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
 

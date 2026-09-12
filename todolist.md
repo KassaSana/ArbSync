@@ -363,13 +363,13 @@ Acceptance criteria:
 - Add tests for incomplete snapshot, crossed snapshot, a later uncrossing delta, and a
   subsequent valid snapshot.
 
-### [ ] ARB-014 — Add runtime validation for API and WebSocket payloads in the dashboard
+### [x] ARB-014 — Add runtime validation for API and WebSocket payloads in the dashboard
 
 - Priority: P1
 - Estimate: 10 hours
 - Dependencies: ARB-003, ARB-004
 
-Problem: [`requestJson`](dashboard/src/api/client.ts#L112) and the WebSocket handler cast
+Problem: [`requestJson`](dashboard/src/api/client.ts) and the WebSocket handler previously cast
 unvalidated JSON directly to TypeScript types. TypeScript provides no runtime guarantee;
 structurally bad data can poison state. React error boundaries also do not catch errors in
 event handlers, so the current comment about malformed frames is stronger than the actual

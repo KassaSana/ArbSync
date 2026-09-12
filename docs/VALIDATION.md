@@ -36,6 +36,8 @@ The suite covers:
   across separate write batches, exact cutoff membership for a window starting
   mid-minute, documented binary64 tolerance, and sub-minute buckets bypassing the rollup
 - WebSocket reconnection and state restoration
+- dashboard boundary validation for every REST shape and live message type, including
+  malformed JSON, missing fields, invalid decimal and nanosecond strings, and unknown types
 - REST, readiness, metrics, persistence, and statistics behavior
 - runtime configuration type, range, exchange, symbol, and normalized-duplicate validation
 - installed-wheel metadata, package contents, console startup outside the checkout,

@@ -230,7 +230,10 @@ the backend was answering recovers without a reload.
 Incoming WebSocket frames are collected and committed to React state once per animation
 frame. This limits rendering pressure during market bursts. The browser rejects replayed
 or out-of-order stream envelopes within a connection and refreshes persisted
-opportunities and statistics after reconnecting.
+opportunities and statistics after reconnecting. Every REST response and live envelope is
+decoded from `unknown` at the network boundary. Invalid REST payloads become typed errors
+that identify the endpoint; malformed live frames are ignored without advancing the stream
+sequence, counted for the browser session, and reported in the top bar.
 
 The dashboard holds only quotes it is allowed to display. A `state_snapshot` replaces the
 books and statuses it holds rather than merging into them, and a `book_status` reporting a
@@ -256,6 +259,7 @@ The system makes degraded state visible instead of treating it as valid market d
 | Persistence initialization or worker failure | The store enters a terminal failed state, rejects and counts later rows by reason, and reports unflushed work |
 | Full client queue | The slow WebSocket client is disconnected and counted |
 | Unexpected WebSocket sender failure | The client is removed; the failure is counted and logged without the message payload |
+| Malformed dashboard API response | REST requests fail with endpoint context; live frames are quarantined and counted without changing state |
 | Supervised background task exits | The failure is recorded, logged, counted, and exposed through readiness |
 | Browser socket disconnects | Last-known values are visibly marked stale while reconnecting |
 

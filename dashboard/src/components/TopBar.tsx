@@ -6,6 +6,7 @@ import { Nav } from "./Nav";
 type Props = {
   status: ConnectionStatus;
   lastTickAgeMs: number | null;
+  invalidFrameCount: number;
 };
 
 const STATUS_HEALTH: Record<ConnectionStatus, Health> = {
@@ -25,7 +26,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
  * because "is this thing still receiving data" is the question a monitor
  * has to answer before any other.
  */
-export function TopBar({ status, lastTickAgeMs }: Props) {
+export function TopBar({ status, lastTickAgeMs, invalidFrameCount }: Props) {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-ground/90 backdrop-blur">
       <div className="mx-auto flex h-12 max-w-[1600px] items-center gap-4 px-4">
@@ -46,6 +47,11 @@ export function TopBar({ status, lastTickAgeMs }: Props) {
             {/* Freshness only earns space once it is worth worrying about. */}
             {status === "connected" && lastTickAgeMs !== null && lastTickAgeMs >= 2_000 ? (
               <span className="num text-micro text-warn">{age(lastTickAgeMs)}</span>
+            ) : null}
+            {invalidFrameCount > 0 ? (
+              <span className="num text-micro text-warn" title="Malformed live frames ignored">
+                {invalidFrameCount} invalid
+              </span>
             ) : null}
           </div>
         </div>

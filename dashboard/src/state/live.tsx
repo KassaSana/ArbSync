@@ -21,19 +21,9 @@ import {
   Stats,
   TopOfBook,
 } from "../api/client";
+import { decodeLiveEnvelope, type LiveEnvelope } from "../api/schema";
 import { ConnectionStatus, useWebSocket } from "../hooks/useWebSocket";
 import { Async, failed, loading, ready } from "../lib/async";
-
-type LivePayload =
-  | { type: "top_of_book"; payload: TopOfBook }
-  | { type: "opportunity"; payload: Opportunity }
-  | { type: "book_status"; payload: BookStatus }
-  | {
-      type: "state_snapshot";
-      payload: { books: TopOfBook[]; statuses: BookStatus[] };
-    };
-
-type LiveEnvelope = LivePayload & { stream_sequence: number };
 
 /**
  * A canonical book status plus the moment we received it.
@@ -59,6 +49,7 @@ type LiveValue = {
   feedLive: boolean;
   nowMs: number;
   lastTickAgeMs: number | null;
+  invalidFrameCount: number;
   books: Record<string, TopOfBook>;
   bookStatuses: Record<string, TrackedBookStatus>;
   opportunities: Async<Opportunity[]>;
@@ -120,6 +111,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [pairs, setPairs] = useState<Async<PairRecord[]>>(loading);
   const [adapters, setAdapters] = useState<Async<AdapterStatus[]>>(loading);
   const [lastTickAt, setLastTickAt] = useState<number | null>(null);
+  const [invalidFrameCount, setInvalidFrameCount] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Ages are only meaningful if something re-renders to recompute them.
@@ -257,8 +249,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     (event: MessageEvent<string>, connectionId: number) => {
       let message: LiveEnvelope;
       try {
-        message = JSON.parse(event.data) as LiveEnvelope;
+        message = decodeLiveEnvelope(JSON.parse(event.data));
       } catch {
+        setInvalidFrameCount((count) => count + 1);
         return;
       }
 
@@ -343,6 +336,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       feedLive: websocket.status === "connected",
       nowMs,
       lastTickAgeMs: lastTickAt === null ? null : Math.max(0, nowMs - lastTickAt),
+      invalidFrameCount,
       books,
       bookStatuses,
       opportunities,
@@ -358,6 +352,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       websocket.status,
       nowMs,
       lastTickAt,
+      invalidFrameCount,
       books,
       bookStatuses,
       opportunities,
@@ -367,6 +362,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       refreshStats,
       refreshOpportunities,
       refreshAdapters,
+      refreshPairs,
     ],
   );
 

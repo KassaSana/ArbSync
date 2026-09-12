@@ -7,8 +7,14 @@ import { LiveProvider, useLive } from "./state/live";
 const Statistics = lazy(() => import("./pages/Statistics"));
 
 function Chrome() {
-  const { status, lastTickAgeMs } = useLive();
-  return <TopBar status={status} lastTickAgeMs={lastTickAgeMs} />;
+  const { status, lastTickAgeMs, invalidFrameCount } = useLive();
+  return (
+    <TopBar
+      status={status}
+      lastTickAgeMs={lastTickAgeMs}
+      invalidFrameCount={invalidFrameCount}
+    />
+  );
 }
 
 export default function App() {
