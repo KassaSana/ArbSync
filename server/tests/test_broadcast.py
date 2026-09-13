@@ -10,7 +10,7 @@ from arb import broadcast as broadcast_module
 from arb.broadcast import LiveBroadcaster
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
-from arb.types import EventKind, LiveMessage, MarketEvent, PriceLevel
+from arb.types import BookEligibility, EventKind, LiveMessage, MarketEvent, PriceLevel
 from fastapi import WebSocketDisconnect
 from websockets.exceptions import ConnectionClosed
 
@@ -373,3 +373,27 @@ async def test_gap_storm_sends_one_invalidation_not_one_per_refused_event() -> N
 
     await broadcaster.aclose()
     await broadcaster.disconnect(socket)  # type: ignore[arg-type]
+
+
+def test_status_display_signature_matches_payload_based_signature() -> None:
+    """The typed and payload-based suppression signatures must not drift apart.
+
+    `broadcast_status` compares `BookEligibility.display_signature()` so an
+    unchanged status never builds a payload, while the generic book path still
+    derives its signature from payload fields. Two sources of truth for one
+    decision only stay correct while they agree.
+    """
+    for eligible, reason in ((True, None), (False, "too_old"), (False, "disconnected")):
+        status = BookEligibility(
+            exchange="gemini",
+            pair="BTC-USD",
+            initialized=True,
+            continuous=True,
+            connected=eligible,
+            age_ns=1_000_000,
+            max_age_ns=30_000_000_000,
+            eligible=eligible,
+            reason=reason,
+        )
+        message = LiveMessage(type="book_status", payload=status.as_payload())
+        assert status.display_signature() == broadcast_module._display_signature(message)

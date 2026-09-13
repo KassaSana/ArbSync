@@ -110,6 +110,16 @@ class BookEligibility:
     eligible: bool
     reason: str | None = None
 
+    def display_signature(self) -> tuple[object, ...]:
+        """What this status actually shows, for suppressing unchanged repeats.
+
+        Deliberately excludes `age_ns`, which changes on every event even when
+        nothing about the book has; comparing it would defeat suppression
+        entirely. Reading these fields directly means an unchanged status never
+        pays for building its payload.
+        """
+        return (self.initialized, self.continuous, self.connected, self.eligible, self.reason)
+
     def as_payload(self) -> dict[str, object]:
         return {
             "exchange": self.exchange,

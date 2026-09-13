@@ -9,7 +9,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from websockets.exceptions import ConnectionClosed
 
 from arb.metrics import ws_client_queue_overflows_total, ws_clients, ws_sender_failures_total
-from arb.types import LiveMessage
+from arb.types import BookEligibility, LiveMessage
 
 logger = structlog.get_logger(__name__)
 
@@ -93,6 +93,30 @@ class LiveBroadcaster:
             await self.broadcast(message)
             return
         self._pending[(message.type, exchange, pair)] = message
+        if self._flush_task is None or self._flush_task.done():
+            self._flush_task = asyncio.create_task(self._flush_loop())
+
+    async def broadcast_status(self, status: BookEligibility, *, immediate: bool) -> None:
+        """Publish a book status, building its payload only if it will be sent.
+
+        Status is unchanged for the overwhelming majority of events, and
+        `as_payload` walks nine fields and divides two ages. Comparing the
+        status object directly keeps that work off the path whose entire
+        purpose is to discard the message.
+        """
+        key = ("book_status", status.exchange, status.pair)
+        if immediate:
+            self._pending.pop(("top_of_book", status.exchange, status.pair), None)
+            self._pending.pop(key, None)
+        signature = status.display_signature()
+        if self._last_sent.get(key) == signature:
+            return
+        self._last_sent[key] = signature
+        message = LiveMessage(type="book_status", payload=status.as_payload())
+        if immediate or self._coalesce_interval <= 0:
+            await self.broadcast(message)
+            return
+        self._pending[key] = message
         if self._flush_task is None or self._flush_task.done():
             self._flush_task = asyncio.create_task(self._flush_loop())
 
