@@ -304,7 +304,20 @@ async def scenario(args, rate, browser, output):
             (output / "sent.json").write_text(json.dumps(feed.sent))
             await context.close()
             await client.post("/__bench/shutdown")
-        await asyncio.to_thread(process.wait, 15)
+        # The backend writes backend.json before exiting, so a slow exit is not
+        # lost measurement. Forcing it is still recorded rather than swallowed:
+        # shutdown ordering is production behavior a run can regress.
+        shutdown_started = time.perf_counter()
+        shutdown_forced = False
+        try:
+            await asyncio.to_thread(process.wait, 60)
+        except subprocess.TimeoutExpired:
+            if not (output / "backend.json").exists():
+                raise
+            shutdown_forced = True
+            process.kill()
+            await asyncio.to_thread(process.wait, 15)
+        shutdown_seconds = time.perf_counter() - shutdown_started
         backend = json.loads((output / "backend.json").read_text())
         result = summarize(
             backend,
@@ -322,6 +335,8 @@ async def scenario(args, rate, browser, output):
             result["self_time_attribution"] = json.loads((output / "stages.json").read_text())
         result["rate_per_second"] = rate
         result["profile_enabled"] = args.profile
+        result["shutdown_seconds"] = shutdown_seconds
+        result["shutdown_forced"] = shutdown_forced
         result["valid"] = (
             not errors
             and not result["failures"]
