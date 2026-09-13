@@ -88,6 +88,9 @@ system sleep for the duration, samples, and stops the backend on exit:
 
 It defaults to the full 24-hour run at a 60-second sample interval, which gives
 roughly 1,441 samples. Shorter runs take `-DurationSeconds` and `-SampleSeconds`.
+Sample starts may be at most twice the configured interval apart by default. A larger
+gap stops the run immediately, exits nonzero, and leaves the report marked `interrupted`;
+`-MaxSampleGapSeconds` sets a different explicit limit.
 Use `-Config <path>` to select a configuration (paths containing spaces are supported).
 It defaults to the repository's `config.toml`. Default report and backend log names
 include the start time to distinguish runs on the same day.
@@ -118,7 +121,8 @@ The observer samples per-exchange ingest volume, adapter reconnects and gaps,
 canonical book eligibility and age, readiness, opportunities, background-task
 failures, HTTP failures, recovery durations, and backend RSS. It rewrites the
 report after every sample, so an interrupted run still leaves a readable report
-marked `in progress`. Shorter durations are useful as smoke tests but must not be
+marked `interrupted`. Windows sleep prevention cannot override forced sleep, shutdown,
+lid policies, or host suspension. Shorter durations are useful as smoke tests but must not be
 described as the required 24-hour soak.
 
 Reports also capture labeled persistence, WebSocket, reconciliation, and background

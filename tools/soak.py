@@ -127,6 +127,13 @@ class BookObservation:
         self.last_eligible = eligible
 
 
+@dataclass(frozen=True)
+class SamplingGap:
+    started_at: str
+    ended_at: str
+    duration_seconds: float
+
+
 @dataclass
 class SoakReport:
     started_at: str
@@ -153,6 +160,9 @@ class SoakReport:
     missing_rss_samples: int = 0
     expected_books: set[str] = field(default_factory=set)
     missing_book_samples: Counter[str] = field(default_factory=Counter)
+    max_sample_gap_seconds: float | None = None
+    sampling_gaps: list[SamplingGap] = field(default_factory=list)
+    interrupted: bool = False
 
     def observe(
         self,
@@ -210,6 +220,9 @@ class SoakReport:
     def markdown(self) -> str:
         opportunity_delta = (self.opportunity_end or 0) - (self.opportunity_start or 0)
         ready_pct = 0 if self.samples == 0 else self.ready_samples / self.samples * 100
+        status = (
+            "interrupted" if self.interrupted else "complete" if self.completed else "in progress"
+        )
         lines = [
             f"# Live soak report - {self.started_at[:10]}",
             "",
@@ -218,7 +231,7 @@ class SoakReport:
             f"- Requested duration: `{self.duration_requested_seconds:.1f}s`",
             f"- Actual duration: `{self.actual_duration_seconds:.1f}s`",
             f"- Sample interval: `{self.sample_interval_seconds:.1f}s`",
-            f"- Status: `{'complete' if self.completed else 'in progress'}`",
+            f"- Status: `{status}`",
             "- Status describes observer completion only; reliability requires review of failures and coverage.",
             f"- Successful samples: `{self.samples}`",
             f"- Ready samples: `{self.ready_samples}/{self.samples}` ({ready_pct:.1f}%)",
@@ -230,6 +243,8 @@ class SoakReport:
             f"- Missing RSS samples: `{self.missing_rss_samples}`",
             f"- Expected books: `{len(self.expected_books)}` (zero means configuration not supplied)",
             f"- Missing configured book observations: `{sum(self.missing_book_samples.values())}`",
+            f"- Maximum allowed sample gap: `{'-' if self.max_sample_gap_seconds is None else f'{self.max_sample_gap_seconds:.1f}s'}`",
+            f"- Excessive sample gaps: `{len(self.sampling_gaps)}`",
             "",
             "## Adapters",
             "",
@@ -303,6 +318,12 @@ class SoakReport:
         if self.http_failures:
             lines.extend(["", "## Sampling failures", ""])
             lines.extend(f"- {failure}" for failure in self.http_failures)
+        if self.sampling_gaps:
+            lines.extend(["", "## Sampling interruptions", ""])
+            lines.extend(
+                f"- `{gap.started_at}` to `{gap.ended_at}`: `{gap.duration_seconds:.1f}s`"
+                for gap in self.sampling_gaps
+            )
         lines.extend(["", "## Operational counters", ""])
         lines.append(
             "Deltas retain metric labels; resets or process restarts invalidate simple subtraction. "
@@ -388,8 +409,12 @@ async def run_soak(
     *,
     config: Path | None = None,
     samples_output: Path | None = None,
+    max_sample_gap_seconds: float | None = None,
 ) -> SoakReport:
     report = SoakReport(utc_now(), duration_seconds, sample_interval_seconds)
+    report.max_sample_gap_seconds = (
+        sample_interval_seconds * 2 if max_sample_gap_seconds is None else max_sample_gap_seconds
+    )
     report.metadata = {
         "platform": platform.platform(),
         "python": sys.version.replace("\n", " "),
@@ -437,10 +462,40 @@ async def run_soak(
         report.metadata["observer_checkout_dirty"] = "unavailable"
     loop = asyncio.get_running_loop()
     started = loop.time()
+    next_sample_started = started
+    previous_sample_started: float | None = None
+    previous_sampled_at: str | None = None
     async with httpx.AsyncClient(base_url=base_url, timeout=10) as client:
         while True:
             elapsed = loop.time() - started
-            evidence: dict[str, Any] = {"sampled_at": utc_now(), "elapsed_seconds": elapsed}
+            sampled_at = utc_now()
+            if previous_sample_started is not None:
+                gap_seconds = loop.time() - previous_sample_started
+                assert previous_sampled_at is not None
+                if gap_seconds > report.max_sample_gap_seconds:
+                    gap = SamplingGap(previous_sampled_at, sampled_at, gap_seconds)
+                    report.sampling_gaps.append(gap)
+                    report.interrupted = True
+                    evidence = {
+                        "sampled_at": sampled_at,
+                        "elapsed_seconds": elapsed,
+                        "interruption": {
+                            "previous_sampled_at": previous_sampled_at,
+                            "duration_seconds": gap_seconds,
+                            "maximum_seconds": report.max_sample_gap_seconds,
+                        },
+                    }
+                    if samples_output is not None:
+                        with samples_output.open("a", encoding="utf-8") as stream:
+                            stream.write(json.dumps(evidence) + "\n")
+                    report.actual_duration_seconds = elapsed
+                    report.ended_at = sampled_at
+                    write_report(output, report)
+                    break
+
+            previous_sample_started = loop.time()
+            previous_sampled_at = sampled_at
+            evidence = {"sampled_at": sampled_at, "elapsed_seconds": elapsed}
             try:
                 adapters = await fetch_json(client, "/api/adapters")
                 books = await fetch_json(client, "/api/book-status")
@@ -488,12 +543,13 @@ async def run_soak(
 
             remaining = duration_seconds - (loop.time() - started)
             if remaining <= 0:
+                report.completed = True
                 break
-            await asyncio.sleep(min(sample_interval_seconds, remaining))
+            next_sample_started += sample_interval_seconds
+            await asyncio.sleep(max(0, min(next_sample_started - loop.time(), remaining)))
 
     report.actual_duration_seconds = loop.time() - started
     report.ended_at = utc_now()
-    report.completed = True
     write_report(output, report)
     return report
 
@@ -503,6 +559,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--duration-seconds", type=float, default=86_400)
     parser.add_argument("--sample-seconds", type=float, default=300)
+    parser.add_argument(
+        "--max-sample-gap-seconds",
+        type=float,
+        help="Fail if sample starts are farther apart (default: twice --sample-seconds)",
+    )
     parser.add_argument("--pid", type=int)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -518,6 +579,8 @@ def main() -> None:
     args = parse_args()
     if args.duration_seconds <= 0 or args.sample_seconds <= 0:
         raise SystemExit("duration and sample interval must be positive")
+    if args.max_sample_gap_seconds is not None and args.max_sample_gap_seconds <= 0:
+        raise SystemExit("maximum sample gap must be positive")
     report = asyncio.run(
         run_soak(
             args.base_url,
@@ -527,9 +590,12 @@ def main() -> None:
             args.output,
             config=args.config,
             samples_output=args.samples_output,
+            max_sample_gap_seconds=args.max_sample_gap_seconds,
         )
     )
     print(json.dumps({"output": str(args.output), "samples": report.samples}))
+    if report.interrupted:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

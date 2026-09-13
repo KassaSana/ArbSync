@@ -181,3 +181,10 @@ A documented 24-hour live soak is still required. It should capture:
 
 Run the observer as described in [`BENCHMARKS.md`](BENCHMARKS.md) and commit the
 generated report only after the full run completes.
+
+An attempted run on September 12-13 observed 923 successful samples and no process
+restart, counter reset, sequence gap, background failure, or unbounded RSS trend, but it
+contained nine sample gaps over two minutes, including a 9.5-hour gap. It is retained as
+local diagnostic evidence and does not satisfy the uninterrupted requirement. The observer
+now fails fast and labels such a run `interrupted` instead of allowing elapsed wall time to
+produce a misleading `complete` status.

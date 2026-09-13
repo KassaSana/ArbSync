@@ -28,6 +28,7 @@
 param(
     [double] $DurationSeconds = 86400,
     [double] $SampleSeconds = 60,
+    [double] $MaxSampleGapSeconds = 0,
     [string] $BaseUrl = "http://127.0.0.1:8000",
     [string] $Output,
     [string] $Config,
@@ -121,10 +122,12 @@ try {
     }
 
     Write-Host "Backend ready. Observing for $DurationSeconds seconds into $Output"
+    if ($MaxSampleGapSeconds -le 0) { $MaxSampleGapSeconds = $SampleSeconds * 2 }
     & $python (Join-Path $repoRoot "tools\soak.py") `
         --base-url $BaseUrl `
         --duration-seconds $DurationSeconds `
         --sample-seconds $SampleSeconds `
+        --max-sample-gap-seconds $MaxSampleGapSeconds `
         --pid $samplePid `
         --config $Config `
         --samples-output ([System.IO.Path]::ChangeExtension($Output, '.jsonl')) `

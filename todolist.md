@@ -583,7 +583,22 @@ Acceptance criteria:
 - Verify all README commands on Windows and one Unix-like CI runner.
 - Tag the release only after required tickets and checks pass.
 
-P2 total: **18 engineer-hours plus the 24-hour soak runtime**.
+### [x] ARB-025 — Reject interrupted soak evidence
+
+- Priority: P2
+- Estimate: 2 hours
+- Dependencies: ARB-021 observer tooling
+
+Problem: the September 12-13 run crossed the requested wall-clock duration after nine
+large sampling gaps, including a 9.5-hour suspension, and was labeled complete even though
+it did not provide 24 uninterrupted hours of evidence.
+
+Resolution: sample starts now follow a fixed schedule and have an explicit maximum gap.
+Exceeding it writes the gap to raw and summarized evidence, marks the report interrupted,
+exits nonzero, and preserves the partial run for diagnosis. The Windows launcher defaults
+to a two-interval limit and documents the limits of programmatic sleep prevention.
+
+P2 total: **20 engineer-hours plus the 24-hour soak runtime**.
 
 ## Planning summary
 
@@ -591,8 +606,8 @@ P2 total: **18 engineer-hours plus the 24-hour soak runtime**.
 | --- | ---: | --- |
 | P0 release gate | 43 h | Required before public announcement |
 | P1 reliability and maintainability | 54 h | Strongly recommended for the first stable release |
-| P2 operations and evidence | 18 h | Can follow initial publication except where dependencies say otherwise |
-| Total | **115 h** | About 2.9 engineer-weeks at 40 h/week |
+| P2 operations and evidence | 20 h | Can follow initial publication except where dependencies say otherwise |
+| Total | **117 h** | About 2.9 engineer-weeks at 40 h/week |
 
 The critical path is ARB-002 -> ARB-004/ARB-010 -> ARB-021. The highest-risk issue is
 quote-currency conflation, not performance. Avoid expanding into execution modeling until

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import httpx
 import pytest
 import soak
 from soak import (
+    SamplingGap,
     SoakReport,
     parse_event_counts,
     parse_operational_counters,
@@ -98,6 +100,26 @@ def test_markdown_labels_an_unfinished_run_as_in_progress() -> None:
     report.completed = True
 
     assert "- Status: `complete`" in report.markdown()
+
+
+def test_markdown_labels_an_excessive_gap_as_interrupted() -> None:
+    report = SoakReport("2026-09-05T00:00:00+00:00", 86_400, 60)
+    report.max_sample_gap_seconds = 120
+    report.sampling_gaps.append(
+        SamplingGap(
+            "2026-09-05T01:00:00+00:00",
+            "2026-09-05T10:30:00+00:00",
+            34_200,
+        )
+    )
+    report.interrupted = True
+
+    markdown = report.markdown()
+
+    assert "- Status: `interrupted`" in markdown
+    assert "- Maximum allowed sample gap: `120.0s`" in markdown
+    assert "- Excessive sample gaps: `1`" in markdown
+    assert "`34200.0s`" in markdown
 
 
 def test_write_report_creates_missing_directories(tmp_path: Path) -> None:
@@ -233,3 +255,42 @@ async def test_soak_refuses_to_overwrite_or_mix_evidence(tmp_path: Path) -> None
     assert evidence.read_text(encoding="utf-8") == "previous run\n"
     with pytest.raises(ValueError, match="different paths"):
         await soak.run_soak("http://unused", 0, 1, None, evidence, samples_output=evidence)
+
+
+@pytest.mark.asyncio
+async def test_soak_fails_fast_when_sample_start_gap_exceeds_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        time.sleep(0.003)
+        if request.url.path == "/metrics":
+            return httpx.Response(200, text="")
+        payloads: dict[str, object] = {
+            "/api/adapters": [],
+            "/api/book-status": [],
+            "/readyz": {"status": "ready", "background_task_failures": []},
+            "/api/system/overview": {"all_time_count": 0, "started_at_ns": "1"},
+        }
+        return httpx.Response(200, json=payloads[request.url.path])
+
+    client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
+    output = tmp_path / "report.md"
+    evidence = tmp_path / "samples.jsonl"
+
+    report = await soak.run_soak(
+        "http://test",
+        1,
+        0.001,
+        None,
+        output,
+        samples_output=evidence,
+        max_sample_gap_seconds=0.005,
+    )
+
+    assert report.interrupted
+    assert not report.completed
+    assert len(report.sampling_gaps) == 1
+    assert "- Status: `interrupted`" in output.read_text(encoding="utf-8")
+    records = [json.loads(line) for line in evidence.read_text(encoding="utf-8").splitlines()]
+    assert "interruption" in records[-1]
