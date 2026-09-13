@@ -27,5 +27,7 @@ max_age_seconds = 60.0
 # Checks are spread across the cycle rather than launched as one REST burst.
 cycle_seconds = 60.0
 confirmation_count = 3
+# Size is more volatile than price across non-atomic REST/live observations.
+size_confirmation_count = 5
 # Also serves as the deadline for reporting a started recovery as unresolved.
 cooldown_seconds = 300.0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from decimal import Decimal
 
 import pytest
@@ -30,6 +31,7 @@ class ReconcileAdapter(ExchangeAdapter):
         self.fetch_error: Exception | None = None
         self.fetches: list[str] = []
         self.reconnect_requests = 0
+        self.fetch_hook: Callable[[], None] | None = None
 
     @staticmethod
     def normalize_symbol(symbol: str) -> str:
@@ -53,7 +55,7 @@ class ReconcileAdapter(ExchangeAdapter):
                 sequence=trigger_sequence,
                 timestamp_ns=trigger_sequence,
             )
-        return MarketEvent(
+        snapshot = MarketEvent(
             exchange=self.name,
             pair=pair,
             kind=EventKind.SNAPSHOT,
@@ -62,6 +64,9 @@ class ReconcileAdapter(ExchangeAdapter):
             bids=(PriceLevel(price=self.bid, size=self.bid_size),),
             asks=(PriceLevel(price=self.ask, size=self.ask_size),),
         )
+        if self.fetch_hook is not None:
+            self.fetch_hook()
+        return snapshot
 
     def request_reconnect(self) -> None:
         self.reconnect_requests += 1
@@ -173,12 +178,92 @@ async def test_aggregate_size_divergence_can_confirm_recovery() -> None:
     adapter.bid_size = Decimal("3")
     manager = OrderBookManager()
     apply_book(manager)
-    reconciler = SnapshotReconciler([adapter], manager, [("stub", "BTC-USD")], confirmation_count=1)
+    reconciler = SnapshotReconciler(
+        [adapter],
+        manager,
+        [("stub", "BTC-USD")],
+        confirmation_count=1,
+        size_confirmation_count=1,
+    )
 
     await reconciler.reconcile_next()
 
     assert adapter.reconnect_requests == 1
     assert manager.eligibility("stub", "BTC-USD").eligible is False
+
+
+@pytest.mark.asyncio
+async def test_market_movement_during_snapshot_fetch_is_not_corroborated() -> None:
+    adapter = ReconcileAdapter(["BTC-USD"])
+    adapter.bid = Decimal("102")
+    adapter.ask = Decimal("103")
+    adapter.bid_size = Decimal("3")
+    adapter.ask_size = Decimal("3")
+    manager = OrderBookManager()
+    apply_book(manager)
+    adapter.fetch_hook = lambda: apply_book(
+        manager,
+        bid="102",
+        ask="103",
+        bid_size="3",
+        ask_size="3",
+        sequence=2,
+    )
+
+    await SnapshotReconciler(
+        [adapter],
+        manager,
+        [("stub", "BTC-USD")],
+        confirmation_count=1,
+        size_confirmation_count=1,
+    ).reconcile_next()
+
+    assert adapter.reconnect_requests == 0
+    assert manager.eligibility("stub", "BTC-USD").eligible is True
+
+
+@pytest.mark.asyncio
+async def test_size_only_recovery_uses_longer_confirmation_count() -> None:
+    adapter = ReconcileAdapter(["BTC-USD"])
+    adapter.bid = Decimal("100")
+    adapter.ask = Decimal("101")
+    adapter.bid_size = Decimal("3")
+    adapter.ask_size = Decimal("3")
+    manager = OrderBookManager()
+    apply_book(manager)
+    reconciler = SnapshotReconciler(
+        [adapter], manager, [("stub", "BTC-USD")], size_confirmation_count=5
+    )
+
+    for _ in range(4):
+        await reconciler.reconcile_next()
+    assert adapter.reconnect_requests == 0
+    await reconciler.reconcile_next()
+
+    assert adapter.reconnect_requests == 1
+    assert manager.eligibility("stub", "BTC-USD").eligible is False
+
+
+@pytest.mark.asyncio
+async def test_size_direction_change_resets_confirmation_streak() -> None:
+    adapter = ReconcileAdapter(["BTC-USD"])
+    adapter.bid = Decimal("100")
+    adapter.ask = Decimal("101")
+    adapter.bid_size = Decimal("3")
+    adapter.ask_size = Decimal("3")
+    manager = OrderBookManager()
+    apply_book(manager)
+    reconciler = SnapshotReconciler(
+        [adapter], manager, [("stub", "BTC-USD")], size_confirmation_count=2
+    )
+
+    await reconciler.reconcile_next()
+    adapter.bid_size = Decimal("0.25")
+    adapter.ask_size = Decimal("0.25")
+    await reconciler.reconcile_next()
+
+    assert adapter.reconnect_requests == 0
+    assert manager.eligibility("stub", "BTC-USD").eligible is True
 
 
 @pytest.mark.asyncio

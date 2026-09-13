@@ -215,6 +215,7 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
         expected_pairs,
         cycle_seconds=config.reconciliation.cycle_seconds,
         confirmation_count=config.reconciliation.confirmation_count,
+        size_confirmation_count=config.reconciliation.size_confirmation_count,
         cooldown_seconds=config.reconciliation.cooldown_seconds,
         on_book_invalidated=publish_book_status,
     )

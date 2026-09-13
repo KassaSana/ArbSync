@@ -33,6 +33,11 @@ ws_sender_failures_total = Counter(
 reconcile_mismatches_total = Counter(
     "arb_reconcile_mismatches_total", "Snapshot reconciliation mismatches", ["exchange", "pair"]
 )
+reconcile_evidence_total = Counter(
+    "arb_reconcile_evidence_total",
+    "Corroborated reconciliation mismatch evidence by cause",
+    ["exchange", "pair", "kind"],
+)
 reconcile_confirmations_total = Counter(
     "arb_reconcile_confirmations_total",
     "Snapshot reconciliation mismatches that reached the confirmation threshold",

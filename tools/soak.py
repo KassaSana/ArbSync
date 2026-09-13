@@ -526,6 +526,7 @@ def parse_operational_counters(metrics: str) -> dict[str, int]:
         "arb_ws_sender_failures_total",
         "arb_background_task_failures_total",
         "arb_reconcile_mismatches_total",
+        "arb_reconcile_evidence_total",
         "arb_reconcile_confirmations_total",
         "arb_reconcile_recoveries_total",
         "arb_reconcile_failures_total",

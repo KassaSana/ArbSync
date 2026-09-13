@@ -613,7 +613,24 @@ and per-connection stream sequences; reports frames, reconnects, malformed messa
 outages; and interrupts the run if delivery stays unavailable beyond the sample-gap limit.
 Browser rendering remains covered by the separate connected-dashboard benchmark.
 
-P2 total: **23 engineer-hours plus the 24-hour soak runtime**.
+### [x] ARB-027 — Corroborate non-atomic reconciliation mismatches
+
+- Priority: P2
+- Estimate: 4 hours
+- Dependencies: ARB-010, ARB-021 diagnostic evidence
+
+Problem: 1,387 of 1,684 mismatches in the interrupted long observation were size-only,
+including all 279 Gemini LINK-USD mismatches and 40 completed forced recoveries. Comparing
+a live book captured only before a network REST request made normal depth churn look like
+persistent corruption.
+
+Resolution: REST comparisons are now bracketed by live reads and must disagree with both.
+Price evidence retains its three-cycle confirmation path; size-only evidence must keep the
+same side and direction across a separately configurable five-cycle streak. Cause-specific
+metrics distinguish price, size, and combined evidence while canonical invalidation,
+adapter-owned recovery, cooldown, and fail-closed behavior remain unchanged.
+
+P2 total: **27 engineer-hours plus the 24-hour soak runtime**.
 
 ## Planning summary
 
@@ -621,8 +638,8 @@ P2 total: **23 engineer-hours plus the 24-hour soak runtime**.
 | --- | ---: | --- |
 | P0 release gate | 43 h | Required before public announcement |
 | P1 reliability and maintainability | 54 h | Strongly recommended for the first stable release |
-| P2 operations and evidence | 23 h | Can follow initial publication except where dependencies say otherwise |
-| Total | **120 h** | About 3.0 engineer-weeks at 40 h/week |
+| P2 operations and evidence | 27 h | Can follow initial publication except where dependencies say otherwise |
+| Total | **124 h** | About 3.1 engineer-weeks at 40 h/week |
 
 The critical path is ARB-002 -> ARB-004/ARB-010 -> ARB-021. The highest-risk issue is
 quote-currency conflation, not performance. Avoid expanding into execution modeling until

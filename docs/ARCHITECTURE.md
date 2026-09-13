@@ -160,17 +160,20 @@ The reconciler checks one target at a time and spreads those checks across the c
 `reconciliation.cycle_seconds`, so the setting describes a nominal full pass rather than
 the delay between individual books. Network time can make a pass slightly longer.
 
-Each comparison reads the top ten live and REST levels. It treats ordered price divergence
-above 0.5% or aggregate side-size divergence above 50% as a mismatch. The wider size
-tolerance accounts for normal depth churn between non-atomic reads. A matching comparison
-or fetch failure resets the consecutive-mismatch streak.
+Each comparison brackets the REST request with top-ten live-book reads. Divergence is
+evidence only when the REST result disagrees with both surrounding live views. Ordered
+price divergence above 0.5% uses `confirmation_count`; aggregate side-size divergence above
+50% uses the longer `size_confirmation_count` and must retain the same side and direction.
+This accounts for normal depth churn between non-atomic reads without making persistent
+size corruption invisible. A matching comparison, changed size signature, or fetch failure
+resets the relevant streak.
 
-After `confirmation_count` consecutive mismatches for the same book, the reconciler clears
-that canonical chain and broadcasts its ineligibility before asking the adapter to reconnect.
+After the applicable consecutive-mismatch threshold, the reconciler clears that canonical
+chain and broadcasts its ineligibility before asking the adapter to reconnect.
 The adapter still owns connection reset, snapshot acquisition, and native sequence recovery.
 A cooldown prevents another recovery storm for the same target and is also the deadline for
 reporting a started recovery as unresolved. Started, completed, timed-out, confirmed-mismatch,
-raw-mismatch, and reconciliation-failure events are logged and counted.
+raw-mismatch, corroborated cause, and reconciliation-failure events are logged and counted.
 
 ## Persistence and statistics
 

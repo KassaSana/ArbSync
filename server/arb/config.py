@@ -49,6 +49,7 @@ class OrderBookConfig:
 class ReconciliationConfig:
     cycle_seconds: float
     confirmation_count: int
+    size_confirmation_count: int
     cooldown_seconds: float
 
 
@@ -114,6 +115,10 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         "reconciliation.confirmation_count",
         reconciliation.get("confirmation_count", 3),
     )
+    size_confirmation_count = _positive_integer(
+        "reconciliation.size_confirmation_count",
+        reconciliation.get("size_confirmation_count", 5),
+    )
     cooldown_seconds = _positive_number(
         "reconciliation.cooldown_seconds",
         reconciliation.get("cooldown_seconds", 300.0),
@@ -141,6 +146,7 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         reconciliation=ReconciliationConfig(
             cycle_seconds=cycle_seconds,
             confirmation_count=confirmation_count,
+            size_confirmation_count=size_confirmation_count,
             cooldown_seconds=cooldown_seconds,
         ),
     )

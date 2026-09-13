@@ -23,9 +23,12 @@ adapter currently uses one connection for all configured pairs, recovery invalid
 exchange's other books until the new connection rebuilds them.
 
 The periodic reconciler uses the same boundary after repeated live-versus-REST divergence.
-It clears the affected book before requesting reconnection, but does not apply the REST
-comparison snapshot as stream state. Reconciliation confirmation and cooldown prevent a
-single non-atomic comparison from causing a recovery storm.
+It brackets each REST request with live reads and requires disagreement with both, so market
+movement during the request does not count as evidence. Price mismatches use the normal
+confirmation count; size-only mismatches require a longer streak with the same side and
+direction. It clears the affected book before requesting reconnection, but does not apply
+the REST comparison snapshot as stream state. Confirmation and cooldown prevent a single
+non-atomic comparison from causing a recovery storm.
 
 Tradeoffs:
 - Binance's REST snapshot introduces extra latency during its resync window.

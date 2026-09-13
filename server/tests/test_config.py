@@ -31,6 +31,7 @@ max_age_seconds = 12.5
 [reconciliation]
 cycle_seconds = 90.0
 confirmation_count = 4
+size_confirmation_count = 6
 cooldown_seconds = 600.0
 """
 
@@ -59,6 +60,7 @@ def test_load_config_parses_all_sections(tmp_path: Path) -> None:
     assert config.order_books.max_age_seconds == 12.5
     assert config.reconciliation.cycle_seconds == 90.0
     assert config.reconciliation.confirmation_count == 4
+    assert config.reconciliation.size_confirmation_count == 6
     assert config.reconciliation.cooldown_seconds == 600.0
 
 
@@ -94,6 +96,7 @@ def test_load_config_defaults_book_age_when_section_missing(tmp_path: Path) -> N
 def test_load_config_defaults_reconciliation_when_section_missing(tmp_path: Path) -> None:
     config_text = VALID_CONFIG.replace(
         "\n[reconciliation]\ncycle_seconds = 90.0\nconfirmation_count = 4\n"
+        "size_confirmation_count = 6\n"
         "cooldown_seconds = 600.0\n",
         "",
     )
@@ -104,6 +107,7 @@ def test_load_config_defaults_reconciliation_when_section_missing(tmp_path: Path
 
     assert config.reconciliation.cycle_seconds == 60.0
     assert config.reconciliation.confirmation_count == 3
+    assert config.reconciliation.size_confirmation_count == 5
     assert config.reconciliation.cooldown_seconds == 300.0
 
 
@@ -124,6 +128,7 @@ def test_valid_numeric_boundaries_are_accepted(tmp_path: Path) -> None:
         .replace("max_age_seconds = 12.5", "max_age_seconds = 0.000001")
         .replace("cycle_seconds = 90.0", "cycle_seconds = 0.000001")
         .replace("confirmation_count = 4", "confirmation_count = 1")
+        .replace("size_confirmation_count = 6", "size_confirmation_count = 1")
         .replace("cooldown_seconds = 600.0", "cooldown_seconds = 0.000001")
     )
     path = tmp_path / "config.toml"
@@ -138,6 +143,7 @@ def test_valid_numeric_boundaries_are_accepted(tmp_path: Path) -> None:
     assert config.order_books.max_age_seconds == 0.000001
     assert config.reconciliation.cycle_seconds == 0.000001
     assert config.reconciliation.confirmation_count == 1
+    assert config.reconciliation.size_confirmation_count == 1
     assert config.reconciliation.cooldown_seconds == 0.000001
 
 
@@ -180,6 +186,11 @@ def test_valid_numeric_boundaries_are_accepted(tmp_path: Path) -> None:
             "reconciliation.confirmation_count",
         ),
         (
+            "size_confirmation_count = 6",
+            "size_confirmation_count = 0",
+            "reconciliation.size_confirmation_count",
+        ),
+        (
             "cooldown_seconds = 600.0",
             "cooldown_seconds = inf",
             "reconciliation.cooldown_seconds",
@@ -216,6 +227,12 @@ def test_invalid_numeric_ranges_identify_field_and_value(
             "confirmation_count = 4",
             "confirmation_count = 1.5",
             "reconciliation.confirmation_count",
+            "1.5",
+        ),
+        (
+            "size_confirmation_count = 6",
+            "size_confirmation_count = 1.5",
+            "reconciliation.size_confirmation_count",
             "1.5",
         ),
     ],
@@ -259,6 +276,7 @@ def test_unsupported_exchange_is_rejected(tmp_path: Path) -> None:
 def test_reconciliation_must_be_a_table(tmp_path: Path) -> None:
     config_text = VALID_CONFIG.replace(
         "\n[reconciliation]\ncycle_seconds = 90.0\nconfirmation_count = 4\n"
+        "size_confirmation_count = 6\n"
         "cooldown_seconds = 600.0\n",
         "",
     ).replace("[detector]", 'reconciliation = "invalid"\n\n[detector]')

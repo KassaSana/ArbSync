@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from itertools import cycle
 
@@ -12,6 +12,7 @@ import structlog
 from arb.adapters.base import ExchangeAdapter
 from arb.metrics import (
     reconcile_confirmations_total,
+    reconcile_evidence_total,
     reconcile_failures_total,
     reconcile_mismatches_total,
     reconcile_recoveries_total,
@@ -33,21 +34,39 @@ class ReconcileTarget:
 
 
 @dataclass(frozen=True)
+class SideDifference:
+    price_pct: Decimal
+    signed_size_pct: Decimal
+
+
+@dataclass(frozen=True)
 class ReconcileDifference:
+    bids: SideDifference
+    asks: SideDifference
+
+
+@dataclass(frozen=True)
+class ReconcileEvidence:
     price_pct: Decimal
     size_pct: Decimal
+    size_signature: frozenset[str]
 
     @property
     def mismatched(self) -> bool:
-        return (
-            self.price_pct > PRICE_MISMATCH_THRESHOLD_PCT
-            or self.size_pct > SIZE_MISMATCH_THRESHOLD_PCT
-        )
+        return self.price_pct > 0 or self.size_pct > 0
+
+    @property
+    def kind(self) -> str:
+        if self.price_pct > 0 and self.size_pct > 0:
+            return "price_and_size"
+        return "price" if self.price_pct > 0 else "size"
 
 
 @dataclass
 class _TargetState:
-    consecutive_mismatches: int = 0
+    consecutive_price_mismatches: int = 0
+    consecutive_size_mismatches: int = 0
+    size_signature: frozenset[str] = field(default_factory=frozenset)
     cooldown_until: float = 0.0
     recovery_started_at: float | None = None
     recovery_failure_recorded: bool = False
@@ -69,6 +88,7 @@ class SnapshotReconciler:
         *,
         cycle_seconds: float = 60.0,
         confirmation_count: int = 3,
+        size_confirmation_count: int = 5,
         cooldown_seconds: float = 300.0,
         on_book_invalidated: Callable[[BookEligibility], Awaitable[None]] | None = None,
         clock: Callable[[], float] = time.monotonic,
@@ -77,12 +97,15 @@ class SnapshotReconciler:
             raise ValueError("cycle_seconds must be positive")
         if confirmation_count <= 0:
             raise ValueError("confirmation_count must be positive")
+        if size_confirmation_count <= 0:
+            raise ValueError("size_confirmation_count must be positive")
         if cooldown_seconds <= 0:
             raise ValueError("cooldown_seconds must be positive")
         self._adapter_by_name = {adapter.name: adapter for adapter in adapters}
         self.book_manager = book_manager
         self.cycle_seconds = cycle_seconds
         self.confirmation_count = confirmation_count
+        self.size_confirmation_count = size_confirmation_count
         self.cooldown_seconds = cooldown_seconds
         self._on_book_invalidated = on_book_invalidated
         self._clock = clock
@@ -112,20 +135,20 @@ class SnapshotReconciler:
         now = self._clock()
         self._observe_recovery(target, state, now)
         if state.recovery_started_at is not None or now < state.cooldown_until:
-            state.consecutive_mismatches = 0
+            self._reset_mismatches(state)
             return
 
         live_levels = self.book_manager.level_snapshot(
             target.exchange, target.pair, limit=RECONCILE_DEPTH
         )
         if live_levels is None:
-            state.consecutive_mismatches = 0
+            self._reset_mismatches(state)
             return
 
         try:
             snapshot = await adapter.fetch_snapshot(target.pair, trigger_sequence=0)
         except Exception as exc:
-            state.consecutive_mismatches = 0
+            self._reset_mismatches(state)
             reconcile_failures_total.labels(
                 exchange=target.exchange, pair=target.pair, phase="snapshot_fetch"
             ).inc()
@@ -142,26 +165,56 @@ class SnapshotReconciler:
             list(snapshot.bids[:RECONCILE_DEPTH]),
             list(snapshot.asks[:RECONCILE_DEPTH]),
         )
-        difference = self._difference(live_levels, snapshot_levels)
-        if not difference.mismatched:
-            state.consecutive_mismatches = 0
+        current_levels = self.book_manager.level_snapshot(
+            target.exchange, target.pair, limit=RECONCILE_DEPTH
+        )
+        if current_levels is None:
+            self._reset_mismatches(state)
+            return
+        evidence = self._corroborate(
+            self._difference(live_levels, snapshot_levels),
+            self._difference(current_levels, snapshot_levels),
+        )
+        if not evidence.mismatched:
+            self._reset_mismatches(state)
             return
 
-        state.consecutive_mismatches += 1
+        if evidence.price_pct > 0:
+            state.consecutive_price_mismatches += 1
+            state.consecutive_size_mismatches = 0
+            state.size_signature = frozenset()
+            consecutive_mismatches = state.consecutive_price_mismatches
+            required_confirmations = self.confirmation_count
+        else:
+            state.consecutive_price_mismatches = 0
+            if evidence.size_signature == state.size_signature:
+                state.consecutive_size_mismatches += 1
+            else:
+                state.consecutive_size_mismatches = 1
+                state.size_signature = evidence.size_signature
+            consecutive_mismatches = state.consecutive_size_mismatches
+            required_confirmations = self.size_confirmation_count
         reconcile_mismatches_total.labels(exchange=target.exchange, pair=target.pair).inc()
+        reconcile_evidence_total.labels(
+            exchange=target.exchange, pair=target.pair, kind=evidence.kind
+        ).inc()
         logger.warning(
             "snapshot_reconcile_mismatch",
             exchange=target.exchange,
             pair=target.pair,
-            price_mismatch_pct=str(difference.price_pct),
-            size_mismatch_pct=str(difference.size_pct),
-            consecutive_mismatches=state.consecutive_mismatches,
-            confirmation_count=self.confirmation_count,
+            mismatch_kind=evidence.kind,
+            price_mismatch_pct=str(evidence.price_pct),
+            size_mismatch_pct=str(evidence.size_pct),
+            size_signature=sorted(evidence.size_signature),
+            consecutive_mismatches=consecutive_mismatches,
+            confirmation_count=required_confirmations,
         )
-        if state.consecutive_mismatches < self.confirmation_count:
+        if consecutive_mismatches < required_confirmations:
             return
 
-        await self._start_recovery(target, state, adapter, now)
+        await self._start_recovery(
+            target, state, adapter, now, evidence.kind, required_confirmations
+        )
 
     def observe_book(self, exchange: str, pair: str) -> None:
         """Record recovery completion when a new eligible snapshot reaches the manager."""
@@ -204,8 +257,10 @@ class SnapshotReconciler:
         state: _TargetState,
         adapter: ExchangeAdapter,
         now: float,
+        mismatch_kind: str,
+        confirmation_count: int,
     ) -> None:
-        state.consecutive_mismatches = 0
+        self._reset_mismatches(state)
         state.cooldown_until = now + self.cooldown_seconds
         state.recovery_started_at = now
         state.recovery_failure_recorded = False
@@ -218,7 +273,8 @@ class SnapshotReconciler:
             "snapshot_reconcile_confirmed",
             exchange=target.exchange,
             pair=target.pair,
-            confirmation_count=self.confirmation_count,
+            mismatch_kind=mismatch_kind,
+            confirmation_count=confirmation_count,
         )
 
         if self._on_book_invalidated is not None:
@@ -261,17 +317,15 @@ class SnapshotReconciler:
         live_levels: tuple[list[PriceLevel], list[PriceLevel]],
         snapshot_levels: tuple[list[PriceLevel], list[PriceLevel]],
     ) -> ReconcileDifference:
-        bid_price, bid_size = self._side_difference(live_levels[0], snapshot_levels[0])
-        ask_price, ask_size = self._side_difference(live_levels[1], snapshot_levels[1])
         return ReconcileDifference(
-            price_pct=max(bid_price, ask_price),
-            size_pct=max(bid_size, ask_size),
+            bids=self._side_difference(live_levels[0], snapshot_levels[0]),
+            asks=self._side_difference(live_levels[1], snapshot_levels[1]),
         )
 
     @staticmethod
     def _side_difference(
         live_levels: list[PriceLevel], snapshot_levels: list[PriceLevel]
-    ) -> tuple[Decimal, Decimal]:
+    ) -> SideDifference:
         price_pct = Decimal("0")
         if len(live_levels) != len(snapshot_levels):
             price_pct = Decimal("100")
@@ -286,5 +340,41 @@ class SnapshotReconciler:
         live_size = sum((level.size for level in live_levels), start=Decimal("0"))
         snapshot_size = sum((level.size for level in snapshot_levels), start=Decimal("0"))
         size_baseline = abs(snapshot_size) or Decimal("1")
-        size_pct = (abs(live_size - snapshot_size) / size_baseline) * Decimal("100")
-        return price_pct, size_pct
+        signed_size_pct = ((live_size - snapshot_size) / size_baseline) * Decimal("100")
+        return SideDifference(price_pct, signed_size_pct)
+
+    @staticmethod
+    def _corroborate(before: ReconcileDifference, after: ReconcileDifference) -> ReconcileEvidence:
+        price_values: list[Decimal] = []
+        size_values: list[Decimal] = []
+        size_signature: set[str] = set()
+        for side, before_side, after_side in (
+            ("bids", before.bids, after.bids),
+            ("asks", before.asks, after.asks),
+        ):
+            if (
+                before_side.price_pct > PRICE_MISMATCH_THRESHOLD_PCT
+                and after_side.price_pct > PRICE_MISMATCH_THRESHOLD_PCT
+            ):
+                price_values.append(min(before_side.price_pct, after_side.price_pct))
+            before_size = before_side.signed_size_pct
+            after_size = after_side.signed_size_pct
+            if (
+                abs(before_size) > SIZE_MISMATCH_THRESHOLD_PCT
+                and abs(after_size) > SIZE_MISMATCH_THRESHOLD_PCT
+                and (before_size > 0) == (after_size > 0)
+            ):
+                direction = "live_above" if before_size > 0 else "live_below"
+                size_signature.add(f"{side}:{direction}")
+                size_values.append(min(abs(before_size), abs(after_size)))
+        return ReconcileEvidence(
+            price_pct=max(price_values, default=Decimal("0")),
+            size_pct=max(size_values, default=Decimal("0")),
+            size_signature=frozenset(size_signature),
+        )
+
+    @staticmethod
+    def _reset_mismatches(state: _TargetState) -> None:
+        state.consecutive_price_mismatches = 0
+        state.consecutive_size_mismatches = 0
+        state.size_signature = frozenset()
