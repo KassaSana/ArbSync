@@ -165,6 +165,16 @@ def test_markdown_labels_an_excessive_gap_as_interrupted() -> None:
     assert "`34200.0s`" in markdown
 
 
+def test_markdown_describes_built_in_websocket_counter_context() -> None:
+    report = SoakReport("2026-09-05T00:00:00+00:00", 86_400, 60)
+    report.websocket = WebSocketObservation("ws://example.test/ws/live")
+
+    markdown = report.markdown()
+
+    assert "observer's built-in WebSocket consumer" in markdown
+    assert "does not create WebSocket clients" not in markdown
+
+
 def test_write_report_creates_missing_directories(tmp_path: Path) -> None:
     report = SoakReport("2026-09-05T00:00:00+00:00", 86_400, 60)
     output = tmp_path / "nested" / "soak.md"

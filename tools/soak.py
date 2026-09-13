@@ -467,7 +467,8 @@ class SoakReport:
         lines.extend(["", "## Operational counters", ""])
         lines.append(
             "Deltas retain metric labels; resets or process restarts invalidate simple subtraction. "
-            "The observer does not create WebSocket clients; delivery counters only cover independently connected clients."
+            "Delivery counters include the observer's built-in WebSocket consumer and any "
+            "independently connected clients."
         )
         for name, value in sorted(self.counter_last.items()):
             delta = (
