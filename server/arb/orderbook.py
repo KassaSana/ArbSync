@@ -93,18 +93,22 @@ class OrderBookManager:
         self._max_age_ns = int(max_age_seconds * 1_000_000_000)
         self._clock = clock
         self._exchange_connected: dict[str, bool] = {}
+        # Pair -> exchanges holding a book for it, so per-pair detection does not
+        # sort every known book key on every ingested event. Books are created
+        # but never dropped, so this only grows.
+        self._exchanges_by_pair: dict[str, list[str]] = {}
 
     def set_exchange_connected(self, exchange: str, connected: bool) -> list[BookEligibility]:
         self._exchange_connected[exchange] = connected
         affected: list[BookEligibility] = []
-        for (book_exchange, _pair), book in self._books.items():
+        for (book_exchange, book_pair), book in self._books.items():
             if book_exchange != exchange:
                 continue
-            book.connected = connected
             if not connected:
+                # `clear` does not touch `connected`, so the flag survives it.
                 book.clear()
-                book.connected = False
-            affected.append(self.eligibility(book_exchange, _pair))
+            book.connected = connected
+            affected.append(self.eligibility(book_exchange, book_pair))
         return affected
 
     def eligibility_for(self, pairs: list[tuple[str, str]]) -> list[BookEligibility]:
@@ -126,6 +130,9 @@ class OrderBookManager:
         book = self._books.get(key)
         if book is None:
             book = self._books[key] = OrderBook()
+            exchanges = self._exchanges_by_pair.setdefault(event.pair, [])
+            exchanges.append(event.exchange)
+            exchanges.sort()
         book.connected = self._exchange_connected.get(event.exchange, True)
         received_at = self._clock() if received_monotonic_ns is None else received_monotonic_ns
 
@@ -221,20 +228,34 @@ class OrderBookManager:
     def eligibility(
         self, exchange: str, pair: str, now_monotonic_ns: int | None = None
     ) -> BookEligibility:
+        return self._evaluate(exchange, pair, now_monotonic_ns)[0]
+
+    def _evaluate(
+        self, exchange: str, pair: str, now_monotonic_ns: int | None = None
+    ) -> tuple[BookEligibility, TopOfBook | None]:
+        """Decide eligibility and return the top of book that decision validated.
+
+        Eligibility already has to read the top of book to reject incomplete and
+        crossed books, so callers that want both get them from one pass instead
+        of recomputing the status and then asking for the quote separately.
+        """
         book = self._books.get((exchange, pair))
         now = self._clock() if now_monotonic_ns is None else now_monotonic_ns
         if book is None:
             connected = self._exchange_connected.get(exchange, True)
-            return BookEligibility(
-                exchange,
-                pair,
-                False,
-                False,
-                connected,
+            return (
+                BookEligibility(
+                    exchange=exchange,
+                    pair=pair,
+                    initialized=False,
+                    continuous=False,
+                    connected=connected,
+                    age_ns=None,
+                    max_age_ns=self._max_age_ns,
+                    eligible=False,
+                    reason="missing" if connected else "disconnected",
+                ),
                 None,
-                self._max_age_ns,
-                False,
-                "missing" if connected else "disconnected",
             )
         age_ns = (
             None
@@ -242,6 +263,7 @@ class OrderBookManager:
             else max(0, now - book.last_received_monotonic_ns)
         )
         reason = None
+        top: TopOfBook | None = None
         if not book.connected:
             reason = "disconnected"
         elif not book.initialized:
@@ -256,38 +278,52 @@ class OrderBookManager:
                 reason = "incomplete"
             elif top.best_bid_price >= top.best_ask_price:
                 reason = "crossed"
-        return BookEligibility(
-            exchange,
-            pair,
-            book.initialized,
-            book.continuous,
-            book.connected,
-            age_ns,
-            self._max_age_ns,
-            reason is None,
-            reason,
+        status = BookEligibility(
+            exchange=exchange,
+            pair=pair,
+            initialized=book.initialized,
+            continuous=book.continuous,
+            connected=book.connected,
+            age_ns=age_ns,
+            max_age_ns=self._max_age_ns,
+            eligible=reason is None,
+            reason=reason,
         )
+        return status, top if status.eligible else None
 
     def eligible_top_of_book(
         self, exchange: str, pair: str, now_monotonic_ns: int | None = None
     ) -> TopOfBook | None:
-        if not self.eligibility(exchange, pair, now_monotonic_ns).eligible:
-            return None
-        return self.top_of_book(exchange, pair)
+        return self._evaluate(exchange, pair, now_monotonic_ns)[1]
 
-    def eligible_books(self, pair: str, now_monotonic_ns: int | None = None) -> list[TopOfBook]:
+    def eligible_books(
+        self,
+        pair: str,
+        now_monotonic_ns: int | None = None,
+        known: TopOfBook | None = None,
+    ) -> list[TopOfBook]:
         """Every eligible top of book for one pair, or nothing if fewer than two.
 
         The manager already knows which exchanges hold a book for this pair, so
         callers do not supply a venue roster and cannot drift from the adapters
         that are actually running.
+
+        `known` is an eligible top this caller already obtained for one of the
+        pair's exchanges at this same instant, which the ingestion path always
+        has for the book it just updated. It replaces that one evaluation and
+        nothing else; every other venue is still evaluated here.
         """
-        books = [
-            top
-            for exchange, book_pair in sorted(self._books)
-            if book_pair == pair
-            if (top := self.eligible_top_of_book(exchange, pair, now_monotonic_ns)) is not None
-        ]
+        if known is not None and known.pair != pair:
+            known = None
+        books: list[TopOfBook] = []
+        for exchange in self._exchanges_by_pair.get(pair, ()):
+            top: TopOfBook | None
+            if known is not None and known.exchange == exchange:
+                top = known
+            else:
+                top = self._evaluate(exchange, pair, now_monotonic_ns)[1]
+            if top is not None:
+                books.append(top)
         return books if len(books) >= 2 else []
 
     def known_pairs(self) -> list[tuple[str, str]]:

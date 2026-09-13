@@ -6,7 +6,7 @@ import pytest
 from arb import main
 from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager
-from arb.types import EventKind, LiveMessage, MarketEvent, PriceLevel
+from arb.types import BookEligibility, EventKind, LiveMessage, MarketEvent, PriceLevel
 
 
 def snapshot(exchange: str, bid: str = "100", ask: str = "101") -> MarketEvent:
@@ -44,6 +44,11 @@ class RecordingBroadcaster:
         self.books.append((exchange, pair, message))
         self.messages.append(message)
 
+    async def broadcast_status(self, status: BookEligibility, *, immediate: bool) -> None:
+        message = LiveMessage(type="book_status", payload=status.as_payload())
+        self.books.append((status.exchange, status.pair, message))
+        self.messages.append(message)
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("enqueue_accepted", [True, False])
@@ -58,12 +63,9 @@ async def test_processing_order_and_payloads(monkeypatch, enqueue_accepted) -> N
     store = Mock(enqueue=AsyncMock(return_value=enqueue_accepted))
     broadcaster = RecordingBroadcaster()
     for name in (
-        "book_eligible",
-        "events_ingested_total",
-        "book_updates_total",
-        "book_staleness_seconds",
+        "book_metrics",
         "detection_latency_seconds",
-        "opportunities_total",
+        "opportunity_counter",
     ):
         metric = Mock()
         monkeypatch.setattr(main, name, metric)
@@ -263,12 +265,9 @@ async def test_event_receipt_time_drives_freshness(monkeypatch) -> None:
     clock.time_ns.return_value = 123
     monkeypatch.setattr(main, "time", clock)
     for name in (
-        "book_eligible",
-        "events_ingested_total",
-        "book_updates_total",
-        "book_staleness_seconds",
+        "book_metrics",
         "detection_latency_seconds",
-        "opportunities_total",
+        "opportunity_counter",
     ):
         monkeypatch.setattr(main, name, Mock())
     manager = OrderBookManager(clock=lambda: 9_000)
@@ -297,12 +296,9 @@ async def test_processing_delay_can_make_received_event_ineligible(monkeypatch) 
     clock.monotonic_ns.return_value = 2_001
     monkeypatch.setattr(main, "time", clock)
     for name in (
-        "book_eligible",
-        "events_ingested_total",
-        "book_updates_total",
-        "book_staleness_seconds",
+        "book_metrics",
         "detection_latency_seconds",
-        "opportunities_total",
+        "opportunity_counter",
     ):
         monkeypatch.setattr(main, name, Mock())
     broadcaster = RecordingBroadcaster()

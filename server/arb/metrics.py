@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from functools import cache
+
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 events_ingested_total = Counter("arb_events_ingested_total", "Market events ingested", ["exchange"])
@@ -67,6 +70,36 @@ background_task_failures_total = Counter(
     "Unexpected background task exits",
     ["task"],
 )
+
+
+@dataclass(frozen=True)
+class BookMetrics:
+    """The per-book metric children resolved once instead of per event.
+
+    `labels()` re-validates and re-hashes its arguments on every call, which the
+    ingestion path would otherwise pay several times for every accepted update
+    even though a book's label values never change.
+    """
+
+    ingested: Counter
+    updates: Counter
+    eligible: Gauge
+    staleness: Gauge
+
+
+@cache
+def book_metrics(exchange: str, pair: str) -> BookMetrics:
+    return BookMetrics(
+        ingested=events_ingested_total.labels(exchange=exchange),
+        updates=book_updates_total.labels(exchange=exchange, pair=pair),
+        eligible=book_eligible.labels(exchange=exchange, pair=pair),
+        staleness=book_staleness_seconds.labels(exchange=exchange, pair=pair),
+    )
+
+
+@cache
+def opportunity_counter(pair: str) -> Counter:
+    return opportunities_total.labels(pair=pair)
 
 
 def render_metrics() -> tuple[bytes, str]:

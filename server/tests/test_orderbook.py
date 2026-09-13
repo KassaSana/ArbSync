@@ -386,3 +386,61 @@ def test_cached_top_tracks_size_updates_deletions_gaps_and_recovery() -> None:
     assert manager.top_of_book("gemini", "BTC-USD").best_bid_price == Decimal("90")
     manager.set_exchange_connected("gemini", False)
     assert manager.top_of_book("gemini", "BTC-USD") is None
+
+
+def test_eligible_books_matches_per_venue_eligibility_sweep() -> None:
+    """The fast per-pair path must agree with evaluating each venue separately.
+
+    `eligible_books` skips re-evaluating the book its caller just updated and
+    reads a pair index instead of scanning every key, so it could silently
+    diverge from the canonical decision it is supposed to share.
+    """
+    manager = OrderBookManager(clock=lambda: 1_000)
+    venues = ("gemini", "coinbase", "binance")
+    for exchange in venues:
+        manager.apply(
+            event(
+                kind=EventKind.SNAPSHOT,
+                sequence=1,
+                bids=[("100", "1")],
+                asks=[("101", "1")],
+                exchange=exchange,
+            )
+        )
+    # A second pair must not leak into the first pair's result.
+    manager.apply(
+        event(
+            kind=EventKind.SNAPSHOT,
+            sequence=1,
+            bids=[("10", "1")],
+            asks=[("11", "1")],
+            exchange="gemini",
+            pair="ETH-USD",
+        )
+    )
+
+    def sweep(pair: str) -> list:
+        found = [
+            top
+            for exchange, book_pair in sorted(manager._books)
+            if book_pair == pair
+            if (top := manager.eligible_top_of_book(exchange, pair, 1_000)) is not None
+        ]
+        return found if len(found) >= 2 else []
+
+    assert manager.eligible_books("BTC-USD", 1_000) == sweep("BTC-USD")
+    assert len(manager.eligible_books("BTC-USD", 1_000)) == 3
+    assert manager.eligible_books("ETH-USD", 1_000) == sweep("ETH-USD") == []
+
+    # Passing the caller's already-validated top must not change the outcome.
+    known = manager.top_of_book("coinbase", "BTC-USD")
+    assert manager.eligible_books("BTC-USD", 1_000, known=known) == sweep("BTC-USD")
+
+    # A top for another pair must never be substituted in.
+    other_pair_top = manager.top_of_book("gemini", "ETH-USD")
+    assert manager.eligible_books("BTC-USD", 1_000, known=other_pair_top) == sweep("BTC-USD")
+
+    # Dropping one venue must drop it from both paths identically.
+    manager.set_exchange_connected("binance", False)
+    assert manager.eligible_books("BTC-USD", 1_000) == sweep("BTC-USD")
+    assert len(manager.eligible_books("BTC-USD", 1_000)) == 2

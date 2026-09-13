@@ -12,7 +12,7 @@ from starlette.websockets import WebSocketState
 
 from arb.adapters.base import ExchangeAdapter
 from arb.broadcast import LiveBroadcaster
-from arb.metrics import book_eligible, book_staleness_seconds, render_metrics
+from arb.metrics import book_metrics, render_metrics
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
 from arb.types import LiveMessage
@@ -162,13 +162,10 @@ def create_app(
     @app.get("/metrics")
     async def metrics() -> Response:
         for status in book_manager.eligibility_for(tracked_pairs):
-            book_eligible.labels(exchange=status.exchange, pair=status.pair).set(
-                1 if status.eligible else 0
-            )
+            metrics_for_book = book_metrics(status.exchange, status.pair)
+            metrics_for_book.eligible.set(1 if status.eligible else 0)
             if status.age_ns is not None:
-                book_staleness_seconds.labels(exchange=status.exchange, pair=status.pair).set(
-                    status.age_ns / 1_000_000_000
-                )
+                metrics_for_book.staleness.set(status.age_ns / 1_000_000_000)
         payload, content_type = render_metrics()
         return Response(content=payload, media_type=content_type)
 
