@@ -44,7 +44,7 @@ def create_app(
     broadcaster: LiveBroadcaster,
     adapters: Iterable[ExchangeAdapter] = (),
     expected_pairs: Iterable[tuple[str, str]] = (),
-    started_at_holder: list[int] | None = None,
+    started_at_ns: int | None = None,
     background_failures: Callable[[], list[dict[str, str]]] = lambda: [],
     cors_allowed_origins: Iterable[str] = (),
 ) -> FastAPI:
@@ -57,7 +57,7 @@ def create_app(
     )
     adapter_list = list(adapters)
     tracked_pairs = list(expected_pairs)
-    started_at: list[int] = started_at_holder if started_at_holder is not None else [time.time_ns()]
+    started_at: int = time.time_ns() if started_at_ns is None else started_at_ns
 
     @app.get("/api/opportunities/recent")
     async def recent_opportunities(
@@ -74,8 +74,8 @@ def create_app(
     async def system_overview() -> dict[str, object]:
         all_time = await store.extended_stats(window_ns=None)
         return {
-            "started_at_ns": str(started_at[0]),
-            "uptime_seconds": max(0, (time.time_ns() - started_at[0]) // 1_000_000_000),
+            "started_at_ns": str(started_at),
+            "uptime_seconds": max(0, (time.time_ns() - started_at) // 1_000_000_000),
             "all_time_count": all_time["count"],
             "all_time_max_spread_pct": all_time["max_spread_pct"],
             "all_time_peak_minute": serialize_peak(await store.peak_minute(window_ns=None)),

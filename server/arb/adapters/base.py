@@ -3,7 +3,6 @@ from __future__ import annotations
 import abc
 import asyncio
 import json
-import logging
 import random
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -12,17 +11,7 @@ from inspect import isawaitable
 from typing import Any
 
 import httpx
-
-try:
-    import structlog
-except ModuleNotFoundError:  # pragma: no cover - fallback for minimal environments
-
-    class _StructlogFallback:
-        @staticmethod
-        def get_logger(name: str) -> logging.Logger:
-            return logging.getLogger(name)
-
-    structlog = _StructlogFallback()  # type: ignore[assignment]
+import structlog
 
 from arb.metrics import adapter_reconnects_total
 from arb.types import MarketEvent

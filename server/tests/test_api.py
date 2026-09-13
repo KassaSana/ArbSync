@@ -549,16 +549,14 @@ def _seed_opp(store: OpportunityStore, **kwargs: Any) -> ArbitrageOpportunity:
 async def test_system_overview_reports_uptime_and_started_at(tmp_path: Path) -> None:
     store = OpportunityStore(str(tmp_path / "ov.sqlite3"))
     await store.initialize()
-    started_at_holder = [time.time_ns() - 5_000_000_000]  # started 5s ago
+    started_at_ns = time.time_ns() - 5_000_000_000  # started 5s ago
     client = TestClient(
-        create_app(
-            store, OrderBookManager(), LiveBroadcaster(), started_at_holder=started_at_holder
-        )
+        create_app(store, OrderBookManager(), LiveBroadcaster(), started_at_ns=started_at_ns)
     )
     response = client.get("/api/system/overview")
     assert response.status_code == 200
     body = response.json()
-    assert body["started_at_ns"] == str(started_at_holder[0])
+    assert body["started_at_ns"] == str(started_at_ns)
     assert body["uptime_seconds"] >= 5
     assert body["all_time_count"] == 0
     assert body["all_time_peak_minute"] is None

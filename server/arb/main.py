@@ -175,7 +175,7 @@ async def consume_adapter(
 async def run_pipeline(config_path: str | Path = "config.toml") -> None:
     configure_logging()
     config = load_config(config_path)
-    started_at_holder: list[int] = [time.time_ns()]
+    started_at_ns = time.time_ns()
     book_manager = OrderBookManager(max_age_seconds=config.order_books.max_age_seconds)
     detector = ArbitrageDetector(threshold_pct=Decimal(str(config.detector.threshold_pct)))
     store = OpportunityStore(
@@ -225,7 +225,7 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
         broadcaster,
         adapters=adapters,
         expected_pairs=expected_pairs,
-        started_at_holder=started_at_holder,
+        started_at_ns=started_at_ns,
         background_failures=supervisor.failures,
         cors_allowed_origins=config.server.cors_allowed_origins,
     )
