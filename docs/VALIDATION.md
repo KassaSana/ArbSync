@@ -119,6 +119,17 @@ of CPU per 60-second run at 1,100 events/second, so persistence does not cross i
 investigation gate. The main-thread profile reports elapsed self time rather than exact
 per-stage CPU; the worker measurement uses a quantized Windows per-thread CPU clock.
 
+The [2026-09-13 optimization measurement](../artifacts/benchmarks/performance/optimization-20260913.md)
+compares the commit before four optimization commits against the commit after them, both
+measured on the same host in the same session. At 1,100 events/second mean process CPU fell
+from 27.13-29.35% to 9.75-14.87% of one core and send-to-detection p99 fell from 298.5-644.7 ms
+to 46.5-176.6 ms, with no missing events or queue losses in any run. At the representative
+110/s rate the difference is within run-to-run spread. Two of thirteen runs on the changed
+code failed to exit within the harness's 60-second graceful window, against zero of nine on
+the baseline; measurements were complete in both cases and a four-run reproduction did not
+reproduce it. That shutdown observation is open, and the record names a candidate mechanism
+in the reused SQLite writer connection.
+
 ## Statistics query scaling
 
 The statistics endpoints previously aggregated every stored opportunity inside
