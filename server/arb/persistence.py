@@ -137,6 +137,16 @@ class OpportunityStore:
         self._failure_event = asyncio.Event()
         self._accepted_count = 0
         self._flushed_count = 0
+        # Opened on the first flush and held until the worker stops, so writing
+        # no longer pays connection setup and statement recompilation every
+        # interval. Owned by the single `run` worker, which is also the only
+        # writer: `initialize` deliberately does not open it, so a store that is
+        # never run leaks no connection and no aiosqlite thread. Readers below
+        # still open their own short-lived connections, because WAL allows
+        # concurrent readers and sharing this one would serialize API reads onto
+        # the writer's thread and interleave them with an open write transaction.
+        self._db: aiosqlite.Connection | None = None
+        self._worker_started = False
         persistence_unflushed_rows.set(0)
 
     @property
@@ -194,6 +204,7 @@ class OpportunityStore:
 
     async def run(self) -> None:
         batch: list[ArbitrageOpportunity] = []
+        self._worker_started = True
         try:
             while True:
                 try:
@@ -216,6 +227,10 @@ class OpportunityStore:
         except Exception as exc:
             self._mark_failed("worker_failed", exc)
             raise
+        finally:
+            # The worker owns the writer connection, so it outlives `close`,
+            # which only queues the sentinel this loop is still draining.
+            await self._close_db()
 
     def _mark_failed(self, reason: PersistenceFailureReason, exception: Exception) -> None:
         if self._failure is not None:
@@ -232,9 +247,16 @@ class OpportunityStore:
             unflushed_rows=self.unflushed_count,
         )
 
+    async def _close_db(self) -> None:
+        db = self._db
+        self._db = None
+        if db is not None:
+            await db.close()
+
     async def close(self) -> None:
         if self._failure is not None:
             self._report_incomplete_shutdown()
+            await self._close_db()
             return
         if self._closed:
             return
@@ -255,6 +277,11 @@ class OpportunityStore:
                 await asyncio.gather(put_sentinel, wait_for_failure, return_exceptions=True)
             if self._failure is not None:
                 self._report_incomplete_shutdown()
+        if not self._worker_started:
+            # No worker will reach the sentinel and run the `finally` that
+            # closes the connection, so release it here. A worker starting
+            # later still exits on the queued sentinel without touching it.
+            await self._close_db()
 
     def _report_incomplete_shutdown(self) -> None:
         logger.error(
@@ -478,19 +505,22 @@ class OpportunityStore:
             )
             for opp in batch
         ]
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.executemany(
-                """
-                INSERT INTO opportunities (
-                    timestamp_ns, pair, buy_exchange, sell_exchange, buy_price, sell_price,
-                    spread_pct, max_size, quote_asset, theoretical_profit
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
-            await db.executemany(UPSERT_ROLLUP_SQL, _rollup_rows(batch))
-            # One transaction, so the rollup can never record opportunities the
-            # table does not hold, or miss ones it does.
-            await db.commit()
+        db = self._db
+        if db is None:
+            Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            db = self._db = await aiosqlite.connect(self.db_path)
+        await db.executemany(
+            """
+            INSERT INTO opportunities (
+                timestamp_ns, pair, buy_exchange, sell_exchange, buy_price, sell_price,
+                spread_pct, max_size, quote_asset, theoretical_profit
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        await db.executemany(UPSERT_ROLLUP_SQL, _rollup_rows(batch))
+        # One transaction, so the rollup can never record opportunities the
+        # table does not hold, or miss ones it does.
+        await db.commit()
         self._flushed_count += len(batch)
         persistence_unflushed_rows.set(self.unflushed_count)

@@ -269,6 +269,8 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
             reconcile_task,
             return_exceptions=True,
         )
+        # Adapters hold a reused REST pool; close it only once nothing can fetch.
+        await asyncio.gather(*(adapter.aclose() for adapter in adapters), return_exceptions=True)
         await store.close()
         await persistence_task
 

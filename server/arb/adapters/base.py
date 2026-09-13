@@ -54,6 +54,7 @@ class ExchangeAdapter(abc.ABC):
         self._last_sequence_by_pair: dict[str, int] = {}
         self._connection_state_callback: Callable[[str, bool], Awaitable[None] | None] | None = None
         self._reconnect_requested = False
+        self._client: httpx.AsyncClient | None = None
 
     def set_connection_state_callback(
         self, callback: Callable[[str, bool], Awaitable[None] | None]
@@ -154,10 +155,26 @@ class ExchangeAdapter(abc.ABC):
         return json.dumps(payload)
 
     async def client_get_json(self, url: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            return response.json()  # type: ignore[no-any-return]
+        """Fetch one REST payload over this adapter's reused connection pool.
+
+        Snapshot fetches happen on the recovery path, where a fresh client per
+        call means a full TCP and TLS handshake before every resync.
+        """
+        response = await self.http_client().get(url)
+        response.raise_for_status()
+        return response.json()  # type: ignore[no-any-return]
+
+    def http_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=10.0)
+        return self._client
+
+    async def aclose(self) -> None:
+        """Release the shared REST connection pool. Safe to call more than once."""
+        client = self._client
+        self._client = None
+        if client is not None and not client.is_closed:
+            await client.aclose()
 
     def status_snapshot(self, now_ns: int | None = None) -> AdapterStatusSnapshot:
         current_ns = time.time_ns() if now_ns is None else now_ns
