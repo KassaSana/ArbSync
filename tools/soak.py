@@ -11,12 +11,15 @@ import statistics
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+from websockets.asyncio.client import connect as websocket_connect
 
 
 def utc_now() -> str:
@@ -134,6 +137,118 @@ class SamplingGap:
     duration_seconds: float
 
 
+LIVE_MESSAGE_TYPES = {"state_snapshot", "top_of_book", "book_status", "opportunity"}
+
+
+@dataclass
+class WebSocketObservation:
+    url: str
+    connections: int = 0
+    disconnects: int = 0
+    frames: int = 0
+    frames_by_type: Counter[str] = field(default_factory=Counter)
+    invalid_frames: int = 0
+    sequence_gaps: int = 0
+    max_disconnected_seconds: float = 0
+    connected: bool = False
+    disconnected_since: float | None = None
+    last_error: str | None = None
+
+    def disconnected_seconds(self, now: float) -> float:
+        if self.connected or self.disconnected_since is None:
+            return 0
+        return max(0, now - self.disconnected_since)
+
+
+def live_websocket_url(base_url: str) -> str:
+    parsed = urlsplit(base_url)
+    scheme = {"http": "ws", "https": "wss"}.get(parsed.scheme)
+    if scheme is None or not parsed.netloc:
+        raise ValueError(f"base URL must be an absolute HTTP(S) URL; got {base_url!r}")
+    base_path = parsed.path.rstrip("/")
+    return urlunsplit((scheme, parsed.netloc, f"{base_path}/ws/live", "", ""))
+
+
+def validate_live_frame(
+    raw: str | bytes, *, first_frame: bool, previous_sequence: int | None
+) -> tuple[str, int, bool]:
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("live frame must be a JSON object")
+    message_type = payload.get("type")
+    if message_type not in LIVE_MESSAGE_TYPES:
+        raise ValueError(f"unsupported live message type {message_type!r}")
+    if first_frame and message_type != "state_snapshot":
+        raise ValueError("first live frame must be state_snapshot")
+    if not isinstance(payload.get("payload"), dict):
+        raise ValueError("live frame payload must be an object")
+    sequence = payload.get("stream_sequence")
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0:
+        raise ValueError("live frame stream_sequence must be a positive integer")
+    sequence_gap = previous_sequence is not None and sequence != previous_sequence + 1
+    return str(message_type), sequence, sequence_gap
+
+
+async def observe_websocket(
+    observation: WebSocketObservation,
+    ready: asyncio.Event,
+    *,
+    connector: Callable[..., Any] = websocket_connect,
+) -> None:
+    loop = asyncio.get_running_loop()
+    backoff = 1.0
+    while True:
+        try:
+            async with connector(
+                observation.url,
+                open_timeout=10,
+                close_timeout=5,
+                max_size=10_000_000,
+            ) as websocket:
+                observation.connections += 1
+                if observation.disconnected_since is not None:
+                    observation.max_disconnected_seconds = max(
+                        observation.max_disconnected_seconds,
+                        loop.time() - observation.disconnected_since,
+                    )
+                observation.connected = True
+                observation.disconnected_since = None
+                observation.last_error = None
+                backoff = 1.0
+                first_frame = True
+                previous_sequence: int | None = None
+                async for raw in websocket:
+                    try:
+                        message_type, sequence, sequence_gap = validate_live_frame(
+                            raw,
+                            first_frame=first_frame,
+                            previous_sequence=previous_sequence,
+                        )
+                    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+                        observation.invalid_frames += 1
+                        observation.last_error = f"{type(exc).__name__}: {exc}"
+                        continue
+                    if sequence_gap:
+                        observation.sequence_gaps += 1
+                    observation.frames += 1
+                    observation.frames_by_type[message_type] += 1
+                    previous_sequence = sequence
+                    first_frame = False
+                    ready.set()
+                observation.disconnects += 1
+                observation.last_error = "connection closed"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            observation.disconnects += 1
+            observation.last_error = f"{type(exc).__name__}: {exc}"
+        finally:
+            observation.connected = False
+            observation.disconnected_since = observation.disconnected_since or loop.time()
+        await asyncio.sleep(backoff)
+        backoff = min(backoff * 2, 30.0)
+
+
 @dataclass
 class SoakReport:
     started_at: str
@@ -163,6 +278,8 @@ class SoakReport:
     max_sample_gap_seconds: float | None = None
     sampling_gaps: list[SamplingGap] = field(default_factory=list)
     interrupted: bool = False
+    interruption_reasons: list[str] = field(default_factory=list)
+    websocket: WebSocketObservation | None = None
 
     def observe(
         self,
@@ -324,6 +441,29 @@ class SoakReport:
                 f"- `{gap.started_at}` to `{gap.ended_at}`: `{gap.duration_seconds:.1f}s`"
                 for gap in self.sampling_gaps
             )
+        if self.interruption_reasons:
+            lines.extend(["", "## Interruption reasons", ""])
+            lines.extend(f"- {reason}" for reason in self.interruption_reasons)
+        if self.websocket is not None:
+            websocket = self.websocket
+            lines.extend(
+                [
+                    "",
+                    "## WebSocket delivery",
+                    "",
+                    f"- URL: `{websocket.url}`",
+                    f"- Connections: `{websocket.connections}`",
+                    f"- Reconnects: `{max(0, websocket.connections - 1)}`",
+                    f"- Disconnects: `{websocket.disconnects}`",
+                    f"- Frames: `{websocket.frames}`",
+                    f"- Invalid frames: `{websocket.invalid_frames}`",
+                    f"- Sequence gaps: `{websocket.sequence_gaps}`",
+                    f"- Maximum disconnected time: `{websocket.max_disconnected_seconds:.1f}s`",
+                    f"- Last error: `{websocket.last_error or '-'}`",
+                ]
+            )
+            for message_type, count in sorted(websocket.frames_by_type.items()):
+                lines.append(f"- `{message_type}` frames: `{count}`")
         lines.extend(["", "## Operational counters", ""])
         lines.append(
             "Deltas retain metric labels; resets or process restarts invalidate simple subtraction. "
@@ -410,6 +550,8 @@ async def run_soak(
     config: Path | None = None,
     samples_output: Path | None = None,
     max_sample_gap_seconds: float | None = None,
+    websocket_url: str | None = None,
+    observe_websocket_delivery: bool = True,
 ) -> SoakReport:
     report = SoakReport(utc_now(), duration_seconds, sample_interval_seconds)
     report.max_sample_gap_seconds = (
@@ -461,6 +603,23 @@ async def run_soak(
         report.metadata.setdefault("observer_checkout_commit", "unavailable")
         report.metadata["observer_checkout_dirty"] = "unavailable"
     loop = asyncio.get_running_loop()
+    websocket_task: asyncio.Task[None] | None = None
+    websocket_ready = asyncio.Event()
+    if observe_websocket_delivery:
+        report.websocket = WebSocketObservation(websocket_url or live_websocket_url(base_url))
+        websocket_task = asyncio.create_task(observe_websocket(report.websocket, websocket_ready))
+        try:
+            await asyncio.wait_for(websocket_ready.wait(), timeout=15)
+        except TimeoutError:
+            report.interrupted = True
+            report.interruption_reasons.append(
+                "WebSocket did not provide an initial state within 15s"
+            )
+            report.ended_at = utc_now()
+            write_report(output, report)
+            websocket_task.cancel()
+            await asyncio.gather(websocket_task, return_exceptions=True)
+            return report
     started = loop.time()
     next_sample_started = started
     previous_sample_started: float | None = None
@@ -469,6 +628,33 @@ async def run_soak(
         while True:
             elapsed = loop.time() - started
             sampled_at = utc_now()
+            if report.websocket is not None:
+                if report.websocket.invalid_frames or report.websocket.sequence_gaps:
+                    report.interrupted = True
+                    report.interruption_reasons.append(
+                        "WebSocket delivery produced "
+                        f"{report.websocket.invalid_frames} invalid frame(s) and "
+                        f"{report.websocket.sequence_gaps} sequence gap(s)"
+                    )
+                    report.actual_duration_seconds = elapsed
+                    report.ended_at = sampled_at
+                    write_report(output, report)
+                    break
+                disconnected_seconds = report.websocket.disconnected_seconds(loop.time())
+                report.websocket.max_disconnected_seconds = max(
+                    report.websocket.max_disconnected_seconds, disconnected_seconds
+                )
+                if disconnected_seconds > report.max_sample_gap_seconds:
+                    report.interrupted = True
+                    report.interruption_reasons.append(
+                        "WebSocket delivery was disconnected for "
+                        f"{disconnected_seconds:.1f}s (maximum "
+                        f"{report.max_sample_gap_seconds:.1f}s)"
+                    )
+                    report.actual_duration_seconds = elapsed
+                    report.ended_at = sampled_at
+                    write_report(output, report)
+                    break
             if previous_sample_started is not None:
                 gap_seconds = loop.time() - previous_sample_started
                 assert previous_sampled_at is not None
@@ -550,6 +736,9 @@ async def run_soak(
 
     report.actual_duration_seconds = loop.time() - started
     report.ended_at = utc_now()
+    if websocket_task is not None:
+        websocket_task.cancel()
+        await asyncio.gather(websocket_task, return_exceptions=True)
     write_report(output, report)
     return report
 
@@ -572,6 +761,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--samples-output", type=Path, help="New JSONL file for raw sampling evidence"
     )
+    parser.add_argument(
+        "--websocket-url", help="Live WebSocket URL (default: derived from base URL)"
+    )
+    parser.add_argument(
+        "--no-websocket",
+        action="store_true",
+        help="Disable the built-in live delivery consumer (not valid for release evidence)",
+    )
     return parser.parse_args()
 
 
@@ -591,6 +788,8 @@ def main() -> None:
             config=args.config,
             samples_output=args.samples_output,
             max_sample_gap_seconds=args.max_sample_gap_seconds,
+            websocket_url=args.websocket_url,
+            observe_websocket_delivery=not args.no_websocket,
         )
     )
     print(json.dumps({"output": str(args.output), "samples": report.samples}))

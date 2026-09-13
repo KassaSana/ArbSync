@@ -598,7 +598,22 @@ Exceeding it writes the gap to raw and summarized evidence, marks the report int
 exits nonzero, and preserves the partial run for diagnosis. The Windows launcher defaults
 to a two-interval limit and documents the limits of programmatic sleep prevention.
 
-P2 total: **20 engineer-hours plus the 24-hour soak runtime**.
+### [x] ARB-026 — Exercise WebSocket delivery during live soaks
+
+- Priority: P2
+- Estimate: 3 hours
+- Dependencies: ARB-012, ARB-025
+
+Problem: the observer recorded server-side delivery counters without connecting a client,
+so zero queue overflows and sender failures did not demonstrate sustained live delivery.
+
+Resolution: official soaks now connect a lightweight `/ws/live` consumer before their
+timer starts. It continuously drains and validates envelopes, initial state, message types,
+and per-connection stream sequences; reports frames, reconnects, malformed messages and
+outages; and interrupts the run if delivery stays unavailable beyond the sample-gap limit.
+Browser rendering remains covered by the separate connected-dashboard benchmark.
+
+P2 total: **23 engineer-hours plus the 24-hour soak runtime**.
 
 ## Planning summary
 
@@ -606,8 +621,8 @@ P2 total: **20 engineer-hours plus the 24-hour soak runtime**.
 | --- | ---: | --- |
 | P0 release gate | 43 h | Required before public announcement |
 | P1 reliability and maintainability | 54 h | Strongly recommended for the first stable release |
-| P2 operations and evidence | 20 h | Can follow initial publication except where dependencies say otherwise |
-| Total | **117 h** | About 2.9 engineer-weeks at 40 h/week |
+| P2 operations and evidence | 23 h | Can follow initial publication except where dependencies say otherwise |
+| Total | **120 h** | About 3.0 engineer-weeks at 40 h/week |
 
 The critical path is ARB-002 -> ARB-004/ARB-010 -> ARB-021. The highest-risk issue is
 quote-currency conflation, not performance. Avoid expanding into execution modeling until

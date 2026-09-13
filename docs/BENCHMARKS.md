@@ -119,11 +119,14 @@ The launcher script resolves this automatically.
 
 The observer samples per-exchange ingest volume, adapter reconnects and gaps,
 canonical book eligibility and age, readiness, opportunities, background-task
-failures, HTTP failures, recovery durations, and backend RSS. It rewrites the
-report after every sample, so an interrupted run still leaves a readable report
-marked `interrupted`. Windows sleep prevention cannot override forced sleep, shutdown,
-lid policies, or host suspension. Shorter durations are useful as smoke tests but must not be
-described as the required 24-hour soak.
+failures, HTTP failures, recovery durations, and backend RSS. It also keeps a
+lightweight `/ws/live` consumer connected, validates its initial state and stream
+sequence, and reports frames, reconnects, malformed messages, and delivery outages.
+Use `--no-websocket` only for diagnostic runs; such a run is not release evidence. The
+observer rewrites the report after every sample, so an interrupted run still leaves a
+readable report marked `interrupted`. Windows sleep prevention cannot override forced
+sleep, shutdown, lid policies, or host suspension. Shorter durations are useful as smoke
+tests but must not be described as the required 24-hour soak.
 
 Reports also capture labeled persistence, WebSocket, reconciliation, and background
 failure counters, observed backend restarts, and missing RSS samples. Counters first
@@ -138,5 +141,5 @@ target URL, and sampled PID. For a published report, also record the backend's e
 commit, configuration, and environment; the observer may target a different checkout
 or machine. Review failures and all configured books before drawing conclusions:
 `complete` means the observer finished its requested duration, not that the run passed.
-The observer creates no WebSocket clients, so delivery-load evidence requires separately
-connected clients and a description of that workload.
+The built-in consumer establishes continuous protocol-delivery evidence with low overhead;
+the connected-dashboard benchmark remains the evidence for rendering in a real browser.

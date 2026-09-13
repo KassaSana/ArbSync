@@ -176,6 +176,7 @@ A documented 24-hour live soak is still required. It should capture:
 - book eligibility and maximum update age
 - recovery duration after disconnects
 - persistence queue drops and WebSocket client overflows
+- built-in WebSocket delivery frames, sequence continuity, reconnects, and outages
 - background-task and observer HTTP failures
 - process crashes or restarts
 

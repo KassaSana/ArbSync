@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -11,6 +12,9 @@ import soak
 from soak import (
     SamplingGap,
     SoakReport,
+    WebSocketObservation,
+    live_websocket_url,
+    observe_websocket,
     parse_event_counts,
     parse_operational_counters,
     process_rss_bytes,
@@ -90,6 +94,45 @@ arb_book_eligible{exchange="gemini",pair="BTC-USD"} 1.0
 """
 
     assert parse_event_counts(metrics) == {"gemini": 123, "coinbase": 42}
+
+
+def test_live_websocket_url_preserves_base_path_and_selects_secure_scheme() -> None:
+    assert live_websocket_url("http://127.0.0.1:8000") == "ws://127.0.0.1:8000/ws/live"
+    assert live_websocket_url("https://example.test/api/") == "wss://example.test/api/ws/live"
+    with pytest.raises(ValueError, match="absolute HTTP"):
+        live_websocket_url("localhost:8000")
+
+
+@pytest.mark.asyncio
+async def test_websocket_observer_validates_initial_state_sequences_and_frames() -> None:
+    class FakeWebSocket:
+        async def __aenter__(self) -> FakeWebSocket:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def __aiter__(self):  # type: ignore[no-untyped-def]
+            yield json.dumps({"type": "state_snapshot", "payload": {}, "stream_sequence": 10})
+            yield json.dumps({"type": "top_of_book", "payload": {}, "stream_sequence": 12})
+            yield "not json"
+            await asyncio.Future()
+
+    observation = WebSocketObservation("ws://example.test/ws/live")
+    ready = asyncio.Event()
+    task = asyncio.create_task(
+        observe_websocket(observation, ready, connector=lambda *args, **kwargs: FakeWebSocket())
+    )
+    await asyncio.wait_for(ready.wait(), timeout=1)
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert observation.connections == 1
+    assert observation.frames == 2
+    assert observation.frames_by_type == {"state_snapshot": 1, "top_of_book": 1}
+    assert observation.sequence_gaps == 1
+    assert observation.invalid_frames == 1
 
 
 def test_markdown_labels_an_unfinished_run_as_in_progress() -> None:
@@ -223,7 +266,14 @@ async def test_soak_samples_metrics_and_checkpoints_failures(
     evidence = tmp_path / "raw" / "samples.jsonl"
     config = Path(__file__).resolve().parents[2] / "config.toml"
     report = await soak.run_soak(
-        "http://test", 0, 1, None, output, config=config, samples_output=evidence
+        "http://test",
+        0,
+        1,
+        None,
+        output,
+        config=config,
+        samples_output=evidence,
+        observe_websocket_delivery=False,
     )
     assert paths.count("/metrics") == 1
     assert report.completed
@@ -250,11 +300,25 @@ async def test_soak_refuses_to_overwrite_or_mix_evidence(tmp_path: Path) -> None
     evidence.write_text("previous run\n", encoding="utf-8")
     with pytest.raises(FileExistsError):
         await soak.run_soak(
-            "http://unused", 0, 1, None, tmp_path / "report.md", samples_output=evidence
+            "http://unused",
+            0,
+            1,
+            None,
+            tmp_path / "report.md",
+            samples_output=evidence,
+            observe_websocket_delivery=False,
         )
     assert evidence.read_text(encoding="utf-8") == "previous run\n"
     with pytest.raises(ValueError, match="different paths"):
-        await soak.run_soak("http://unused", 0, 1, None, evidence, samples_output=evidence)
+        await soak.run_soak(
+            "http://unused",
+            0,
+            1,
+            None,
+            evidence,
+            samples_output=evidence,
+            observe_websocket_delivery=False,
+        )
 
 
 @pytest.mark.asyncio
@@ -286,6 +350,7 @@ async def test_soak_fails_fast_when_sample_start_gap_exceeds_limit(
         output,
         samples_output=evidence,
         max_sample_gap_seconds=0.005,
+        observe_websocket_delivery=False,
     )
 
     assert report.interrupted
