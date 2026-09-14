@@ -652,6 +652,27 @@ def live_sqlite_worker_threads() -> set[threading.Thread]:
     }
 
 
+async def wait_for_no_new_sqlite_workers(before: set[threading.Thread]) -> None:
+    """Fail unless every worker started during the test has stopped.
+
+    Closing a connection returns once the worker has processed the close, which
+    is a moment before the thread itself finishes, so asserting immediately is a
+    race that fails roughly one run in five. A thread that is genuinely stranded
+    never leaves, so waiting costs nothing when the assertion should fail.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + WAIT_TIMEOUT_SECONDS
+    while True:
+        extra = live_sqlite_worker_threads() - before
+        if not extra:
+            return
+        if loop.time() >= deadline:
+            raise AssertionError(
+                f"aiosqlite worker threads still running after {WAIT_TIMEOUT_SECONDS}s: {extra}"
+            )
+        await asyncio.sleep(0.01)
+
+
 @pytest.mark.asyncio
 async def test_graceful_shutdown_stops_the_reused_writer_thread(tmp_path: Path) -> None:
     """The reused writer connection must not outlive the worker that owns it.
@@ -672,7 +693,7 @@ async def test_graceful_shutdown_stops_the_reused_writer_thread(tmp_path: Path) 
 
     assert store._db is None
     # Threads other tests left running are in both snapshots and cancel out.
-    assert live_sqlite_worker_threads() - before == set()
+    await wait_for_no_new_sqlite_workers(before)
 
 
 @pytest.mark.asyncio
@@ -700,4 +721,4 @@ async def test_cancelled_worker_releases_its_writer_thread(tmp_path: Path) -> No
         await worker
 
     assert store._db is None
-    assert live_sqlite_worker_threads() - before == set()
+    await wait_for_no_new_sqlite_workers(before)
