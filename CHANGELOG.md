@@ -46,8 +46,8 @@ date or tag is claimed until the release checklist has been completed.
 
 - Opportunities exclude fees, slippage, latency, inventory, and execution risk.
   ArbSync does not place trades or convert between quote currencies.
-- The required uninterrupted 24-hour live soak and reviewed report remain outstanding.
-  Short smoke tests and modeled load profiles do not establish day-long reliability.
+- The required uninterrupted multi-hour live soak and reviewed report remain outstanding.
+  Short smoke tests and modeled load profiles do not establish sustained reliability.
 - See [validation status](docs/VALIDATION.md) for exact evidence and unresolved gaps.
 
 See [the release process](docs/RELEASING.md) for versioning and publication checks.

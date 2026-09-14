@@ -32,7 +32,7 @@ versions, full commit ID, commands, outcomes, and links to hosted runs. Local ch
 cannot substitute for a Unix-like runner when only Windows has been exercised.
 
 - [ ] Every P0 dependency is complete, and ARB-016, ARB-017 and ARB-018 remain satisfied.
-- [ ] Review `docs/VALIDATION.md` and clearly state the 24-hour soak's actual status.
+- [ ] Review `docs/VALIDATION.md` and clearly state the soak's actual status and duration.
   Review any soak anomalies before calling the run successful.
 - [ ] Run `uv sync --locked --extra dev` and all four backend checks from the README.
   The backend suite includes an installed-wheel check from outside the checkout.

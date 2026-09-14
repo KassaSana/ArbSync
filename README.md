@@ -248,7 +248,7 @@ See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for methodology and
 [`artifacts/benchmarks/results.json`](artifacts/benchmarks/results.json) for the
 committed raw results.
 The live observer is documented there as well; the repository includes short smoke
-runs, but not yet the planned 24-hour soak.
+runs, but not yet the planned multi-hour soak.
 
 ## Repository map
 
@@ -279,8 +279,8 @@ trading and withdrawal fees, slippage, transfer latency, inventory constraints,
 partial fills, rate limits, and execution risk. The detector uses only top-of-book
 liquidity and is an observability project, not an execution engine or trading system.
 
-The largest remaining validation gap is a documented 24-hour live soak covering
-memory stability, reconnect recovery, sequence gaps, and the 60-second freshness
+The largest remaining validation gap is a documented uninterrupted multi-hour live soak
+covering memory stability, reconnect recovery, sequence gaps, and the 60-second freshness
 threshold.
 
 ## Contributing and support

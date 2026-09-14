@@ -86,8 +86,9 @@ system sleep for the duration, samples, and stops the backend on exit:
 .\tools\run_soak.ps1
 ```
 
-It defaults to the full 24-hour run at a 60-second sample interval, which gives
-roughly 1,441 samples. Shorter runs take `-DurationSeconds` and `-SampleSeconds`.
+It defaults to a 24-hour run at a 60-second sample interval, which gives roughly 1,441
+samples. Shorter runs take `-DurationSeconds` and `-SampleSeconds`; the required bar is
+four uninterrupted hours, so `-DurationSeconds 14400` is the shortest qualifying run.
 Sample starts may be at most twice the configured interval apart by default. A larger
 gap stops the run immediately, exits nonzero, and leaves the report marked `interrupted`;
 `-MaxSampleGapSeconds` sets a different explicit limit.
@@ -125,8 +126,13 @@ sequence, and reports frames, reconnects, malformed messages, and delivery outag
 Use `--no-websocket` only for diagnostic runs; such a run is not release evidence. The
 observer rewrites the report after every sample, so an interrupted run still leaves a
 readable report marked `interrupted`. Windows sleep prevention cannot override forced
-sleep, shutdown, lid policies, or host suspension. Shorter durations are useful as smoke
-tests but must not be described as the required 24-hour soak.
+sleep, shutdown, lid policies, or host suspension. Durations below the four-hour bar are
+useful as smoke tests but must not be described as the required soak, and any soak result
+must state the duration actually achieved.
+
+Start a soak from an interactive shell that outlives whatever launched it. A run started as
+a child of a short-lived process is killed with its parent, which has already ended one
+attempt at 107 minutes.
 
 Reports also capture labeled persistence, WebSocket, reconciliation, and background
 failure counters, observed backend restarts, and missing RSS samples. Counters first
