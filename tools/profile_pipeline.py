@@ -268,8 +268,9 @@ async def scenario(args, rate, browser, output):
                 .locator("tbody tr")
             )
             await expect(spread_rows).to_have_count(len({record["pair"] for record in roster}))
-            await feed.run(110, 5, record=False)
-            await asyncio.sleep(1.5)
+            if args.warmup_seconds:
+                await feed.run(110, args.warmup_seconds, record=False)
+            await asyncio.sleep(args.settle_seconds)
             cdp = await context.new_cdp_session(page)
             await cdp.send("Performance.enable")
             cdp_start = {
@@ -289,7 +290,7 @@ async def scenario(args, rate, browser, output):
                 if progress["processed"] >= len(feed.sent) and progress["persistence_queue"] == 0:
                     break
                 await asyncio.sleep(0.1)
-            await asyncio.sleep(1.5)  # writer's idle flush and browser delivery
+            await asyncio.sleep(args.settle_seconds)  # writer's idle flush and delivery
             elapsed = time.perf_counter() - started
             (await client.post("/__bench/stop")).raise_for_status()
             browser_data = await page.evaluate("window.__arbBrowser.stop()")
@@ -298,7 +299,8 @@ async def scenario(args, rate, browser, output):
             }
             stop.set()
             await sampler
-            await page.screenshot(path=str(output / "dashboard.png"), full_page=True)
+            if not args.no_screenshot:
+                await page.screenshot(path=str(output / "dashboard.png"), full_page=True)
             (output / "browser.json").write_text(json.dumps(browser_data))
             (output / "resources.json").write_text(json.dumps(resources))
             (output / "sent.json").write_text(json.dumps(feed.sent))
@@ -370,22 +372,33 @@ async def main(args):
     source_before = source_fingerprint()
     mode = "profile" if args.profile else "perf"
     env = {**os.environ, "VITE_API_URL": ""}
-    build = await asyncio.create_subprocess_exec(
-        shutil.which("node"),
-        "node_modules/vite/bin/vite.js",
-        "build",
-        "--mode",
-        mode,
-        "--outDir",
-        "dist-perf",
-        cwd=ROOT / "dashboard",
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    build_output, _ = await build.communicate()
-    if build.returncode:
-        raise RuntimeError(build_output.decode())
+    built = ROOT / "dashboard" / "dist-perf"
+    if args.skip_build:
+        # The build takes longer than a short run, so iterating on the harness
+        # rebuilds an unchanged dashboard repeatedly. Reusing it is only safe when
+        # nobody later reads the run as evidence about the dashboard, which is why
+        # the report says which one it got.
+        if not (built / "index.html").exists():
+            raise RuntimeError(f"--skip-build needs an existing build at {built}")
+        if args.profile:
+            raise RuntimeError("--skip-build cannot confirm the build matches --profile mode")
+    else:
+        build = await asyncio.create_subprocess_exec(
+            shutil.which("node"),
+            "node_modules/vite/bin/vite.js",
+            "build",
+            "--mode",
+            mode,
+            "--outDir",
+            "dist-perf",
+            cwd=ROOT / "dashboard",
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        build_output, _ = await build.communicate()
+        if build.returncode:
+            raise RuntimeError(build_output.decode())
     root = ROOT / "artifacts" / "benchmarks" / "performance"
     root.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -447,8 +460,11 @@ async def main(args):
             "seconds": args.seconds,
             "burst_ms": args.burst_ms,
             "pattern": "4 seconds at 0.25x followed by 1 second at 4x",
-            "warmup_seconds": 5,
+            "warmup_seconds": args.warmup_seconds,
+            "settle_seconds": args.settle_seconds,
             "repeats": args.repeats,
+            "dashboard_build": "reused" if args.skip_build else "fresh",
+            "screenshot": not args.no_screenshot,
         },
         "raw_directory": str(output.relative_to(ROOT)),
         "results": results,
@@ -473,9 +489,32 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=0, help="0 selects a fresh localhost port")
     parser.add_argument("--channel", default="chrome")
     parser.add_argument("--profile", action="store_true")
+    # Iteration shortcuts. Every one of them is recorded in the report, because a
+    # run that skipped the build, the warmup or the settle is not comparable with
+    # the committed measurements and must not be mistaken for one later.
+    parser.add_argument(
+        "--skip-build",
+        action="store_true",
+        help="reuse an existing dashboard/dist-perf instead of rebuilding it",
+    )
+    parser.add_argument(
+        "--warmup-seconds",
+        type=float,
+        default=5.0,
+        help="pre-measurement traffic at 110/s that fills the books",
+    )
+    parser.add_argument(
+        "--settle-seconds",
+        type=float,
+        default=1.5,
+        help="pause after warmup and after the drain, for delivery and idle flush",
+    )
+    parser.add_argument("--no-screenshot", action="store_true")
     args = parser.parse_args()
     if args.seconds <= 0 or args.seconds % 5 or args.depth < 2 or args.repeats < 1:
         parser.error("seconds must be a positive multiple of 5; depth >= 2; repeats >= 1")
+    if args.warmup_seconds < 0 or args.settle_seconds < 0:
+        parser.error("warmup-seconds and settle-seconds must not be negative")
     if any(rate <= 0 for rate in args.rates) or args.burst_ms <= 0 or 1000 % args.burst_ms:
         parser.error("rates must be positive; burst-ms must divide 1000")
     if not args.label.replace("-", "").replace("_", "").isalnum():
