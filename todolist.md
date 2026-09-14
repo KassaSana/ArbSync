@@ -576,9 +576,11 @@ archive contents and SHA-256 hashes. The expanded matrix has now run on hosted r
 four jobs, `backend` and `frontend` on both `ubuntu-latest` and `windows-latest`, covering
 the documented backend commands (tests with coverage, mypy, ruff, format, repository hooks,
 release checks, package build and inspection) and dashboard commands (lint, typecheck, test,
-build). A CI badge for that workflow is in the README. No badge was added for the dependency
-audit: it also runs weekly on a schedule, so it can turn red from a new upstream advisory
-without any change to this repository, which would misstate build health on the front page.
+build). The README carries badges for that workflow and for the dependency audit, both of
+which passed on the same push. The audit badge is deliberate on the owner's call: it also
+runs weekly on a schedule, so it can turn red from a new upstream advisory with nothing in
+this repository having changed. For a security-adjacent project that is a signal worth
+surfacing, not a broken build.
 
 Remaining: create the release tag after owner review. Everything else is done.
 
