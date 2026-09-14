@@ -1,5 +1,7 @@
 # ArbSync
 
+[![CI](https://github.com/KassaSana/ArbSync/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KassaSana/ArbSync/actions/workflows/ci.yml)
+
 ArbSync is a real-time, detection-only crypto arbitrage system. It consumes public
 level-2 order books from Gemini, Coinbase, and Binance.US, normalizes each feed,
 maintains trusted in-memory books, detects spreads only across matching base/quote markets, stores theoretical

@@ -571,8 +571,16 @@ versioning rules, and a candidate checklist covering both operating systems, pac
 licenses, scans, and artifact provenance. Publication remains gated on verified runner
 evidence and owner review; no release tag has been created.
 The content/artifact checker now validates filesystem links, package/lock versions,
-archive contents and SHA-256 hashes. Windows checks and package inspection pass locally;
-the expanded Windows/Ubuntu CI matrix still needs hosted execution after an owner-requested push.
+archive contents and SHA-256 hashes. The expanded matrix has now run on hosted runners:
+[run 34796528741](https://github.com/KassaSana/ArbSync/actions/runs/34796528741) passed all
+four jobs, `backend` and `frontend` on both `ubuntu-latest` and `windows-latest`, covering
+the documented backend commands (tests with coverage, mypy, ruff, format, repository hooks,
+release checks, package build and inspection) and dashboard commands (lint, typecheck, test,
+build). A CI badge for that workflow is in the README. No badge was added for the dependency
+audit: it also runs weekly on a schedule, so it can turn red from a new upstream advisory
+without any change to this repository, which would misstate build health on the front page.
+
+Remaining: create the release tag after owner review. Everything else is done.
 
 Acceptance criteria:
 
