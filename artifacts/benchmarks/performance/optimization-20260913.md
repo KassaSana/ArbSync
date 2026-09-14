@@ -107,23 +107,43 @@ and were killed; no run on the baseline code did. The counts are 2 of 13 after v
 9 before. Forced-shutdown recording (`7f7fd0c`) is present on both sides, so this is a
 real difference in the observations and not a difference in instrumentation.
 
-In both cases the backend had already written its measurement output, so the pipeline
-completed and the measurements are intact; only interpreter exit hung. A dedicated
-four-run reproduction on the changed code at 1,100/s did not reproduce it.
+In both cases the backend had already written its measurement output, so the measurements
+are intact. That output is written by the benchmark stop route before shutdown begins, so
+it establishes only that measurement finished, not that the shutdown sequence completed.
+The hang could be anywhere from the first shutdown phase to the interpreter's join of
+non-daemon threads.
 
 `b6735c5` names the relevant hazard in its own commit message: `aiosqlite` worker threads
 are not daemons, so a surviving writer connection blocks interpreter exit. That commit
-guards the path where the store is never run. The leading candidate for the remaining
-cases is a path where `_close_db` does not complete — it clears `self._db` before awaiting
-`close()`, so an interruption at that await drops the only reference to the connection
-while its thread is still alive. The 0.027 MiB database left by one such run, against
-0.96 MiB for every clean run, is consistent with a connection that never closed and never
-checkpointed its WAL.
+guards the path where the store is never run. The 0.027 MiB database left by one hung run,
+against 0.96 MiB for every clean run, is consistent with a connection that never closed and
+never checkpointed its WAL.
 
-This is a candidate mechanism, not a confirmed cause. Confirming it needs a reproduction
-with more runs than were done here; a blind fix would risk masking a different cause.
+The leading candidate was an interrupted `_close_db`, which clears `self._db` before
+awaiting `close()` and so would drop the only reference to a live connection.
+`test_cancelled_worker_releases_its_writer_thread` rules that out: cancelling the worker
+mid-run still executes the `finally`, closes the connection, and leaves no worker thread
+behind. A companion test pins the graceful path. Neither the benchmark backend nor
+`run_pipeline` cancels the persistence worker in the first place — `BackgroundTaskSupervisor.stop`
+only sets a flag — so no known path currently strands the writer.
 
-Source: [non-reproduction](shutdownrepro-perf-20260913T230715Z.json).
+Reproduction attempts now total 24 runs on the changed code with no occurrence: four at 60
+seconds and twenty at 15 seconds, the latter with a maximum shutdown of 0.41 seconds and no
+lingering non-daemon threads in any run. Against the 2-of-13 rate originally observed, 20
+consecutive clean runs would be an unlikely outcome if the per-shutdown probability were
+still that high. The caveat is that both original hangs were 60-second runs, and a
+15-second run accumulates roughly a quarter of the write volume before shutting down, so a
+volume-dependent cause is not excluded.
+
+Rather than keep sampling a rare event, the harness now captures what a single future
+occurrence would need. `tools/perf_backend.py` times each shutdown phase, so the phase with
+no recorded duration is the one that hung; a `faulthandler` watchdog dumps every thread's
+stack from inside the hang; and non-daemon threads surviving the event loop are recorded
+before the interpreter's join can block on them. `tools/profile_pipeline.py` carries all of
+it into each result as `shutdown_diagnostics`.
+
+Sources: [four 60-second runs](shutdownrepro-perf-20260913T230715Z.json),
+[twenty 15-second runs](shutdown20-perf-20260913T235048Z.json).
 
 ## Limits
 

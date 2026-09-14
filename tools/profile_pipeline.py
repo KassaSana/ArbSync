@@ -337,6 +337,12 @@ async def scenario(args, rate, browser, output):
         result["profile_enabled"] = args.profile
         result["shutdown_seconds"] = shutdown_seconds
         result["shutdown_forced"] = shutdown_forced
+        # Absent when the backend never reached the end of its shutdown, which is
+        # itself the finding; the phase that hung is the one with no duration.
+        diagnostics = output / "shutdown.json"
+        result["shutdown_diagnostics"] = (
+            json.loads(diagnostics.read_text()) if diagnostics.exists() else None
+        )
         result["valid"] = (
             not errors
             and not result["failures"]

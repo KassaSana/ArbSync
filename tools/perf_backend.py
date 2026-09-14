@@ -9,9 +9,11 @@ import argparse
 import asyncio
 import contextvars
 import cProfile
+import faulthandler
 import json
 import os
 import pstats
+import threading
 import time
 from dataclasses import dataclass
 from decimal import Decimal
@@ -245,13 +247,37 @@ async def run(args) -> None:
     try:
         await server.serve()
     finally:
-        supervisor.stop()
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        await broadcaster.aclose()
-        await store.close()
-        await persistence
+        # A backend that stops responding during shutdown is otherwise invisible:
+        # the harness only sees a process that never exits and has to be repeated
+        # until it happens again. Timing each phase names the one that stalled,
+        # and the watchdog dumps every thread's stack while it is still stuck.
+        phase_seconds: dict[str, float] = {}
+        stacks = (output / "shutdown-stacks.txt").open("w")
+        faulthandler.dump_traceback_later(15, repeat=True, file=stacks, exit=False)
+
+        async def phase(name: str, awaitable) -> None:
+            started = time.perf_counter()
+            try:
+                await awaitable
+            finally:
+                # A phase that never returns records no duration, so the missing
+                # key is the one that hung.
+                phase_seconds[name] = time.perf_counter() - started
+
+        try:
+            supervisor.stop()
+            for task in tasks:
+                task.cancel()
+            await phase("cancel_tasks", asyncio.gather(*tasks, return_exceptions=True))
+            await phase("broadcaster_aclose", broadcaster.aclose())
+            await phase("store_close", store.close())
+            await phase("persistence_worker", persistence)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+            (output / "shutdown.json").write_text(
+                json.dumps({"phase_seconds": phase_seconds}, indent=2)
+            )
+            stacks.close()
 
 
 if __name__ == "__main__":
@@ -260,4 +286,28 @@ if __name__ == "__main__":
     parser.add_argument("--feed-port", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", action="store_true")
-    asyncio.run(run(parser.parse_args()))
+    arguments = parser.parse_args()
+    asyncio.run(run(arguments))
+
+    # The interpreter joins non-daemon threads before exiting, so a survivor here
+    # is exactly what a process that hangs after finishing its work looks like.
+    # aiosqlite worker threads are not daemons. Record them while recording is
+    # still possible, because the join happens after this and never returns.
+    output_directory = arguments.output.resolve()
+    lingering = sorted(
+        thread.name
+        for thread in threading.enumerate()
+        if thread is not threading.main_thread() and not thread.daemon
+    )
+    diagnostics = output_directory / "shutdown.json"
+    if diagnostics.exists():
+        recorded = json.loads(diagnostics.read_text())
+        recorded["lingering_non_daemon_threads"] = lingering
+        diagnostics.write_text(json.dumps(recorded, indent=2))
+    if lingering:
+        # Dump stacks from inside the hanging join rather than leaving the
+        # harness to kill a silent process. The harness still times and records
+        # the forced exit, so this only adds evidence.
+        faulthandler.dump_traceback_later(
+            20, file=(output_directory / "join-stacks.txt").open("w"), exit=False
+        )

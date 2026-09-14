@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import AsyncMock, Mock
 
 import aiosqlite
 import pytest
+from aiosqlite.core import _connection_worker_thread
 from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
 from arb.persistence import OpportunityStore
 from arb.types import ArbitrageOpportunity
@@ -628,3 +630,74 @@ async def test_sub_minute_timeseries_buckets_do_not_use_the_rollup(tmp_path: Pat
     assert [point["count"] for point in points] == [1, 1]
     # Floats via SQL MAX(CAST(... AS REAL)), matching the pre-rollup format.
     assert [str(point["max_spread_pct"]) for point in points] == ["2.0", "3.0"]
+
+
+def live_sqlite_worker_threads() -> set[threading.Thread]:
+    """Every aiosqlite worker thread still running.
+
+    aiosqlite runs each connection on a plain `Thread` that is not a daemon, so
+    one left alive after the event loop closes blocks interpreter exit instead
+    of raising anything a test would otherwise notice. The threads carry no
+    distinguishing name, so they are identified by the function they run.
+
+    `threading.enumerate` also reports threads that have finished but have not
+    been reaped yet, so callers comparing before and after would otherwise see
+    an earlier test's expiring thread as a change of their own making.
+    """
+    return {
+        thread
+        for thread in threading.enumerate()
+        if getattr(thread, "_target", None) is _connection_worker_thread
+        if thread.is_alive()
+    }
+
+
+@pytest.mark.asyncio
+async def test_graceful_shutdown_stops_the_reused_writer_thread(tmp_path: Path) -> None:
+    """The reused writer connection must not outlive the worker that owns it.
+
+    The per-flush connection this replaced was closed by its own context manager
+    every interval, so nothing previously depended on shutdown ordering to
+    release it. One connection now spans the whole run.
+    """
+    store = OpportunityStore(
+        str(tmp_path / "db.sqlite3"), batch_size=1, flush_interval_seconds=0.05
+    )
+    await store.initialize()
+    before = live_sqlite_worker_threads()
+    worker = asyncio.create_task(store.run())
+    assert await store.enqueue(make_opp(1))
+    await store.close()
+    await asyncio.wait_for(worker, timeout=WAIT_TIMEOUT_SECONDS)
+
+    assert store._db is None
+    # Threads other tests left running are in both snapshots and cancel out.
+    assert live_sqlite_worker_threads() - before == set()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_worker_releases_its_writer_thread(tmp_path: Path) -> None:
+    """Cancellation must release the writer too, not just the sentinel path.
+
+    Shutdown normally drains a sentinel, but a worker can also be cancelled. The
+    `finally` in `run` is what closes the connection in that case, and it clears
+    the attribute before awaiting the close, so an interrupted close would strand
+    a thread no one holds a reference to.
+    """
+    store = OpportunityStore(
+        str(tmp_path / "db.sqlite3"), batch_size=1, flush_interval_seconds=0.05
+    )
+    await store.initialize()
+    before = live_sqlite_worker_threads()
+    worker = asyncio.create_task(store.run())
+    assert await store.enqueue(make_opp(1))
+    await wait_for_rows(store, 1)
+    assert store._db is not None
+    assert live_sqlite_worker_threads() - before != set()
+
+    worker.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await worker
+
+    assert store._db is None
+    assert live_sqlite_worker_threads() - before == set()

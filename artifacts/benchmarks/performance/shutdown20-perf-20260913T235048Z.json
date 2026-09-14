@@ -1,0 +1,3619 @@
+{
+  "label": "shutdown20",
+  "mode": "perf",
+  "created_utc": "20260913T235048Z",
+  "command": [
+    "tools/profile_pipeline.py",
+    "--label",
+    "shutdown20",
+    "--rates",
+    "1100",
+    "--seconds",
+    "15",
+    "--repeats",
+    "20"
+  ],
+  "source_sha256_before": "8d313a25280e4dda5c0e20a77d574fb98ee3b9bde39f42fc32f0872735ef9930",
+  "source_sha256_after": "8d313a25280e4dda5c0e20a77d574fb98ee3b9bde39f42fc32f0872735ef9930",
+  "clock": "perf_counter_ns for sender and worker receipt/freshness/detection; benchmark-only substitution",
+  "machine": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+    "cpu": "Intel64 Family 6 Model 154 Stepping 3, GenuineIntel",
+    "logical_cpus": 16,
+    "memory_gib": 15.648784637451172,
+    "browser": "152.0.7977.83"
+  },
+  "workload": {
+    "initial_levels_per_side": 500,
+    "books": 27,
+    "seconds": 15,
+    "burst_ms": 100,
+    "pattern": "4 seconds at 0.25x followed by 1 second at 4x",
+    "warmup_seconds": 5,
+    "repeats": 20
+  },
+  "raw_directory": "artifacts\\benchmarks\\performance\\raw\\shutdown20-perf-20260913T235048Z",
+  "results": [
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.716794599982677,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.1345195393939394,
+          "p50": 0.1069,
+          "p95": 0.2487,
+          "p99": 0.5192,
+          "max": 14.2895
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.26701426666666667,
+          "p50": 0.1588,
+          "p95": 0.6508,
+          "p99": 1.5355,
+          "max": 14.7471
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 67.98915033939393,
+          "p50": 70.1357,
+          "p95": 159.524,
+          "p99": 213.6121,
+          "max": 236.4156
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 68.12366987878788,
+          "p50": 70.2871,
+          "p95": 159.6964,
+          "p99": 213.7736,
+          "max": 236.5468
+        },
+        "event_loop_lag": {
+          "count": 315,
+          "mean": 5.090746356614141,
+          "p50": 3.0568000220227987,
+          "p95": 15.647100022761151,
+          "p99": 25.852300022961572,
+          "max": 32.05460001481697
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.241779327237357,
+          "p50": 2.875299978768453,
+          "p95": 18.28419999219477,
+          "p99": 24.306100007379428,
+          "max": 25.605700007872656
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 21.72222222222222,
+        "p50": 6.2,
+        "p95": 93.8,
+        "p99": 100.0,
+        "max": 100.0
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.98071676587301,
+        "p50": 74.015625,
+        "p95": 78.92578125,
+        "p99": 79.67578125,
+        "max": 79.67578125
+      },
+      "backend_rss_change_mib": 7.5859375,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 57.86825396825397,
+        "p50": 38.9,
+        "p95": 163.1,
+        "p99": 204.60000000000002,
+        "max": 204.60000000000002
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 654.5814732142857,
+        "p50": 664.81640625,
+        "p95": 671.0546875,
+        "p99": 672.61328125,
+        "max": 672.61328125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 18,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3294,
+        "payload_bytes": 913419,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2129,
+          "mean": 7.904978863316109,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 20.899999999997817
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.645593,
+          "ScriptDuration": 2.478733,
+          "LayoutDuration": 0.405693,
+          "RecalcStyleDuration": 0.799244
+        },
+        "js_heap_start_mib": 5.431396484375,
+        "js_heap_end_mib": 4.914772033691406,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1744,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1567,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1726,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.35809019999578595,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004852500016568229,
+          "broadcaster_aclose": 6.0699996538460255e-05,
+          "store_close": 7.399998139590025e-06,
+          "persistence_worker": 0.007550099981017411
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.626980800007004,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.1320340909090909,
+          "p50": 0.1067,
+          "p95": 0.2562,
+          "p99": 0.5062,
+          "max": 5.4304
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.2560471636363636,
+          "p50": 0.1589,
+          "p95": 0.6297,
+          "p99": 1.2823,
+          "max": 7.9879
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 68.09554345454545,
+          "p50": 71.9819,
+          "p95": 144.4935,
+          "p99": 162.7937,
+          "max": 179.6553
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 68.22757754545454,
+          "p50": 72.111,
+          "p95": 144.5991,
+          "p99": 162.9186,
+          "max": 179.7367
+        },
+        "event_loop_lag": {
+          "count": 313,
+          "mean": 5.131274767382927,
+          "p50": 2.4572999973315746,
+          "p95": 17.385500017553568,
+          "p99": 20.98260002094321,
+          "max": 26.377300004241988
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.205243336968124,
+          "p50": 2.812999999150634,
+          "p95": 18.781699996907264,
+          "p99": 22.546599997440353,
+          "max": 43.66250001476146
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 22.914516129032258,
+        "p50": 11.1,
+        "p95": 93.8,
+        "p99": 100.0,
+        "max": 100.0
+      },
+      "backend_rss_mib": {
+        "count": 62,
+        "mean": 74.66034526209677,
+        "p50": 73.80859375,
+        "p95": 78.40625,
+        "p99": 78.4375,
+        "max": 78.4375
+      },
+      "backend_rss_change_mib": 6.484375,
+      "browser_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 60.63548387096775,
+        "p50": 41.099999999999994,
+        "p95": 168.7,
+        "p99": 212.3,
+        "max": 212.3
+      },
+      "browser_rss_sum_mib": {
+        "count": 62,
+        "mean": 667.1604712701613,
+        "p50": 677.0078125,
+        "p95": 681.81640625,
+        "p99": 682.89453125,
+        "max": 682.89453125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 21,
+        "dashboard": 28
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3312,
+        "payload_bytes": 917879,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2129,
+          "mean": 7.856223579145139,
+          "p50": 7,
+          "p95": 13.899999999997817,
+          "p99": 14,
+          "max": 20.799999999999272
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.724596,
+          "ScriptDuration": 2.545308,
+          "LayoutDuration": 0.402355,
+          "RecalcStyleDuration": 0.799702
+        },
+        "js_heap_start_mib": 4.626457214355469,
+        "js_heap_end_mib": 5.152927398681641,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1705,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1562,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1683,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.37561550000100397,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004681699996581301,
+          "broadcaster_aclose": 6.429999484680593e-05,
+          "store_close": 9.099981980398297e-06,
+          "persistence_worker": 0.006242500006919727
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.714142799988622,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.1361009333333333,
+          "p50": 0.1085,
+          "p95": 0.2662,
+          "p99": 0.5372,
+          "max": 8.5479
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.2703946848484849,
+          "p50": 0.1634,
+          "p95": 0.6787,
+          "p99": 1.3838,
+          "max": 10.246
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 73.71599274545456,
+          "p50": 77.8311,
+          "p95": 167.3343,
+          "p99": 193.7516,
+          "max": 213.5621
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 73.85209367878787,
+          "p50": 77.9245,
+          "p95": 167.6021,
+          "p99": 194.0498,
+          "max": 213.6834
+        },
+        "event_loop_lag": {
+          "count": 315,
+          "mean": 5.4090996888200085,
+          "p50": 1.7461000243201852,
+          "p95": 20.14390000840649,
+          "p99": 26.880100020207465,
+          "max": 29.23360001295805
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.6147639961758005,
+          "p50": 3.4949999826494604,
+          "p95": 17.799599998397753,
+          "p99": 26.838399993721396,
+          "max": 27.564299991354346
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 20.79047619047619,
+        "p50": 5.9,
+        "p95": 87.5,
+        "p99": 93.8,
+        "max": 93.8
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.74336557539682,
+        "p50": 73.875,
+        "p95": 78.6953125,
+        "p99": 78.7109375,
+        "max": 78.7109375
+      },
+      "backend_rss_change_mib": 6.68359375,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 63.22698412698413,
+        "p50": 42.3,
+        "p95": 172.5,
+        "p99": 200.5,
+        "max": 200.5
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 663.3302951388889,
+        "p50": 671.97265625,
+        "p95": 680.92578125,
+        "p99": 682.0546875,
+        "max": 682.0546875
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 26,
+        "dashboard": 24
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3306,
+        "payload_bytes": 916334,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2117,
+          "mean": 7.933585262163439,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 20.899999999997817
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.8723030000000005,
+          "ScriptDuration": 2.629897,
+          "LayoutDuration": 0.412521,
+          "RecalcStyleDuration": 0.828438
+        },
+        "js_heap_start_mib": 5.012607574462891,
+        "js_heap_end_mib": 6.9663543701171875,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1779,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1587,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1747,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.35734689998207614,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.006024000002071261,
+          "broadcaster_aclose": 6.400002166628838e-05,
+          "store_close": 7.90000194683671e-06,
+          "persistence_worker": 0.004691899986937642
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.61763679998694,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.13129724848484847,
+          "p50": 0.1065,
+          "p95": 0.2527,
+          "p99": 0.5063,
+          "max": 5.9573
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.25678963636363633,
+          "p50": 0.16,
+          "p95": 0.6344,
+          "p99": 1.168,
+          "max": 8.9352
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 66.06277215757575,
+          "p50": 72.9668,
+          "p95": 125.2492,
+          "p99": 148.9595,
+          "max": 172.1364
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 66.1940694060606,
+          "p50": 73.1186,
+          "p95": 125.3936,
+          "p99": 149.1584,
+          "max": 172.2524
+        },
+        "event_loop_lag": {
+          "count": 314,
+          "mean": 5.2868923629118,
+          "p50": 2.2351000225171447,
+          "p95": 16.66049999766983,
+          "p99": 21.345200017094612,
+          "max": 27.80650000204332
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.349906666475969,
+          "p50": 3.3885999873746186,
+          "p95": 15.53449998027645,
+          "p99": 26.424000010592863,
+          "max": 26.462399982847273
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 20.717741935483872,
+        "p50": 6.2,
+        "p95": 88.4,
+        "p99": 93.8,
+        "max": 93.8
+      },
+      "backend_rss_mib": {
+        "count": 62,
+        "mean": 74.3601310483871,
+        "p50": 73.515625,
+        "p95": 78.1484375,
+        "p99": 78.93359375,
+        "max": 78.93359375
+      },
+      "backend_rss_change_mib": 7.3125,
+      "browser_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 62.053225806451614,
+        "p50": 38.8,
+        "p95": 184.10000000000002,
+        "p99": 205.8,
+        "max": 205.8
+      },
+      "browser_rss_sum_mib": {
+        "count": 62,
+        "mean": 664.69140625,
+        "p50": 674.734375,
+        "p95": 681.68359375,
+        "p99": 681.79296875,
+        "max": 681.79296875
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 21,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3267,
+        "payload_bytes": 907131,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2124,
+          "mean": 7.881167608286252,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 14.5
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.696804,
+          "ScriptDuration": 2.512178,
+          "LayoutDuration": 0.409666,
+          "RecalcStyleDuration": 0.806396
+        },
+        "js_heap_start_mib": 5.265007019042969,
+        "js_heap_end_mib": 6.918094635009766,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1678,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1596,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1661,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.35190930002136156,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.006480199983343482,
+          "broadcaster_aclose": 7.310000364668667e-05,
+          "store_close": 1.0499992640689015e-05,
+          "persistence_worker": 0.007412000006297603
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.597886200004723,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.12883401212121212,
+          "p50": 0.1059,
+          "p95": 0.2482,
+          "p99": 0.4691,
+          "max": 5.4829
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.24962490909090906,
+          "p50": 0.1576,
+          "p95": 0.6073,
+          "p99": 1.1384,
+          "max": 8.8193
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 57.67822802424242,
+          "p50": 64.6476,
+          "p95": 103.4807,
+          "p99": 121.3693,
+          "max": 147.2832
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 57.80706203636363,
+          "p50": 64.7518,
+          "p95": 103.6087,
+          "p99": 121.4995,
+          "max": 147.3963
+        },
+        "event_loop_lag": {
+          "count": 315,
+          "mean": 4.869794609793831,
+          "p50": 2.3111000191420317,
+          "p95": 15.81030001398176,
+          "p99": 22.213300020666793,
+          "max": 30.479900015052408
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.917073996388353,
+          "p50": 2.4049999774433672,
+          "p95": 20.409799995832145,
+          "p99": 27.29250001721084,
+          "max": 33.136999991256744
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 21.004761904761903,
+        "p50": 6.2,
+        "p95": 93.8,
+        "p99": 106.4,
+        "max": 106.4
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.53298611111111,
+        "p50": 73.63671875,
+        "p95": 78.375,
+        "p99": 79.12890625,
+        "max": 79.12890625
+      },
+      "backend_rss_change_mib": 7.36328125,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 62.82698412698412,
+        "p50": 41.1,
+        "p95": 162.4,
+        "p99": 324.29999999999995,
+        "max": 324.29999999999995
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 667.8918650793651,
+        "p50": 674.796875,
+        "p95": 684.03515625,
+        "p99": 727.3515625,
+        "max": 727.3515625
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 24,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3267,
+        "payload_bytes": 906938,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2166,
+          "mean": 7.7059095106186515,
+          "p50": 7,
+          "p95": 13.899999999997817,
+          "p99": 14,
+          "max": 20.899999999997817
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.737102999999999,
+          "ScriptDuration": 2.548048,
+          "LayoutDuration": 0.402624,
+          "RecalcStyleDuration": 0.80096
+        },
+        "js_heap_start_mib": 5.116138458251953,
+        "js_heap_end_mib": 6.414218902587891,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1669,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1588,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1655,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.4100861999904737,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.0058825000014621764,
+          "broadcaster_aclose": 8.680002065375447e-05,
+          "store_close": 9.899988071992993e-06,
+          "persistence_worker": 0.007155899977078661
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.62360049999552,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.13232096363636364,
+          "p50": 0.1067,
+          "p95": 0.2562,
+          "p99": 0.4973,
+          "max": 19.0678
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.26080295151515154,
+          "p50": 0.1588,
+          "p95": 0.6447,
+          "p99": 1.266,
+          "max": 19.2064
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 60.390978727272724,
+          "p50": 69.1182,
+          "p95": 107.8118,
+          "p99": 120.4287,
+          "max": 133.9324
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 60.52329969090909,
+          "p50": 69.2251,
+          "p95": 107.9789,
+          "p99": 120.5249,
+          "max": 134.044
+        },
+        "event_loop_lag": {
+          "count": 315,
+          "mean": 4.716108260779745,
+          "p50": 1.5863000007811934,
+          "p95": 15.889500034973025,
+          "p99": 22.012800007360056,
+          "max": 34.0120000182651
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 6.007815338283156,
+          "p50": 2.5335000245831907,
+          "p95": 19.89060000050813,
+          "p99": 28.793200006475672,
+          "max": 28.940599993802607
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 23.501612903225805,
+        "p50": 11.1,
+        "p95": 93.8,
+        "p99": 100.0,
+        "max": 100.0
+      },
+      "backend_rss_mib": {
+        "count": 62,
+        "mean": 74.72895665322581,
+        "p50": 73.84375,
+        "p95": 78.6171875,
+        "p99": 78.62890625,
+        "max": 78.62890625
+      },
+      "backend_rss_change_mib": 6.609375,
+      "browser_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 60.650000000000006,
+        "p50": 39.0,
+        "p95": 181.2,
+        "p99": 219.29999999999998,
+        "max": 219.29999999999998
+      },
+      "browser_rss_sum_mib": {
+        "count": 62,
+        "mean": 669.0994833669355,
+        "p50": 678.35546875,
+        "p95": 683.32421875,
+        "p99": 684.25390625,
+        "max": 684.25390625
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 28,
+        "dashboard": 28
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3276,
+        "payload_bytes": 909149,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2148,
+          "mean": 7.777048417132217,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 20.899999999999636
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.741041999999999,
+          "ScriptDuration": 2.548363,
+          "LayoutDuration": 0.404775,
+          "RecalcStyleDuration": 0.812323
+        },
+        "js_heap_start_mib": 5.4952392578125,
+        "js_heap_end_mib": 5.602409362792969,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1684,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1575,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1659,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.31144289998337626,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.006075899989809841,
+          "broadcaster_aclose": 7.080001523718238e-05,
+          "store_close": 8.500006515532732e-06,
+          "persistence_worker": 0.006370400020387024
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.635654299985617,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.13170642424242424,
+          "p50": 0.1068,
+          "p95": 0.2485,
+          "p99": 0.5214,
+          "max": 6.7267
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.261215593939394,
+          "p50": 0.1597,
+          "p95": 0.6571,
+          "p99": 1.2824,
+          "max": 12.971
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 62.60242043030303,
+          "p50": 68.3781,
+          "p95": 118.2991,
+          "p99": 164.0347,
+          "max": 212.6314
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 62.73412685454546,
+          "p50": 68.5073,
+          "p95": 118.468,
+          "p99": 164.1338,
+          "max": 214.9089
+        },
+        "event_loop_lag": {
+          "count": 310,
+          "mean": 5.564090652267389,
+          "p50": 3.381500020623207,
+          "p95": 19.014500023331493,
+          "p99": 23.297300009289756,
+          "max": 27.008800010662526
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.527783323195763,
+          "p50": 1.8291999876964837,
+          "p95": 20.03889999468811,
+          "p99": 24.833699979353696,
+          "max": 43.788099981611595
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 22.62063492063492,
+        "p50": 11.1,
+        "p95": 93.8,
+        "p99": 106.2,
+        "max": 106.2
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.47619047619048,
+        "p50": 73.4375,
+        "p95": 78.42578125,
+        "p99": 79.203125,
+        "max": 79.203125
+      },
+      "backend_rss_change_mib": 7.65625,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 63.73809523809524,
+        "p50": 44.300000000000004,
+        "p95": 174.89999999999998,
+        "p99": 212.5,
+        "max": 212.5
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 667.715091765873,
+        "p50": 677.171875,
+        "p95": 688.19140625,
+        "p99": 688.57421875,
+        "max": 688.57421875
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 12,
+        "dashboard": 25
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3294,
+        "payload_bytes": 913329,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2145,
+          "mean": 7.800792540792541,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 14.299999999999272
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.725911,
+          "ScriptDuration": 2.531568,
+          "LayoutDuration": 0.40428,
+          "RecalcStyleDuration": 0.81066
+        },
+        "js_heap_start_mib": 4.984169006347656,
+        "js_heap_end_mib": 7.165943145751953,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1707,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1628,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1688,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.3053379000048153,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004947200010064989,
+          "broadcaster_aclose": 6.359998951666057e-05,
+          "store_close": 8.600007276982069e-06,
+          "persistence_worker": 0.0064860999991651624
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.5973124000011,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.12613356363636363,
+          "p50": 0.1054,
+          "p95": 0.2377,
+          "p99": 0.4621,
+          "max": 3.8951
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.24774187272727272,
+          "p50": 0.1559,
+          "p95": 0.61,
+          "p99": 1.0904,
+          "max": 7.6834
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 58.93057621818182,
+          "p50": 66.536,
+          "p95": 107.6648,
+          "p99": 127.1686,
+          "max": 148.2043
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 59.056709781818185,
+          "p50": 66.6554,
+          "p95": 107.7783,
+          "p99": 127.2961,
+          "max": 148.3008
+        },
+        "event_loop_lag": {
+          "count": 311,
+          "mean": 5.336818657179102,
+          "p50": 2.903599990531802,
+          "p95": 17.338900011964142,
+          "p99": 23.64080003462732,
+          "max": 29.459499986842275
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.905397325598945,
+          "p50": 1.955399988219142,
+          "p95": 20.670300000347197,
+          "p99": 27.936600003158674,
+          "max": 28.53579996735789
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 21.35483870967742,
+        "p50": 6.2,
+        "p95": 87.5,
+        "p99": 106.2,
+        "max": 106.2
+      },
+      "backend_rss_mib": {
+        "count": 62,
+        "mean": 74.66192036290323,
+        "p50": 73.73046875,
+        "p95": 78.57421875,
+        "p99": 78.60546875,
+        "max": 78.60546875
+      },
+      "backend_rss_change_mib": 6.84375,
+      "browser_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 61.791935483870965,
+        "p50": 41.3,
+        "p95": 187.5,
+        "p99": 200.3,
+        "max": 200.3
+      },
+      "browser_rss_sum_mib": {
+        "count": 62,
+        "mean": 666.2962449596774,
+        "p50": 676.19140625,
+        "p95": 680.9375,
+        "p99": 681.70703125,
+        "max": 681.70703125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 15,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3271,
+        "payload_bytes": 907957,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2167,
+          "mean": 7.696031379787723,
+          "p50": 7,
+          "p95": 13.899999999997817,
+          "p99": 14,
+          "max": 20.599999999998545
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.638696,
+          "ScriptDuration": 2.5057229999999997,
+          "LayoutDuration": 0.40077,
+          "RecalcStyleDuration": 0.787075
+        },
+        "js_heap_start_mib": 5.439807891845703,
+        "js_heap_end_mib": 10.15045166015625,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1650,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1570,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1634,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.3690788999956567,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004303599998820573,
+          "broadcaster_aclose": 4.5599997974932194e-05,
+          "store_close": 7.499998901039362e-06,
+          "persistence_worker": 0.005264600011287257
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.638479499990353,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.12907359999999998,
+          "p50": 0.1058,
+          "p95": 0.2525,
+          "p99": 0.4892,
+          "max": 4.7083
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.2513380484848485,
+          "p50": 0.1576,
+          "p95": 0.6339,
+          "p99": 1.1465,
+          "max": 8.473
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 67.3816760969697,
+          "p50": 71.0773,
+          "p95": 142.9571,
+          "p99": 163.9815,
+          "max": 191.5458
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 67.5107496969697,
+          "p50": 71.206,
+          "p95": 143.0647,
+          "p99": 164.085,
+          "max": 191.7004
+        },
+        "event_loop_lag": {
+          "count": 314,
+          "mean": 5.114656375223551,
+          "p50": 2.2779999999329448,
+          "p95": 15.959999989718199,
+          "p99": 23.335600009886548,
+          "max": 25.50749998772517
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.005265991979589,
+          "p50": 1.4020999951753765,
+          "p95": 18.806600011885166,
+          "p99": 29.939499974716455,
+          "max": 33.66359998472035
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 20.63015873015873,
+        "p50": 6.2,
+        "p95": 82.2,
+        "p99": 106.1,
+        "max": 106.1
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.76357886904762,
+        "p50": 73.87890625,
+        "p95": 78.61328125,
+        "p99": 79.37890625,
+        "max": 79.37890625
+      },
+      "backend_rss_change_mib": 7.3671875,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 58.871428571428574,
+        "p50": 41.300000000000004,
+        "p95": 156.3,
+        "p99": 168.8,
+        "max": 168.8
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 668.6391369047619,
+        "p50": 679.1015625,
+        "p95": 682.875,
+        "p99": 682.94140625,
+        "max": 682.94140625
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 22,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3276,
+        "payload_bytes": 908959,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2166,
+          "mean": 7.715604801477378,
+          "p50": 7,
+          "p95": 13.899999999997817,
+          "p99": 14,
+          "max": 14.200000000000728
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.671284,
+          "ScriptDuration": 2.504244,
+          "LayoutDuration": 0.406203,
+          "RecalcStyleDuration": 0.800676
+        },
+        "js_heap_start_mib": 5.4677734375,
+        "js_heap_end_mib": 5.565616607666016,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1708,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1632,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1692,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.292704399995273,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.006971599999815226,
+          "broadcaster_aclose": 7.51999905332923e-05,
+          "store_close": 8.700008038431406e-06,
+          "persistence_worker": 0.00824819999979809
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.645294999994803,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.12763117575757577,
+          "p50": 0.1055,
+          "p95": 0.2337,
+          "p99": 0.4643,
+          "max": 5.7461
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.2553368484848485,
+          "p50": 0.156,
+          "p95": 0.6369,
+          "p99": 1.3064,
+          "max": 9.3383
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 67.53277553939395,
+          "p50": 70.8311,
+          "p95": 141.8346,
+          "p99": 162.425,
+          "max": 175.8814
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 67.66040671515151,
+          "p50": 70.9297,
+          "p95": 141.9363,
+          "p99": 162.5659,
+          "max": 175.9549
+        },
+        "event_loop_lag": {
+          "count": 312,
+          "mean": 5.2645823783771055,
+          "p50": 2.42840001010336,
+          "p95": 18.745600013062358,
+          "p99": 23.199799994472414,
+          "max": 30.197200016118586
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 6.066915325354785,
+          "p50": 3.291400003945455,
+          "p95": 19.64300000690855,
+          "p99": 25.782499986235052,
+          "max": 26.740600005723536
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 21.614516129032257,
+        "p50": 5.9,
+        "p95": 93.8,
+        "p99": 100.1,
+        "max": 100.1
+      },
+      "backend_rss_mib": {
+        "count": 62,
+        "mean": 74.4729712701613,
+        "p50": 73.54296875,
+        "p95": 78.33984375,
+        "p99": 78.37109375,
+        "max": 78.37109375
+      },
+      "backend_rss_change_mib": 6.4453125,
+      "browser_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 65.97096774193548,
+        "p50": 47.0,
+        "p95": 181.2,
+        "p99": 223.1,
+        "max": 223.1
+      },
+      "browser_rss_sum_mib": {
+        "count": 62,
+        "mean": 668.6864289314516,
+        "p50": 678.75390625,
+        "p95": 684.16015625,
+        "p99": 684.90234375,
+        "max": 684.90234375
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 11,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3280,
+        "payload_bytes": 910028,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2165,
+          "mean": 7.728637413394919,
+          "p50": 7,
+          "p95": 13.899999999997817,
+          "p99": 14,
+          "max": 20.900000000001455
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.768157,
+          "ScriptDuration": 2.586575,
+          "LayoutDuration": 0.411417,
+          "RecalcStyleDuration": 0.815283
+        },
+        "js_heap_start_mib": 5.011074066162109,
+        "js_heap_end_mib": 10.735649108886719,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1705,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1634,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1688,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.3159878000151366,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004772999993292615,
+          "broadcaster_aclose": 6.240000948309898e-05,
+          "store_close": 8.200004231184721e-06,
+          "persistence_worker": 0.010247800004435703
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.622131999989506,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.12130592727272728,
+          "p50": 0.1034,
+          "p95": 0.2193,
+          "p99": 0.4091,
+          "max": 6.7034
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.2348316,
+          "p50": 0.1515,
+          "p95": 0.5563,
+          "p99": 1.0074,
+          "max": 13.3368
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 52.254522751515154,
+          "p50": 57.7498,
+          "p95": 92.6583,
+          "p99": 110.2835,
+          "max": 130.7194
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 52.375828678787876,
+          "p50": 57.8526,
+          "p95": 92.7786,
+          "p99": 110.3775,
+          "max": 130.9392
+        },
+        "event_loop_lag": {
+          "count": 310,
+          "mean": 5.707937749309255,
+          "p50": 3.116900013992563,
+          "p95": 19.21060003223829,
+          "p99": 24.12210000329651,
+          "max": 28.018200013320893
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 6.458132003123562,
+          "p50": 3.410500008612871,
+          "p95": 23.64630001829937,
+          "p99": 30.353300011483952,
+          "max": 32.45050000259653
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 20.287301587301585,
+        "p50": 5.9,
+        "p95": 87.5,
+        "p99": 94.5,
+        "max": 94.5
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.72730654761905,
+        "p50": 73.734375,
+        "p95": 78.73046875,
+        "p99": 79.50390625,
+        "max": 79.50390625
+      },
+      "backend_rss_change_mib": 7.6796875,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 60.32380952380952,
+        "p50": 44.3,
+        "p95": 162.5,
+        "p99": 193.8,
+        "max": 193.8
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 663.2839161706349,
+        "p50": 673.96484375,
+        "p95": 678.9921875,
+        "p99": 679.33984375,
+        "max": 679.33984375
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 27,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3262,
+        "payload_bytes": 905663,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2164,
+          "mean": 7.729112754158966,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 21
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.419855,
+          "ScriptDuration": 2.383177,
+          "LayoutDuration": 0.390767,
+          "RecalcStyleDuration": 0.765383
+        },
+        "js_heap_start_mib": 4.628868103027344,
+        "js_heap_end_mib": 7.013927459716797,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1687,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1618,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1672,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.33585309999762103,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004573399986838922,
+          "broadcaster_aclose": 6.469999789260328e-05,
+          "store_close": 7.99997360445559e-06,
+          "persistence_worker": 0.007557900011306629
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.615955000015674,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.12955376969696972,
+          "p50": 0.1043,
+          "p95": 0.247,
+          "p99": 0.5117,
+          "max": 6.7982
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.2515533212121212,
+          "p50": 0.1541,
+          "p95": 0.6253,
+          "p99": 1.2183,
+          "max": 6.8985
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 60.64286485454545,
+          "p50": 65.3071,
+          "p95": 120.7731,
+          "p99": 144.4407,
+          "max": 162.9791
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 60.77241862424242,
+          "p50": 65.4304,
+          "p95": 120.8749,
+          "p99": 144.527,
+          "max": 163.1398
+        },
+        "event_loop_lag": {
+          "count": 308,
+          "mean": 5.800355851722808,
+          "p50": 3.7489999958779663,
+          "p95": 15.062299993587658,
+          "p99": 22.14710001135245,
+          "max": 76.78420000593178
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.56829800712876,
+          "p50": 3.001200035214424,
+          "p95": 19.483600015519187,
+          "p99": 29.431800008751452,
+          "max": 30.99390002898872
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 22.106349206349208,
+        "p50": 6.2,
+        "p95": 88.1,
+        "p99": 100.0,
+        "max": 100.0
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.33203125,
+        "p50": 73.51953125,
+        "p95": 78.1015625,
+        "p99": 80.4375,
+        "max": 80.4375
+      },
+      "backend_rss_change_mib": 8.75,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 56.31111111111111,
+        "p50": 38.7,
+        "p95": 176.2,
+        "p99": 194.6,
+        "max": 194.6
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 667.0926959325396,
+        "p50": 677.2734375,
+        "p95": 684.0859375,
+        "p99": 685.5703125,
+        "max": 685.5703125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 10,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3289,
+        "payload_bytes": 912142,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2144,
+          "mean": 7.8593283582089555,
+          "p50": 7,
+          "p95": 13.899999999999636,
+          "p99": 14,
+          "max": 21.100000000002183
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.528256,
+          "ScriptDuration": 2.45612,
+          "LayoutDuration": 0.38706,
+          "RecalcStyleDuration": 0.770846
+        },
+        "js_heap_start_mib": 5.227725982666016,
+        "js_heap_end_mib": 4.980052947998047,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1695,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1581,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1678,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.40652799999224953,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004689099994720891,
+          "broadcaster_aclose": 7.619999814778566e-05,
+          "store_close": 8.299975888803601e-06,
+          "persistence_worker": 0.0054475000069942325
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.531162700004643,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.12400602424242424,
+          "p50": 0.1022,
+          "p95": 0.2338,
+          "p99": 0.46,
+          "max": 7.7128
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.2363481696969697,
+          "p50": 0.151,
+          "p95": 0.5827,
+          "p99": 1.0819,
+          "max": 8.068
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 53.578026054545454,
+          "p50": 59.4183,
+          "p95": 96.9438,
+          "p99": 109.2659,
+          "max": 130.6814
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 53.70203207878788,
+          "p50": 59.5451,
+          "p95": 97.0662,
+          "p99": 109.3581,
+          "max": 130.7996
+        },
+        "event_loop_lag": {
+          "count": 310,
+          "mean": 5.412760007123824,
+          "p50": 2.8612000169232488,
+          "p95": 16.20450001792051,
+          "p99": 24.04350001597777,
+          "max": 28.410800034180284
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 5.2006600017193705,
+          "p50": 1.9045000080950558,
+          "p95": 18.80319998599589,
+          "p99": 29.45000000181608,
+          "max": 34.14400000474416
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 61,
+        "mean": 21.885245901639344,
+        "p50": 6.2,
+        "p95": 88.7,
+        "p99": 100.2,
+        "max": 100.2
+      },
+      "backend_rss_mib": {
+        "count": 61,
+        "mean": 74.76639344262296,
+        "p50": 73.98828125,
+        "p95": 78.51953125,
+        "p99": 78.546875,
+        "max": 78.546875
+      },
+      "backend_rss_change_mib": 6.4140625,
+      "browser_cpu_percent_one_core": {
+        "count": 61,
+        "mean": 59.83606557377049,
+        "p50": 41.1,
+        "p95": 164.4,
+        "p99": 200.0,
+        "max": 200.0
+      },
+      "browser_rss_sum_mib": {
+        "count": 61,
+        "mean": 660.9195056352459,
+        "p50": 668.3203125,
+        "p95": 675.8125,
+        "p99": 677.19921875,
+        "max": 677.19921875
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 14,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3267,
+        "payload_bytes": 907136,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2147,
+          "mean": 7.741872380065207,
+          "p50": 7,
+          "p95": 13.899999999997817,
+          "p99": 14,
+          "max": 20.700000000000728
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 5.624827,
+          "ScriptDuration": 2.507965,
+          "LayoutDuration": 0.391256,
+          "RecalcStyleDuration": 0.787889
+        },
+        "js_heap_start_mib": 4.691108703613281,
+        "js_heap_end_mib": 8.598316192626953,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1625,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1540,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1601,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.36348800000268966,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.0045538999838754535,
+          "broadcaster_aclose": 7.800001185387373e-05,
+          "store_close": 9.499985026195645e-06,
+          "persistence_worker": 0.005331599997589365
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.51028449999285,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.04973217575757576,
+          "p50": 0.0404,
+          "p95": 0.092,
+          "p99": 0.1693,
+          "max": 0.8598
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.09026924848484849,
+          "p50": 0.058,
+          "p95": 0.2315,
+          "p99": 0.3977,
+          "max": 1.6575
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 17.756044406060607,
+          "p50": 19.2148,
+          "p95": 32.2106,
+          "p99": 35.299,
+          "max": 39.7042
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 17.805776581818183,
+          "p50": 19.2532,
+          "p95": 32.2534,
+          "p99": 35.3428,
+          "max": 39.743
+        },
+        "event_loop_lag": {
+          "count": 298,
+          "mean": 7.7123550394231195,
+          "p50": 11.205200018594041,
+          "p95": 16.824499994982034,
+          "p99": 22.298900003079325,
+          "max": 24.842699989676476
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 7.091440657774608,
+          "p50": 6.2710999918635935,
+          "p95": 17.06819998798892,
+          "p99": 22.54269999684766,
+          "max": 30.835699988529086
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 10.366129032258065,
+        "p50": 5.9,
+        "p95": 35.2,
+        "p99": 43.8,
+        "max": 43.8
+      },
+      "backend_rss_mib": {
+        "count": 62,
+        "mean": 74.81363407258064,
+        "p50": 73.96484375,
+        "p95": 78.51953125,
+        "p99": 78.55078125,
+        "max": 78.55078125
+      },
+      "backend_rss_change_mib": 6.23828125,
+      "browser_cpu_percent_one_core": {
+        "count": 62,
+        "mean": 31.85967741935484,
+        "p50": 27.799999999999997,
+        "p95": 77.9,
+        "p99": 82.19999999999999,
+        "max": 82.19999999999999
+      },
+      "browser_rss_sum_mib": {
+        "count": 62,
+        "mean": 667.2113155241935,
+        "p50": 674.5234375,
+        "p95": 681.6875,
+        "p99": 681.890625,
+        "max": 681.890625
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 22,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3136,
+        "payload_bytes": 875354,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2386,
+          "mean": 6.937217099748532,
+          "p50": 6.900000000001455,
+          "p95": 7.100000000000364,
+          "p99": 7.200000000000728,
+          "max": 8.099999999999454
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 2.4378379999999997,
+          "ScriptDuration": 1.024658,
+          "LayoutDuration": 0.166668,
+          "RecalcStyleDuration": 0.2909
+        },
+        "js_heap_start_mib": 5.840106964111328,
+        "js_heap_end_mib": 7.778282165527344,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1592,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1566,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1586,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.3038464999990538,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004496400011703372,
+          "broadcaster_aclose": 5.020000389777124e-05,
+          "store_close": 7.499998901039362e-06,
+          "persistence_worker": 0.005524199979845434
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.524664500000654,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.050397448484848485,
+          "p50": 0.0403,
+          "p95": 0.0955,
+          "p99": 0.1782,
+          "max": 0.548
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.0914830606060606,
+          "p50": 0.0594,
+          "p95": 0.2397,
+          "p99": 0.4086,
+          "max": 1.8754
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 18.850886733333333,
+          "p50": 19.9476,
+          "p95": 35.8449,
+          "p99": 44.1478,
+          "max": 52.2028
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 18.901284181818184,
+          "p50": 19.9917,
+          "p95": 35.8925,
+          "p99": 44.2105,
+          "max": 52.2592
+        },
+        "event_loop_lag": {
+          "count": 302,
+          "mean": 6.814006297765855,
+          "p50": 9.097500034840778,
+          "p95": 14.256599999498576,
+          "p99": 21.180300012929365,
+          "max": 27.15330000501126
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 9.154630677658133,
+          "p50": 8.769000007305294,
+          "p95": 19.927300018025562,
+          "p99": 23.80640001501888,
+          "max": 27.52510001300834
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 8.798412698412697,
+        "p50": 0.0,
+        "p95": 35.2,
+        "p99": 50.0,
+        "max": 50.0
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.55096726190476,
+        "p50": 73.7578125,
+        "p95": 78.2265625,
+        "p99": 78.2265625,
+        "max": 78.2265625
+      },
+      "backend_rss_change_mib": 6.2421875,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 29.755555555555553,
+        "p50": 23.5,
+        "p95": 81.2,
+        "p99": 112.5,
+        "max": 112.5
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 663.4255952380952,
+        "p50": 671.4453125,
+        "p95": 677.3671875,
+        "p99": 679.30078125,
+        "max": 679.30078125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 27,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3097,
+        "payload_bytes": 865987,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2388,
+          "mean": 6.937269681742042,
+          "p50": 6.900000000001455,
+          "p95": 7.100000000002183,
+          "p99": 7.299999999999272,
+          "max": 7.799999999999272
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 2.477298,
+          "ScriptDuration": 1.070074,
+          "LayoutDuration": 0.170062,
+          "RecalcStyleDuration": 0.291692
+        },
+        "js_heap_start_mib": 5.4715576171875,
+        "js_heap_end_mib": 6.450366973876953,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1591,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1565,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1586,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.21184349997201934,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.003402700007427484,
+          "broadcaster_aclose": 4.429998807609081e-05,
+          "store_close": 6.599992047995329e-06,
+          "persistence_worker": 0.0046252000029198825
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.500380600016797,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.04850044848484848,
+          "p50": 0.0389,
+          "p95": 0.0926,
+          "p99": 0.1722,
+          "max": 3.7497
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.08687316363636365,
+          "p50": 0.0559,
+          "p95": 0.2239,
+          "p99": 0.3784,
+          "max": 3.8396
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 17.997902745454542,
+          "p50": 19.6023,
+          "p95": 31.6984,
+          "p99": 40.6233,
+          "max": 47.0902
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 18.046403193939394,
+          "p50": 19.6426,
+          "p95": 31.742,
+          "p99": 40.6618,
+          "max": 47.1243
+        },
+        "event_loop_lag": {
+          "count": 303,
+          "mean": 6.894803636230178,
+          "p50": 9.458800021093339,
+          "p95": 13.770300021860749,
+          "p99": 26.484500005608425,
+          "max": 28.53710003546439
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 7.844082009784567,
+          "p50": 7.3162000044249,
+          "p95": 19.768100028159097,
+          "p99": 22.731300006853417,
+          "max": 22.886800026753917
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 8.207936507936509,
+        "p50": 5.9,
+        "p95": 31.2,
+        "p99": 37.5,
+        "max": 37.5
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.55933779761905,
+        "p50": 73.72265625,
+        "p95": 78.42578125,
+        "p99": 78.4296875,
+        "max": 78.4296875
+      },
+      "backend_rss_change_mib": 6.71875,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 23.403174603174605,
+        "p50": 18.7,
+        "p95": 56.2,
+        "p99": 83.5,
+        "max": 83.5
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 634.2134796626984,
+        "p50": 643.609375,
+        "p95": 651.14453125,
+        "p99": 651.58984375,
+        "max": 651.58984375
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 20,
+        "dashboard": 28
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3108,
+        "payload_bytes": 868796,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2384,
+          "mean": 6.937290268456376,
+          "p50": 6.900000000001455,
+          "p95": 7.19999999999709,
+          "p99": 7.200000000000728,
+          "max": 7.600000000000364
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 2.286231,
+          "ScriptDuration": 1.009426,
+          "LayoutDuration": 0.153938,
+          "RecalcStyleDuration": 0.269423
+        },
+        "js_heap_start_mib": 5.61260986328125,
+        "js_heap_end_mib": 6.097095489501953,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1604,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1578,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1596,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.3156093999859877,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004860799992457032,
+          "broadcaster_aclose": 6.10999995842576e-05,
+          "store_close": 9.500014130026102e-06,
+          "persistence_worker": 0.005845599982421845
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.500724799989257,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.0497612303030303,
+          "p50": 0.0398,
+          "p95": 0.0961,
+          "p99": 0.1738,
+          "max": 0.5631
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.08920852727272728,
+          "p50": 0.0585,
+          "p95": 0.2311,
+          "p99": 0.3711,
+          "max": 0.9964
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 18.320765727272725,
+          "p50": 19.6673,
+          "p95": 33.7145,
+          "p99": 39.4711,
+          "max": 49.3127
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 18.37052695757576,
+          "p50": 19.7049,
+          "p95": 33.7581,
+          "p99": 39.5062,
+          "max": 49.3554
+        },
+        "event_loop_lag": {
+          "count": 305,
+          "mean": 6.440744923759771,
+          "p50": 9.133000014116988,
+          "p95": 13.690899999346584,
+          "p99": 18.425899994326755,
+          "max": 27.872300037415698
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 8.851350664238756,
+          "p50": 8.193099987693131,
+          "p95": 22.614099987549707,
+          "p99": 26.044199999887496,
+          "max": 28.768599993782118
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 64,
+        "mean": 6.6046875,
+        "p50": 0.0,
+        "p95": 29.5,
+        "p99": 37.5,
+        "max": 37.5
+      },
+      "backend_rss_mib": {
+        "count": 64,
+        "mean": 74.20062255859375,
+        "p50": 73.3515625,
+        "p95": 78.0703125,
+        "p99": 78.0859375,
+        "max": 78.0859375
+      },
+      "backend_rss_change_mib": 6.59375,
+      "browser_cpu_percent_one_core": {
+        "count": 64,
+        "mean": 25.4453125,
+        "p50": 22.2,
+        "p95": 59.0,
+        "p99": 86.4,
+        "max": 86.4
+      },
+      "browser_rss_sum_mib": {
+        "count": 64,
+        "mean": 667.3428955078125,
+        "p50": 673.75,
+        "p95": 682.421875,
+        "p99": 682.61328125,
+        "max": 682.61328125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 22,
+        "dashboard": 28
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3131,
+        "payload_bytes": 874166,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2384,
+          "mean": 6.937206375838926,
+          "p50": 6.900000000001455,
+          "p95": 7.100000000002183,
+          "p99": 7.299999999999272,
+          "max": 7.700000000000728
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 2.306228,
+          "ScriptDuration": 1.006852,
+          "LayoutDuration": 0.156555,
+          "RecalcStyleDuration": 0.271206
+        },
+        "js_heap_start_mib": 5.036613464355469,
+        "js_heap_end_mib": 7.454689025878906,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1605,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1579,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1599,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.29815679998137057,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.007260599988512695,
+          "broadcaster_aclose": 8.900000830180943e-05,
+          "store_close": 1.209997572004795e-05,
+          "persistence_worker": 0.007549800007836893
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.5207883999974,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.04933686060606061,
+          "p50": 0.0397,
+          "p95": 0.0936,
+          "p99": 0.1765,
+          "max": 0.848
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.0880419393939394,
+          "p50": 0.058,
+          "p95": 0.2211,
+          "p99": 0.3708,
+          "max": 1.4211
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 17.838596733333336,
+          "p50": 19.378,
+          "p95": 31.9918,
+          "p99": 36.2813,
+          "max": 41.2053
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 17.887933593939394,
+          "p50": 19.421,
+          "p95": 32.0302,
+          "p99": 36.3185,
+          "max": 41.2415
+        },
+        "event_loop_lag": {
+          "count": 297,
+          "mean": 7.597204721011441,
+          "p50": 11.447500000940636,
+          "p95": 13.77740001771599,
+          "p99": 19.615700002759695,
+          "max": 24.157300009392202
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 7.873983334284276,
+          "p50": 7.56800000090152,
+          "p95": 18.122400011634454,
+          "p99": 23.88779999455437,
+          "max": 24.432100006379187
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 9.38888888888889,
+        "p50": 5.6,
+        "p95": 37.5,
+        "p99": 46.5,
+        "max": 46.5
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.59244791666667,
+        "p50": 73.69140625,
+        "p95": 78.35546875,
+        "p99": 78.37109375,
+        "max": 78.37109375
+      },
+      "backend_rss_change_mib": 6.47265625,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 28.96666666666667,
+        "p50": 23.5,
+        "p95": 68.6,
+        "p99": 106.1,
+        "max": 106.1
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 666.7253224206349,
+        "p50": 673.84765625,
+        "p95": 680.921875,
+        "p99": 680.96875,
+        "max": 680.96875
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 28,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3143,
+        "payload_bytes": 877178,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2387,
+          "mean": 6.937285295349811,
+          "p50": 6.900000000001455,
+          "p95": 7.100000000002183,
+          "p99": 7.299999999999272,
+          "max": 7.600000000000364
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 2.296204,
+          "ScriptDuration": 0.989967,
+          "LayoutDuration": 0.158042,
+          "RecalcStyleDuration": 0.274389
+        },
+        "js_heap_start_mib": 5.577064514160156,
+        "js_heap_end_mib": 5.263092041015625,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1608,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1583,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1603,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.29066150001017377,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.0034921999904327095,
+          "broadcaster_aclose": 4.3400010326877236e-05,
+          "store_close": 6.700021913275123e-06,
+          "persistence_worker": 0.005576100025791675
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.51799029999529,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.04903764242424242,
+          "p50": 0.0392,
+          "p95": 0.0937,
+          "p99": 0.1773,
+          "max": 1.5006
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.08871824242424244,
+          "p50": 0.0562,
+          "p95": 0.2294,
+          "p99": 0.4013,
+          "max": 1.991
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 17.463235454545455,
+          "p50": 19.1732,
+          "p95": 31.1074,
+          "p99": 35.6145,
+          "max": 40.0655
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 17.512273096969697,
+          "p50": 19.2169,
+          "p95": 31.1534,
+          "p99": 35.6461,
+          "max": 40.1057
+        },
+        "event_loop_lag": {
+          "count": 296,
+          "mean": 7.9025533863436115,
+          "p50": 11.492099991301075,
+          "p95": 16.740400023991242,
+          "p99": 26.770000025862828,
+          "max": 28.109400038374588
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 8.552651336649433,
+          "p50": 8.248800004366785,
+          "p95": 21.943700005067512,
+          "p99": 24.11309999297373,
+          "max": 28.67509998031892
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 7.606349206349206,
+        "p50": 0.0,
+        "p95": 29.5,
+        "p99": 37.5,
+        "max": 37.5
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.63082837301587,
+        "p50": 73.76171875,
+        "p95": 78.5078125,
+        "p99": 78.51953125,
+        "max": 78.51953125
+      },
+      "backend_rss_change_mib": 6.515625,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 24.55079365079365,
+        "p50": 22.299999999999997,
+        "p95": 49.9,
+        "p99": 76.4,
+        "max": 76.4
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 668.2537202380952,
+        "p50": 675.046875,
+        "p95": 682.87890625,
+        "p99": 683.1640625,
+        "max": 683.1640625
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 20,
+        "dashboard": 27
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3135,
+        "payload_bytes": 875293,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2384,
+          "mean": 6.9401426174496645,
+          "p50": 6.900000000001455,
+          "p95": 7.100000000002183,
+          "p99": 7.300000000000182,
+          "max": 14.30000000000291
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 2.271623,
+          "ScriptDuration": 0.97056,
+          "LayoutDuration": 0.15805,
+          "RecalcStyleDuration": 0.268005
+        },
+        "js_heap_start_mib": 5.499507904052734,
+        "js_heap_end_mib": 6.260398864746094,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1589,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1565,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1583,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.22015489998739213,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.0057514999934937805,
+          "broadcaster_aclose": 4.369998350739479e-05,
+          "store_close": 6.89999433234334e-06,
+          "persistence_worker": 0.005206500005442649
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    },
+    {
+      "sent_events": 16500,
+      "processed_events": 16500,
+      "unmatched_events": 0,
+      "missing_events": 0,
+      "measurement_seconds_including_drain": 16.54871840000851,
+      "latency_ms": {
+        "receive_to_detection": {
+          "count": 16500,
+          "mean": 0.049334115151515145,
+          "p50": 0.0396,
+          "p95": 0.0947,
+          "p99": 0.1765,
+          "max": 3.047
+        },
+        "receive_to_handler_complete": {
+          "count": 16500,
+          "mean": 0.08805635757575758,
+          "p50": 0.0568,
+          "p95": 0.2242,
+          "p99": 0.3778,
+          "max": 3.3187
+        },
+        "send_to_receive": {
+          "count": 16500,
+          "mean": 17.065895381818184,
+          "p50": 18.8077,
+          "p95": 29.5672,
+          "p99": 33.2835,
+          "max": 36.6126
+        },
+        "send_to_detection": {
+          "count": 16500,
+          "mean": 17.115229496969697,
+          "p50": 18.8445,
+          "p95": 29.613,
+          "p99": 33.3213,
+          "max": 36.6595
+        },
+        "event_loop_lag": {
+          "count": 297,
+          "mean": 7.542391589674973,
+          "p50": 11.259000020800158,
+          "p95": 14.896400010911748,
+          "p99": 18.873299995902926,
+          "max": 27.79180000652559
+        },
+        "generator_schedule_lag": {
+          "count": 150,
+          "mean": 8.391689338798946,
+          "p50": 7.811400020727888,
+          "p95": 21.315600024536252,
+          "p99": 25.44650001800619,
+          "max": 28.24990000226535
+        }
+      },
+      "backend_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 7.480952380952381,
+        "p50": 5.6,
+        "p95": 29.5,
+        "p99": 39.9,
+        "max": 39.9
+      },
+      "backend_rss_mib": {
+        "count": 63,
+        "mean": 74.40786210317461,
+        "p50": 73.66796875,
+        "p95": 78.1796875,
+        "p99": 78.20703125,
+        "max": 78.20703125
+      },
+      "backend_rss_change_mib": 6.4375,
+      "browser_cpu_percent_one_core": {
+        "count": 63,
+        "mean": 25.263492063492063,
+        "p50": 22.2,
+        "p95": 59.0,
+        "p99": 73.0,
+        "max": 73.0
+      },
+      "browser_rss_sum_mib": {
+        "count": 63,
+        "mean": 665.2139136904761,
+        "p50": 671.58984375,
+        "p95": 677.1171875,
+        "p99": 677.1328125,
+        "max": 677.1328125
+      },
+      "queue_drops": {
+        "arb_persistence_queue_drops_total": 0,
+        "arb_ws_client_queue_overflows_total": 0.0,
+        "arb_opportunities_total": 1723.0,
+        "arb_events_ingested_total": 16500.0
+      },
+      "sampled_queue_max": {
+        "persistence": 31,
+        "dashboard": 28
+      },
+      "connected_clients_min": 1,
+      "persisted_rows_including_warmup": 1782,
+      "database_mib": 0.26953125,
+      "browser": {
+        "messages": 3059,
+        "payload_bytes": 856924,
+        "reconnections": 0,
+        "close_codes": [],
+        "frame_interval_ms": {
+          "count": 2392,
+          "mean": 6.937332775919733,
+          "p50": 6.900000000001455,
+          "p95": 7.200000000000728,
+          "p99": 7.300000000001091,
+          "max": 7.599999999998545
+        },
+        "frames_over_50ms": 0,
+        "long_task_ms": {
+          "count": 0,
+          "mean": null,
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "react_render_ms": {},
+        "profile_samples_dropped": 0,
+        "cdp_duration_seconds": {
+          "TaskDuration": 2.319793,
+          "ScriptDuration": 1.016602,
+          "LayoutDuration": 0.159789,
+          "RecalcStyleDuration": 0.271797
+        },
+        "js_heap_start_mib": 5.820339202880859,
+        "js_heap_end_mib": 8.773929595947266,
+        "errors": [],
+        "react_profile_available": false
+      },
+      "failures": [],
+      "adapters": [
+        {
+          "exchange": "gemini",
+          "connected": true,
+          "last_message_age_ms": 1630,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "coinbase",
+          "connected": true,
+          "last_message_age_ms": 1607,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        },
+        {
+          "exchange": "binance",
+          "connected": true,
+          "last_message_age_ms": 1624,
+          "gap_count": 0,
+          "reconnect_count": 0,
+          "last_error": null
+        }
+      ],
+      "rate_per_second": 1100,
+      "profile_enabled": false,
+      "shutdown_seconds": 0.2770054000138771,
+      "shutdown_forced": false,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.0042351000010967255,
+          "broadcaster_aclose": 3.7999998312443495e-05,
+          "store_close": 5.699985194951296e-06,
+          "persistence_worker": 0.004928000009385869
+        },
+        "lingering_non_daemon_threads": []
+      },
+      "valid": true
+    }
+  ]
+}
