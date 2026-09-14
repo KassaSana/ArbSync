@@ -294,11 +294,17 @@ if __name__ == "__main__":
     # aiosqlite worker threads are not daemons. Record them while recording is
     # still possible, because the join happens after this and never returns.
     output_directory = arguments.output.resolve()
-    lingering = sorted(
-        thread.name
+    surviving = [
+        thread
         for thread in threading.enumerate()
-        if thread is not threading.main_thread() and not thread.daemon
-    )
+        if thread is not threading.main_thread() and not thread.daemon and thread.is_alive()
+    ]
+    # A worker whose connection was just closed can still be finishing, which is
+    # not the condition this is watching for and would otherwise be reported on
+    # perfectly clean exits. The interpreter is about to join these anyway.
+    for thread in surviving:
+        thread.join(timeout=1.0)
+    lingering = sorted(thread.name for thread in surviving if thread.is_alive())
     diagnostics = output_directory / "shutdown.json"
     if diagnostics.exists():
         recorded = json.loads(diagnostics.read_text())

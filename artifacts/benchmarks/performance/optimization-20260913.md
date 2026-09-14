@@ -127,13 +127,17 @@ behind. A companion test pins the graceful path. Neither the benchmark backend n
 `run_pipeline` cancels the persistence worker in the first place — `BackgroundTaskSupervisor.stop`
 only sets a flag — so no known path currently strands the writer.
 
-Reproduction attempts now total 24 runs on the changed code with no occurrence: four at 60
-seconds and twenty at 15 seconds, the latter with a maximum shutdown of 0.41 seconds and no
-lingering non-daemon threads in any run. Against the 2-of-13 rate originally observed, 20
-consecutive clean runs would be an unlikely outcome if the per-shutdown probability were
-still that high. The caveat is that both original hangs were 60-second runs, and a
-15-second run accumulates roughly a quarter of the write volume before shutting down, so a
-volume-dependent cause is not excluded.
+Reproduction attempts now total 124 shutdowns on the changed code with no occurrence: four
+harness runs at 60 seconds, twenty at 15 seconds, and 100 cycles of the lifecycle probe
+described below. No run left a lingering non-daemon thread, and the slowest shutdown across
+all of them was 1.17 seconds. Against the 2-of-13 rate originally observed, this many
+consecutive clean shutdowns would be a very unlikely outcome if the per-shutdown
+probability were still that high.
+
+The caveat is workload volume, not count. Both original hangs were 60-second harness runs;
+the 15-second runs accumulate roughly a quarter of the write volume before shutting down
+and the probe cycles far less, so a cause that depends on how much was written is not
+excluded by these attempts.
 
 Rather than keep sampling a rare event, the harness now captures what a single future
 occurrence would need. `tools/perf_backend.py` times each shutdown phase, so the phase with
@@ -142,8 +146,20 @@ stack from inside the hang; and non-daemon threads surviving the event loop are 
 before the interpreter's join can block on them. `tools/profile_pipeline.py` carries all of
 it into each result as `shutdown_diagnostics`.
 
+The surviving-thread check needed calibration, which the probe found immediately: a worker
+whose connection has just been closed can still be finishing, and `threading.enumerate`
+reports it. That first appeared as a stranded writer on a cycle that had exited cleanly in
+0.345 seconds. Survivors are now joined briefly and only reported if they outlast that, so
+the field means a thread that is actually stuck rather than one on its way out.
+
+Sampling shutdowns is also no longer expensive. `tools/shutdown_probe.py` runs the same
+backend start and stop path without a browser, a warmup or a dashboard build, at about 1.1
+seconds per shutdown against roughly 25 in the measurement harness. It reports startup and
+shutdown behavior only and is explicitly not a capacity benchmark.
+
 Sources: [four 60-second runs](shutdownrepro-perf-20260913T230715Z.json),
-[twenty 15-second runs](shutdown20-perf-20260913T235048Z.json).
+[twenty 15-second runs](shutdown20-perf-20260913T235048Z.json),
+[100 lifecycle cycles](shutdown100-lifecycle-20260914T010205Z.json).
 
 ## Limits
 
