@@ -42,9 +42,9 @@ jobs:
       - name: Run mypy
         run: uv run mypy --strict server/arb
       - name: Run ruff
-        run: uv run ruff check server
+        run: uv run ruff check server tools
       - name: Check backend formatting
-        run: uv run ruff format --check server
+        run: uv run ruff format --check server tools
       - name: Exercise repository hooks
         run: uv run pre-commit run --all-files
       - name: Check release content

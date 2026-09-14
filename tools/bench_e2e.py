@@ -9,7 +9,6 @@ from decimal import Decimal
 from typing import Any
 
 import websockets
-
 from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager
 from arb.types import EventKind, MarketEvent, PriceLevel

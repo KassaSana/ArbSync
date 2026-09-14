@@ -52,8 +52,8 @@ From the repository root:
 ```powershell
 uv run pytest -q server/tests
 uv run mypy --strict server/arb
-uv run ruff check server
-uv run ruff format --check server
+uv run ruff check server tools
+uv run ruff format --check server tools
 uv run python -m arb.main
 ```
 
