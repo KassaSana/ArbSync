@@ -127,17 +127,18 @@ behind. A companion test pins the graceful path. Neither the benchmark backend n
 `run_pipeline` cancels the persistence worker in the first place — `BackgroundTaskSupervisor.stop`
 only sets a flag — so no known path currently strands the writer.
 
-Reproduction attempts now total 124 shutdowns on the changed code with no occurrence: four
-harness runs at 60 seconds, twenty at 15 seconds, and 100 cycles of the lifecycle probe
-described below. No run left a lingering non-daemon thread, and the slowest shutdown across
-all of them was 1.17 seconds. Against the 2-of-13 rate originally observed, this many
-consecutive clean shutdowns would be a very unlikely outcome if the per-shutdown
-probability were still that high.
+Reproduction attempts now total 144 shutdowns on the changed code with no occurrence: four
+harness runs at 60 seconds, twenty at 15 seconds, 100 short cycles of the lifecycle probe
+described below, and 20 probe cycles at matched volume. No run left a lingering non-daemon
+thread, no run failed to exit, and the slowest shutdown across all of them was 1.17 seconds.
+Against the 2-of-13 rate originally observed, this many consecutive clean shutdowns would be
+a very unlikely outcome if the per-shutdown probability were still that high.
 
-The caveat is workload volume, not count. Both original hangs were 60-second harness runs;
-the 15-second runs accumulate roughly a quarter of the write volume before shutting down
-and the probe cycles far less, so a cause that depends on how much was written is not
-excluded by these attempts.
+Volume was the caveat that count could not answer, because both original hangs were
+60-second harness runs and every earlier attempt carried less. The 20 matched cycles each
+sent and processed 66,000 events, the same as the runs that hung, and each exited in at most
+0.63 seconds. The remaining deviation is that those cycles ran four backends at a time
+rather than one, so host conditions differed even though the per-backend workload did not.
 
 Rather than keep sampling a rare event, the harness now captures what a single future
 occurrence would need. `tools/perf_backend.py` times each shutdown phase, so the phase with
@@ -159,7 +160,8 @@ shutdown behavior only and is explicitly not a capacity benchmark.
 
 Sources: [four 60-second runs](shutdownrepro-perf-20260913T230715Z.json),
 [twenty 15-second runs](shutdown20-perf-20260913T235048Z.json),
-[100 lifecycle cycles](shutdown100-lifecycle-20260914T010205Z.json).
+[100 lifecycle cycles](shutdown100-lifecycle-20260914T010205Z.json),
+[20 volume-matched cycles](shutdownvolume-lifecycle-20260914T012811Z.json).
 
 ## Limits
 

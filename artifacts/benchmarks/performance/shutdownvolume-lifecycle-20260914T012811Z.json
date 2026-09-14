@@ -1,0 +1,393 @@
+{
+  "label": "shutdownvolume",
+  "mode": "lifecycle",
+  "created_utc": "20260914T012811Z",
+  "command": [
+    "tools/shutdown_probe.py",
+    "--label",
+    "shutdownvolume",
+    "--cycles",
+    "20",
+    "--seconds",
+    "60",
+    "--concurrency",
+    "4"
+  ],
+  "machine": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+    "logical_cpus": 16
+  },
+  "workload": {
+    "cycles": 20,
+    "seconds": 60.0,
+    "rate_per_second": 1100,
+    "initial_levels_per_side": 500,
+    "concurrency": 4
+  },
+  "limits": "Lifecycle probe, not a capacity benchmark: no browser, no warmup, no dashboard build. Reports startup and shutdown behavior only; its CPU, latency and throughput are not comparable with the measurement harness.",
+  "raw_directory": "artifacts\\benchmarks\\performance\\raw\\shutdownvolume-lifecycle-20260914T012811Z",
+  "elapsed_seconds": 310.3,
+  "results": [
+    {
+      "cycle": 1,
+      "ready_seconds": 1.358,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.358,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.0030097999842837453,
+          "broadcaster_aclose": 2.8300011763349175e-05,
+          "store_close": 5.199981387704611e-06,
+          "persistence_worker": 0.007829400012269616
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 2,
+      "ready_seconds": 1.227,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.442,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.00461519998498261,
+          "broadcaster_aclose": 3.7900026654824615e-05,
+          "store_close": 5.3000112529844046e-06,
+          "persistence_worker": 0.009829500020714477
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 3,
+      "ready_seconds": 1.172,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.515,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.13333379998221062,
+          "broadcaster_aclose": 3.5600009141489863e-05,
+          "store_close": 4.6000059228390455e-06,
+          "persistence_worker": 0.008743599988520145
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 4,
+      "ready_seconds": 1.259,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.407,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.00354850001167506,
+          "broadcaster_aclose": 4.129999433644116e-05,
+          "store_close": 4.7000066842883825e-06,
+          "persistence_worker": 0.010338299995055422
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 5,
+      "ready_seconds": 1.465,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.449,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.010958700004266575,
+          "broadcaster_aclose": 5.750000127591193e-05,
+          "store_close": 5.299982149153948e-06,
+          "persistence_worker": 0.010791100008646026
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 6,
+      "ready_seconds": 1.226,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.44,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.011788200004957616,
+          "broadcaster_aclose": 2.9199989512562752e-05,
+          "store_close": 7.90000194683671e-06,
+          "persistence_worker": 0.012558499991428107
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 7,
+      "ready_seconds": 1.295,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.401,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.005187000002479181,
+          "broadcaster_aclose": 4.839999019168317e-05,
+          "store_close": 7.700000423938036e-06,
+          "persistence_worker": 0.0094377999776043
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 8,
+      "ready_seconds": 1.036,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.445,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004435500013642013,
+          "broadcaster_aclose": 3.4199998481199145e-05,
+          "store_close": 5.799985956400633e-06,
+          "persistence_worker": 0.010325500014005229
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 9,
+      "ready_seconds": 1.47,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.377,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.033147099980851635,
+          "broadcaster_aclose": 3.6200013710185885e-05,
+          "store_close": 5.80001506023109e-06,
+          "persistence_worker": 0.010058799991384149
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 10,
+      "ready_seconds": 1.317,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.518,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.010382599983131513,
+          "broadcaster_aclose": 3.700001980178058e-05,
+          "store_close": 5.900015821680427e-06,
+          "persistence_worker": 0.009736599982716143
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 11,
+      "ready_seconds": 1.442,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.378,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.003128399985143915,
+          "broadcaster_aclose": 2.8399983420968056e-05,
+          "store_close": 4.5000051613897085e-06,
+          "persistence_worker": 0.00846879999153316
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 12,
+      "ready_seconds": 1.3,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.488,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004128999979002401,
+          "broadcaster_aclose": 3.8300000596791506e-05,
+          "store_close": 5.399982910603285e-06,
+          "persistence_worker": 0.009711000020615757
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 13,
+      "ready_seconds": 1.528,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.364,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.003587300016079098,
+          "broadcaster_aclose": 3.819999983534217e-05,
+          "store_close": 5.1000097300857306e-06,
+          "persistence_worker": 0.010198799980571494
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 14,
+      "ready_seconds": 1.396,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.475,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.0036164000048302114,
+          "broadcaster_aclose": 3.239998477511108e-05,
+          "store_close": 4.6000059228390455e-06,
+          "persistence_worker": 0.008061899978201836
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 15,
+      "ready_seconds": 1.053,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.406,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.003013300010934472,
+          "broadcaster_aclose": 2.8000009479001164e-05,
+          "store_close": 4.5000051613897085e-06,
+          "persistence_worker": 0.0074591000156942755
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 16,
+      "ready_seconds": 0.986,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.63,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004249400022672489,
+          "broadcaster_aclose": 6.689998554065824e-05,
+          "store_close": 5.999987479299307e-06,
+          "persistence_worker": 0.007799399987561628
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 17,
+      "ready_seconds": 1.433,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.354,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.007586599997011945,
+          "broadcaster_aclose": 3.169997944496572e-05,
+          "store_close": 4.0000013541430235e-06,
+          "persistence_worker": 0.008817499998258427
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 18,
+      "ready_seconds": 1.462,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.37,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.002962600003229454,
+          "broadcaster_aclose": 2.500001573935151e-05,
+          "store_close": 4.3000036384910345e-06,
+          "persistence_worker": 0.00832950000767596
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 19,
+      "ready_seconds": 1.049,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.364,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004126100015128031,
+          "broadcaster_aclose": 4.780001472681761e-05,
+          "store_close": 6.200018106028438e-06,
+          "persistence_worker": 0.008689000009326264
+        },
+        "lingering_non_daemon_threads": []
+      }
+    },
+    {
+      "cycle": 20,
+      "ready_seconds": 0.994,
+      "sent_events": 66000,
+      "processed_events": 66000,
+      "shutdown_seconds": 0.345,
+      "shutdown_forced": false,
+      "exit_code": 0,
+      "shutdown_diagnostics": {
+        "phase_seconds": {
+          "cancel_tasks": 0.004021899978397414,
+          "broadcaster_aclose": 3.57000099029392e-05,
+          "store_close": 4.9000082071870565e-06,
+          "persistence_worker": 0.00827329998719506
+        },
+        "lingering_non_daemon_threads": []
+      }
+    }
+  ]
+}

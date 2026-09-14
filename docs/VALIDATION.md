@@ -126,10 +126,10 @@ from 27.13-29.35% to 9.75-14.87% of one core and send-to-detection p99 fell from
 to 46.5-176.6 ms, with no missing events or queue losses in any run. At the representative
 110/s rate the difference is within run-to-run spread. Two of thirteen runs on the changed
 code failed to exit within the harness's 60-second graceful window, against zero of nine on
-the baseline; measurements were complete in both cases. A further 124 shutdowns did not
-reproduce it, and tests now rule out the candidate mechanism in the reused SQLite writer
-connection. The observation stays open because both original hangs were 60-second runs and
-every reproduction attempt since has carried less write volume. The benchmark backend now
+the baseline; measurements were complete in both cases. A further 144 shutdowns did not
+reproduce it, including 20 at the same 66,000-event volume as the runs that hung, and tests
+now rule out the candidate mechanism in the reused SQLite writer connection. No attempt left
+a lingering non-daemon thread or failed to exit. The benchmark backend now
 times each shutdown phase, dumps every thread's stack from inside a hang, and records
 non-daemon threads that outlast a brief join, so a single future occurrence is diagnosable
 without repeating runs. `tools/shutdown_probe.py` exercises that path at about 1.1 seconds
