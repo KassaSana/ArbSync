@@ -179,21 +179,7 @@ class SnapshotReconciler:
             self._reset_mismatches(state)
             return
 
-        if evidence.price_pct > 0:
-            state.consecutive_price_mismatches += 1
-            state.consecutive_size_mismatches = 0
-            state.size_signature = frozenset()
-            consecutive_mismatches = state.consecutive_price_mismatches
-            required_confirmations = self.confirmation_count
-        else:
-            state.consecutive_price_mismatches = 0
-            if evidence.size_signature == state.size_signature:
-                state.consecutive_size_mismatches += 1
-            else:
-                state.consecutive_size_mismatches = 1
-                state.size_signature = evidence.size_signature
-            consecutive_mismatches = state.consecutive_size_mismatches
-            required_confirmations = self.size_confirmation_count
+        consecutive_mismatches, required_confirmations = self._record_mismatch(state, evidence)
         reconcile_mismatches_total.labels(exchange=target.exchange, pair=target.pair).inc()
         reconcile_evidence_total.labels(
             exchange=target.exchange, pair=target.pair, kind=evidence.kind
@@ -372,6 +358,27 @@ class SnapshotReconciler:
             size_pct=max(size_values, default=Decimal("0")),
             size_signature=frozenset(size_signature),
         )
+
+    def _record_mismatch(self, state: _TargetState, evidence: ReconcileEvidence) -> tuple[int, int]:
+        """Count this mismatch and return (consecutive count, confirmations required).
+
+        A price mismatch is counted on its own streak and resets the size streak.
+        A size-only mismatch continues its streak only while the same set of levels
+        keeps disagreeing; a different signature starts a new streak of one.
+        """
+        if evidence.price_pct > 0:
+            state.consecutive_price_mismatches += 1
+            state.consecutive_size_mismatches = 0
+            state.size_signature = frozenset()
+            return state.consecutive_price_mismatches, self.confirmation_count
+
+        state.consecutive_price_mismatches = 0
+        if evidence.size_signature == state.size_signature:
+            state.consecutive_size_mismatches += 1
+        else:
+            state.consecutive_size_mismatches = 1
+            state.size_signature = evidence.size_signature
+        return state.consecutive_size_mismatches, self.size_confirmation_count
 
     @staticmethod
     def _reset_mismatches(state: _TargetState) -> None:
