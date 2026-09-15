@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import time
-from decimal import Decimal
 from typing import Any
 
-from arb.adapters.base import ExchangeAdapter
-from arb.types import EventKind, MarketEvent, PriceLevel
+from arb.adapters.base import ExchangeAdapter, parse_level_mappings, parse_levels
+from arb.types import EventKind, MarketEvent
 
 
 def normalize_gemini_symbol(symbol: str) -> str:
@@ -58,14 +57,8 @@ class GeminiAdapter(ExchangeAdapter):
             self._restart_sync(pair)
             return []
 
-        bids = tuple(
-            PriceLevel(price=Decimal(price), size=Decimal(size))
-            for price, size in payload.get("b", [])
-        )
-        asks = tuple(
-            PriceLevel(price=Decimal(price), size=Decimal(size))
-            for price, size in payload.get("a", [])
-        )
+        bids = parse_levels(payload.get("b", []))
+        asks = parse_levels(payload.get("a", []))
         timestamp_ns = int(payload.get("E", time.time_ns()))
 
         if pair not in self._initialized:
@@ -132,12 +125,6 @@ class GeminiAdapter(ExchangeAdapter):
             kind=EventKind.SNAPSHOT,
             sequence=trigger_sequence,
             timestamp_ns=time.time_ns(),
-            bids=tuple(
-                PriceLevel(price=Decimal(level["price"]), size=Decimal(level["amount"]))
-                for level in payload["bids"]
-            ),
-            asks=tuple(
-                PriceLevel(price=Decimal(level["price"]), size=Decimal(level["amount"]))
-                for level in payload["asks"]
-            ),
+            bids=parse_level_mappings(payload["bids"], price_key="price", size_key="amount"),
+            asks=parse_level_mappings(payload["asks"], price_key="price", size_key="amount"),
         )

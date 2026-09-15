@@ -5,8 +5,9 @@ import asyncio
 import json
 import random
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from inspect import isawaitable
 from typing import Any
 
@@ -14,9 +15,23 @@ import httpx
 import structlog
 
 from arb.metrics import adapter_reconnects_total
-from arb.types import MarketEvent
+from arb.types import MarketEvent, PriceLevel
 
 logger = structlog.get_logger(__name__)
+
+
+def parse_levels(rows: Iterable[Sequence[Any]]) -> tuple[PriceLevel, ...]:
+    """Decode [price, size, ...] rows, keeping the exchange's decimal strings exact."""
+    return tuple(PriceLevel(price=Decimal(row[0]), size=Decimal(row[1])) for row in rows)
+
+
+def parse_level_mappings(
+    rows: Iterable[Mapping[str, Any]], *, price_key: str, size_key: str
+) -> tuple[PriceLevel, ...]:
+    """Decode {price_key: ..., size_key: ...} rows, keeping the decimal strings exact."""
+    return tuple(
+        PriceLevel(price=Decimal(row[price_key]), size=Decimal(row[size_key])) for row in rows
+    )
 
 
 @dataclass(frozen=True)

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import time
-from decimal import Decimal
 from typing import Any
 
-from arb.adapters.base import ExchangeAdapter
-from arb.types import EventKind, MarketEvent, PriceLevel
+from arb.adapters.base import ExchangeAdapter, parse_level_mappings, parse_levels
+from arb.types import EventKind, MarketEvent
 
 
 def normalize_coinbase_symbol(symbol: str) -> str:
@@ -136,15 +135,16 @@ class CoinbaseAdapter(ExchangeAdapter):
         exchange_sequence: int | None = None,
     ) -> MarketEvent:
         pair = normalize_coinbase_symbol(payload["product_id"])
-        bids = tuple(
-            PriceLevel(price=Decimal(update["price_level"]), size=Decimal(update["new_quantity"]))
-            for update in payload.get("updates", [])
-            if update["side"] == "bid"
+        updates = payload.get("updates", [])
+        bids = parse_level_mappings(
+            (update for update in updates if update["side"] == "bid"),
+            price_key="price_level",
+            size_key="new_quantity",
         )
-        asks = tuple(
-            PriceLevel(price=Decimal(update["price_level"]), size=Decimal(update["new_quantity"]))
-            for update in payload.get("updates", [])
-            if update["side"] == "offer"
+        asks = parse_level_mappings(
+            (update for update in updates if update["side"] == "offer"),
+            price_key="price_level",
+            size_key="new_quantity",
         )
         return MarketEvent(
             exchange=self.name,
@@ -208,12 +208,6 @@ class CoinbaseAdapter(ExchangeAdapter):
             kind=EventKind.SNAPSHOT,
             sequence=max(int(payload.get("sequence", trigger_sequence)), trigger_sequence),
             timestamp_ns=time.time_ns(),
-            bids=tuple(
-                PriceLevel(price=Decimal(price), size=Decimal(size))
-                for price, size, *_ in payload["bids"]
-            ),
-            asks=tuple(
-                PriceLevel(price=Decimal(price), size=Decimal(size))
-                for price, size, *_ in payload["asks"]
-            ),
+            bids=parse_levels(payload["bids"]),
+            asks=parse_levels(payload["asks"]),
         )

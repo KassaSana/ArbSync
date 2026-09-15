@@ -5,10 +5,9 @@ import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from decimal import Decimal
 from typing import Any
 
-from arb.adapters.base import ExchangeAdapter
+from arb.adapters.base import ExchangeAdapter, parse_levels
 from arb.types import EventKind, MarketEvent, PriceLevel
 
 
@@ -62,8 +61,8 @@ class BinanceAdapter(ExchangeAdapter):
 
         if "bids" in payload and "asks" in payload:
             pair = normalize_binance_symbol(payload.get("symbol", self.pairs[0]))
-            bids = tuple(PriceLevel(price=Decimal(p), size=Decimal(s)) for p, s in payload["bids"])
-            asks = tuple(PriceLevel(price=Decimal(p), size=Decimal(s)) for p, s in payload["asks"])
+            bids = parse_levels(payload["bids"])
+            asks = parse_levels(payload["asks"])
             seq = int(payload["lastUpdateId"])
             self._initialized.add(pair)
             self._local_seq[pair] = seq
@@ -174,8 +173,8 @@ class BinanceAdapter(ExchangeAdapter):
             pair=normalize_binance_symbol(payload["s"]),
             first_id=int(payload["U"]),
             last_id=int(payload["u"]),
-            bids=tuple(PriceLevel(price=Decimal(p), size=Decimal(s)) for p, s in payload["b"]),
-            asks=tuple(PriceLevel(price=Decimal(p), size=Decimal(s)) for p, s in payload["a"]),
+            bids=parse_levels(payload["b"]),
+            asks=parse_levels(payload["a"]),
             received_monotonic_ns=received_monotonic_ns,
         )
 
@@ -282,14 +281,8 @@ class BinanceAdapter(ExchangeAdapter):
             kind=EventKind.SNAPSHOT,
             sequence=max(sequence, trigger_sequence),
             timestamp_ns=time.time_ns(),
-            bids=tuple(
-                PriceLevel(price=Decimal(price), size=Decimal(size))
-                for price, size in payload["bids"]
-            ),
-            asks=tuple(
-                PriceLevel(price=Decimal(price), size=Decimal(size))
-                for price, size in payload["asks"]
-            ),
+            bids=parse_levels(payload["bids"]),
+            asks=parse_levels(payload["asks"]),
             exchange_last_sequence=sequence,
             received_monotonic_ns=received_monotonic_ns,
         )
