@@ -7,18 +7,20 @@ import logging
 import os
 import time
 from collections.abc import Callable, Coroutine, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import structlog
 import uvicorn
+from fastapi import FastAPI
 
 from arb.adapters import ADAPTER_TYPES
 from arb.adapters.base import ExchangeAdapter
 from arb.api import create_app
 from arb.broadcast import LiveBroadcaster
-from arb.config import ConfigError, load_config
+from arb.config import AppConfig, ConfigError, load_config
 from arb.detector import ArbitrageDetector
 from arb.metrics import (
     background_task_failures_total,
@@ -164,10 +166,38 @@ async def consume_adapter(
             on_book_update(event.exchange, event.pair)
 
 
-async def run_pipeline(config_path: str | Path = "config.toml") -> None:
-    configure_logging()
-    config = load_config(config_path)
-    started_at_ns = time.time_ns()
+@dataclass(frozen=True)
+class Pipeline:
+    """Every long-lived component, wired but not yet running."""
+
+    config: AppConfig
+    started_at_ns: int
+    book_manager: OrderBookManager
+    detector: ArbitrageDetector
+    store: OpportunityStore
+    adapters: list[ExchangeAdapter]
+    expected_pairs: list[tuple[str, str]]
+    broadcaster: LiveBroadcaster
+    supervisor: BackgroundTaskSupervisor
+    reconciler: SnapshotReconciler
+    app: FastAPI
+
+
+@dataclass(frozen=True)
+class PipelineTasks:
+    persistence: asyncio.Task[object]
+    reconciler: asyncio.Task[object]
+    adapters: list[asyncio.Task[object]]
+
+
+def build_pipeline(
+    config: AppConfig,
+    *,
+    adapter_types: Sequence[type[ExchangeAdapter]] = ADAPTER_TYPES,
+    started_at_ns: int | None = None,
+) -> Pipeline:
+    """Construct and connect every component without starting any task."""
+    started_at_ns = time.time_ns() if started_at_ns is None else started_at_ns
     book_manager = OrderBookManager(max_age_seconds=config.order_books.max_age_seconds)
     detector = ArbitrageDetector(threshold_pct=Decimal(str(config.detector.threshold_pct)))
     store = OpportunityStore(
@@ -177,7 +207,7 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
         queue_maxsize=config.persistence.queue_maxsize,
     )
     adapters = [
-        adapter_type(config.exchanges.get(adapter_type.name, [])) for adapter_type in ADAPTER_TYPES
+        adapter_type(config.exchanges.get(adapter_type.name, [])) for adapter_type in adapter_types
     ]
     broadcaster = LiveBroadcaster()
     supervisor = BackgroundTaskSupervisor()
@@ -215,50 +245,79 @@ async def run_pipeline(config_path: str | Path = "config.toml") -> None:
         background_failures=supervisor.failures,
         cors_allowed_origins=config.server.cors_allowed_origins,
     )
-
-    await store.initialize()
-    persistence_task = supervisor.create("persistence", store.run())
-    reconcile_task = supervisor.create(
-        "snapshot_reconciler",
-        reconciler.run(),
+    return Pipeline(
+        config=config,
+        started_at_ns=started_at_ns,
+        book_manager=book_manager,
+        detector=detector,
+        store=store,
+        adapters=adapters,
+        expected_pairs=expected_pairs,
+        broadcaster=broadcaster,
+        supervisor=supervisor,
+        reconciler=reconciler,
+        app=app,
     )
 
+
+async def start_pipeline(pipeline: Pipeline) -> PipelineTasks:
+    """Open the store, then start persistence, reconciliation, and every adapter."""
+    await pipeline.store.initialize()
+    persistence_task = pipeline.supervisor.create("persistence", pipeline.store.run())
+    reconcile_task = pipeline.supervisor.create("snapshot_reconciler", pipeline.reconciler.run())
     adapter_tasks = [
-        supervisor.create(
+        pipeline.supervisor.create(
             f"adapter:{adapter.name}",
             consume_adapter(
                 adapter,
-                book_manager=book_manager,
-                detector=detector,
-                store=store,
-                broadcaster=broadcaster,
-                on_book_update=reconciler.observe_book,
+                book_manager=pipeline.book_manager,
+                detector=pipeline.detector,
+                store=pipeline.store,
+                broadcaster=pipeline.broadcaster,
+                on_book_update=pipeline.reconciler.observe_book,
             ),
         )
-        for adapter in adapters
+        for adapter in pipeline.adapters
     ]
+    return PipelineTasks(
+        persistence=persistence_task, reconciler=reconcile_task, adapters=adapter_tasks
+    )
 
+
+async def shutdown_pipeline(pipeline: Pipeline, tasks: PipelineTasks) -> None:
+    """Stop producers before consumers so nothing enqueues into a closed component.
+
+    Adapters and the reconciler are cancelled first, then the broadcaster closes,
+    then the adapters' shared REST pool, then the store. The persistence task is
+    awaited last so it can drain what the adapters enqueued before cancellation.
+    """
+    pipeline.supervisor.stop()
+    for task in tasks.adapters:
+        task.cancel()
+    tasks.reconciler.cancel()
+    await pipeline.broadcaster.aclose()
+    await asyncio.gather(*tasks.adapters, tasks.reconciler, return_exceptions=True)
+    # Adapters hold a reused REST pool; close it only once nothing can fetch.
+    await asyncio.gather(
+        *(adapter.aclose() for adapter in pipeline.adapters), return_exceptions=True
+    )
+    await pipeline.store.close()
+    await tasks.persistence
+
+
+async def run_pipeline(config_path: str | Path = "config.toml") -> None:
+    configure_logging()
+    config = load_config(config_path)
+    pipeline = build_pipeline(config)
+    tasks = await start_pipeline(pipeline)
     config_uvicorn = uvicorn.Config(
-        app=app, host=config.server.host, port=config.server.port, log_level="info"
+        app=pipeline.app, host=config.server.host, port=config.server.port, log_level="info"
     )
     server = uvicorn.Server(config_uvicorn)
     try:
         await server.serve()
     finally:
-        supervisor.stop()
-        for task in adapter_tasks:
-            task.cancel()
-        reconcile_task.cancel()
-        await broadcaster.aclose()
-        await asyncio.gather(
-            *adapter_tasks,
-            reconcile_task,
-            return_exceptions=True,
-        )
-        # Adapters hold a reused REST pool; close it only once nothing can fetch.
-        await asyncio.gather(*(adapter.aclose() for adapter in adapters), return_exceptions=True)
-        await store.close()
-        await persistence_task
+        await shutdown_pipeline(pipeline, tasks)
 
 
 def _parser() -> argparse.ArgumentParser:
