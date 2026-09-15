@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from arb.adapters.base import ExchangeAdapter, parse_level_mappings, parse_levels
-from arb.types import EventKind, MarketEvent
+from arb.types import EventKind, MarketEvent, PriceLevel
 
 
 def normalize_coinbase_symbol(symbol: str) -> str:
@@ -136,16 +136,15 @@ class CoinbaseAdapter(ExchangeAdapter):
     ) -> MarketEvent:
         pair = normalize_coinbase_symbol(payload["product_id"])
         updates = payload.get("updates", [])
-        bids = parse_level_mappings(
-            (update for update in updates if update["side"] == "bid"),
-            price_key="price_level",
-            size_key="new_quantity",
-        )
-        asks = parse_level_mappings(
-            (update for update in updates if update["side"] == "offer"),
-            price_key="price_level",
-            size_key="new_quantity",
-        )
+
+        def side_levels(side: str) -> tuple[PriceLevel, ...]:
+            return parse_level_mappings(
+                (update for update in updates if update["side"] == side),
+                price_key="price_level",
+                size_key="new_quantity",
+            )
+
+        bids, asks = side_levels("bid"), side_levels("offer")
         return MarketEvent(
             exchange=self.name,
             pair=pair,

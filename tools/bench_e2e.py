@@ -9,9 +9,10 @@ from decimal import Decimal
 from typing import Any
 
 import websockets
+from arb.adapters.base import parse_levels
 from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager
-from arb.types import EventKind, MarketEvent, PriceLevel
+from arb.types import EventKind, MarketEvent
 from bench_utils import save_result
 
 HOST = "127.0.0.1"
@@ -46,12 +47,8 @@ def parse_event(message: str, timestamp_ns: int) -> MarketEvent:
         kind=EventKind(payload["kind"]),
         sequence=int(payload["sequence"]),
         timestamp_ns=timestamp_ns,
-        bids=tuple(
-            PriceLevel(price=Decimal(price), size=Decimal(size)) for price, size in payload["bids"]
-        ),
-        asks=tuple(
-            PriceLevel(price=Decimal(price), size=Decimal(size)) for price, size in payload["asks"]
-        ),
+        bids=parse_levels(payload["bids"]),
+        asks=parse_levels(payload["asks"]),
     )
 
 
