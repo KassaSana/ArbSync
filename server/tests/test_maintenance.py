@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
+from arb import maintenance
 from arb.maintenance import parse_cutoff, prune_batch
 from arb.persistence import MINUTE_NS, OpportunityStore
 from test_persistence import make_opp
@@ -127,3 +129,144 @@ def test_cutoff_and_invalid_arguments_do_not_create_database(tmp_path: Path) -> 
     with pytest.raises(FileNotFoundError):
         prune_batch(path, 1)
     assert not path.exists()
+
+
+@pytest.fixture
+def seeded_database(tmp_path: Path) -> Path:
+    """Three rows before minute one, one row after it."""
+    path = tmp_path / "history.sqlite3"
+
+    async def seed() -> None:
+        store = OpportunityStore(str(path))
+        await store.initialize()
+        await store._flush([make_opp(1), make_opp(2), make_opp(3), make_opp(MINUTE_NS + 1)])
+        await store.close()
+
+    asyncio.run(seed())
+    return path
+
+
+def test_cli_prunes_in_batches_and_reports_each_one(
+    seeded_database: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pauses: list[float] = []
+    monkeypatch.setattr(maintenance.time, "sleep", pauses.append)
+
+    maintenance.main(
+        [
+            "--database",
+            str(seeded_database),
+            "--before",
+            "1970-01-01T00:01:00Z",
+            "--batch-size",
+            "2",
+            "--max-batches",
+            "5",
+        ]
+    )
+
+    reports = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert reports == [
+        {"batch": 1, "deleted": 2, "total_deleted": 2},
+        {"batch": 2, "deleted": 1, "total_deleted": 3},
+    ]
+    # A short batch ends the run before the third one is attempted or waited for.
+    assert pauses == [0.1]
+    assert counts(seeded_database) == (1, 1)
+
+
+def test_cli_stops_at_max_batches(
+    seeded_database: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    maintenance.main(
+        [
+            "--database",
+            str(seeded_database),
+            "--before",
+            "1970-01-01T00:01:00Z",
+            "--batch-size",
+            "1",
+        ]
+    )
+
+    assert json.loads(capsys.readouterr().out) == {"batch": 1, "deleted": 1, "total_deleted": 1}
+    assert counts(seeded_database) == (3, 3)
+
+
+def test_cli_rejects_max_batches_outside_range(
+    seeded_database: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        maintenance.main(
+            [
+                "--database",
+                str(seeded_database),
+                "--before",
+                "1970-01-01T00:01:00Z",
+                "--max-batches",
+                "0",
+            ]
+        )
+
+    assert excinfo.value.code == 2
+    assert "--max-batches must be between 1 and 1000" in capsys.readouterr().err
+    assert counts(seeded_database) == (4, 4)
+
+
+@pytest.mark.parametrize(
+    ("argv_tail", "message"),
+    [
+        (["--before", "2026-09-01"], "--before must include a timezone"),
+        (["--before", "1970-01-01T00:01:00Z", "--batch-size", "0"], "batch_size must be"),
+    ],
+)
+def test_cli_reports_validation_errors_without_deleting(
+    seeded_database: Path,
+    capsys: pytest.CaptureFixture[str],
+    argv_tail: list[str],
+    message: str,
+) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        maintenance.main(["--database", str(seeded_database), *argv_tail])
+
+    assert excinfo.value.code == 1
+    assert f"Pruning stopped after 0 committed deletions: {message}" in capsys.readouterr().err
+    assert counts(seeded_database) == (4, 4)
+
+
+def test_cli_reports_committed_deletions_when_a_later_batch_fails(
+    seeded_database: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_prune_batch = maintenance.prune_batch
+    calls = 0
+
+    def flaky_prune_batch(*args: object, **kwargs: object) -> int:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise sqlite3.OperationalError("database is locked")
+        return real_prune_batch(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(maintenance, "prune_batch", flaky_prune_batch)
+    monkeypatch.setattr(maintenance.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        maintenance.main(
+            [
+                "--database",
+                str(seeded_database),
+                "--before",
+                "1970-01-01T00:01:00Z",
+                "--batch-size",
+                "1",
+                "--max-batches",
+                "3",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert json.loads(captured.out) == {"batch": 1, "deleted": 1, "total_deleted": 1}
+    assert "Pruning stopped after 1 committed deletions: database is locked" in captured.err
+    # The first batch committed; the failed one rolled back nothing that was kept.
+    assert counts(seeded_database) == (3, 3)

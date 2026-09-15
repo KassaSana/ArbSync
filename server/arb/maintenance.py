@@ -7,6 +7,7 @@ import json
 import math
 import sqlite3
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -83,7 +84,7 @@ def parse_cutoff(value: str) -> int:
     return (delta.days * 86400 + delta.seconds) * 1_000_000_000 + delta.microseconds * 1000
 
 
-def main() -> None:
+def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", type=Path, required=True)
     parser.add_argument(
@@ -92,7 +93,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=1000)
     parser.add_argument("--max-batches", type=int, default=1)
     parser.add_argument("--timeout-seconds", type=float, default=0.5)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not 1 <= args.max_batches <= 1000:
         parser.error("--max-batches must be between 1 and 1000")
     deleted = 0
