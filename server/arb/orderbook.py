@@ -53,6 +53,9 @@ class SortedLevels:
         return PriceLevel(price=price, size=self._sizes[price])
 
     def top_n(self, limit: int) -> list[PriceLevel]:
+        # A negative-zero slice (prices[-0:]) is the whole list, not nothing.
+        if limit <= 0:
+            return []
         if self.descending:
             prices = list(reversed(self._prices[-limit:]))
         else:

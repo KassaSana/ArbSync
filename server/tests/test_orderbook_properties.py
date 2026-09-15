@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from arb.orderbook import OrderBookManager
+from arb.orderbook import OrderBookManager, SortedLevels
 from arb.types import BookUpdateResult, EventKind, MarketEvent, PriceLevel
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -108,3 +108,54 @@ def test_sequence_gap_detection_fires_when_expected(
     assert result.reason == "sequence_gap"
     assert result.stale is True
     assert manager.eligibility("gemini", "BTC-USD").eligible is False
+
+
+level_price = st.integers(min_value=1, max_value=40).map(lambda value: Decimal(value) / 4)
+level_size = st.integers(min_value=0, max_value=3).map(Decimal)
+level_operations = st.lists(
+    st.one_of(
+        st.tuples(st.just("set"), level_price, level_size),
+        st.tuples(st.just("remove"), level_price, st.just(Decimal(0))),
+    ),
+    max_size=60,
+)
+
+
+@settings(max_examples=200, deadline=None)
+@given(descending=st.booleans(), operations=level_operations, limit=st.integers(0, 6))
+def test_sorted_levels_match_a_dict_oracle(
+    descending: bool, operations: list[tuple[str, Decimal, Decimal]], limit: int
+) -> None:
+    """set_level/remove keep the price list sorted and in step with the size map.
+
+    The oracle is a plain dict of the levels that should remain: a level exists
+    only while its most recent size was positive. Every query the book manager
+    relies on (best, top_n) must agree with that dict sorted the right way.
+    """
+    levels = SortedLevels(descending=descending)
+    oracle: dict[Decimal, Decimal] = {}
+
+    for operation, price, size in operations:
+        if operation == "set":
+            levels.set_level(price, size)
+            if size > 0:
+                oracle[price] = size
+            else:
+                oracle.pop(price, None)
+        else:
+            levels.remove(price)
+            oracle.pop(price, None)
+
+        expected = sorted(oracle, reverse=descending)
+        assert levels._prices == sorted(oracle)
+        assert set(levels._prices) == set(levels._sizes) == set(oracle)
+        assert all(levels._sizes[price] == oracle[price] for price in oracle)
+
+        best = levels.best()
+        if expected:
+            assert best == PriceLevel(price=expected[0], size=oracle[expected[0]])
+        else:
+            assert best is None
+        assert levels.top_n(limit) == [
+            PriceLevel(price=price, size=oracle[price]) for price in expected[:limit]
+        ]
