@@ -7,6 +7,7 @@
     "dev": "vite",
     "lint": "eslint src --ext .ts,.tsx",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
@@ -25,6 +26,7 @@
     "@typescript-eslint/eslint-plugin": "^8.59.2",
     "@typescript-eslint/parser": "^8.59.2",
     "@vitejs/plugin-react": "^4.3.1",
+    "@vitest/coverage-v8": "^4.1.11",
     "autoprefixer": "^10.4.19",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",

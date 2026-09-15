@@ -79,7 +79,7 @@ jobs:
         run: npm run lint
       - name: Typecheck dashboard
         run: npm run typecheck
-      - name: Test dashboard
-        run: npm run test
+      - name: Test dashboard with coverage
+        run: npm run test:coverage
       - name: Build dashboard
         run: npm run build
