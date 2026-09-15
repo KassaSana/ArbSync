@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 from check_commit_attribution import (
     CommitAttribution,
@@ -74,6 +76,25 @@ def test_pull_request_checks_only_commits_after_base(monkeypatch: pytest.MonkeyP
 def test_existing_branch_push_checks_only_new_range(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("check_commit_attribution._git", lambda *args: "new-commit\n")
     assert _revisions_for_ci("push", {"before": "old", "after": "new"}) == ["new-commit"]
+
+
+@pytest.mark.parametrize("reason", ["forced", "unreachable"])
+def test_force_push_falls_back_to_event_commits(
+    monkeypatch: pytest.MonkeyPatch, reason: str
+) -> None:
+    """A rebased branch has no reachable `before`, so the range cannot be listed."""
+
+    def rev_list_fails(*args: str) -> str:
+        raise subprocess.CalledProcessError(128, ["git", *args])
+
+    monkeypatch.setattr("check_commit_attribution._git", rev_list_fails)
+    payload = {
+        "before": "rewritten-away",
+        "after": "commit-two",
+        "forced": reason == "forced",
+        "commits": [{"id": "commit-one"}, {"id": "commit-two"}],
+    }
+    assert _revisions_for_ci("push", payload) == ["commit-one", "commit-two"]
 
 
 def test_new_branch_push_uses_event_commits_without_duplicates() -> None:

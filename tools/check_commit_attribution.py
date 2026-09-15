@@ -101,8 +101,14 @@ def _revisions_for_ci(event_name: str, payload: dict[str, Any]) -> list[str]:
     if event_name == "push":
         before = str(payload.get("before", ""))
         after = str(payload["after"])
-        if before and set(before) != {"0"}:
-            return _git("rev-list", "--reverse", f"{before}..{after}").splitlines()
+        # A force push (Dependabot rebases, for one) rewrites the branch, so
+        # `before` is no longer reachable and a range against it cannot resolve.
+        rewritten = bool(payload.get("forced")) or not before or set(before) == {"0"}
+        if not rewritten:
+            try:
+                return _git("rev-list", "--reverse", f"{before}..{after}").splitlines()
+            except subprocess.CalledProcessError:
+                pass
         revisions = [str(commit["id"]) for commit in payload.get("commits", [])]
         if after not in revisions:
             revisions.append(after)
