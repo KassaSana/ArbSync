@@ -12,8 +12,8 @@ export default defineConfig({
       exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/main.tsx"],
       reporter: ["text-summary", "text"],
       thresholds: {
-        statements: 55,
-        lines: 55,
+        statements: 75,
+        lines: 75,
       },
     },
   },
