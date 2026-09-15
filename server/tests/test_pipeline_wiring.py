@@ -192,9 +192,9 @@ async def test_shutdown_stops_producers_before_consumers_and_drains_persistence(
     await main.shutdown_pipeline(pipeline, tasks)
 
     assert log == [
-        "broadcaster.aclose",
         "adapter.cancelled",
         "reconciler.cancelled",
+        "broadcaster.aclose",
         "adapter.aclose",
         "store.close",
         "persistence.drained",

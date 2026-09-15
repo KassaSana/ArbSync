@@ -397,3 +397,28 @@ def test_status_display_signature_matches_payload_based_signature() -> None:
         )
         message = LiveMessage(type="book_status", payload=status.as_payload())
         assert status.display_signature() == broadcast_module._display_signature(message)
+
+
+@pytest.mark.asyncio
+async def test_aclose_is_terminal_for_the_flush_loop() -> None:
+    """A coalesced message after aclose must not respawn the flush loop."""
+    broadcaster = LiveBroadcaster(coalesce_interval=60)
+    socket = _RecordingSocket()
+    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.broadcast_book(
+        "gemini", "BTC-USD", LiveMessage("top_of_book", {"best_bid_price": "1"})
+    )
+    assert broadcaster._flush_task is not None
+
+    await broadcaster.aclose()
+    await asyncio.sleep(0)
+    assert [payload["payload"]["best_bid_price"] for payload in socket.sent] == ["1"]
+
+    await broadcaster.broadcast_book(
+        "gemini", "BTC-USD", LiveMessage("top_of_book", {"best_bid_price": "2"})
+    )
+    assert broadcaster._flush_task is None
+    await broadcaster.flush()
+    await asyncio.sleep(0)
+    assert [payload["payload"]["best_bid_price"] for payload in socket.sent] == ["1", "2"]
+    await broadcaster.disconnect(socket)  # type: ignore[arg-type]

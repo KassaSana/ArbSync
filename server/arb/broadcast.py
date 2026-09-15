@@ -47,6 +47,7 @@ class LiveBroadcaster:
         self._pending: dict[tuple[str, str, str], LiveMessage] = {}
         self._last_sent: dict[tuple[str, str, str], tuple[object, ...]] = {}
         self._flush_task: asyncio.Task[None] | None = None
+        self._closed = False
 
     async def connect(
         self,
@@ -93,8 +94,7 @@ class LiveBroadcaster:
             await self.broadcast(message)
             return
         self._pending[(message.type, exchange, pair)] = message
-        if self._flush_task is None or self._flush_task.done():
-            self._flush_task = asyncio.create_task(self._flush_loop())
+        self._ensure_flush_loop()
 
     async def broadcast_status(self, status: BookEligibility, *, immediate: bool) -> None:
         """Publish a book status, building its payload only if it will be sent.
@@ -117,8 +117,7 @@ class LiveBroadcaster:
             await self.broadcast(message)
             return
         self._pending[key] = message
-        if self._flush_task is None or self._flush_task.done():
-            self._flush_task = asyncio.create_task(self._flush_loop())
+        self._ensure_flush_loop()
 
     async def broadcast_book_now(self, exchange: str, pair: str, message: LiveMessage) -> None:
         """Send a book update immediately, discarding queued updates it supersedes.
@@ -167,8 +166,21 @@ class LiveBroadcaster:
                 continue
             await self.flush()
 
+    def _ensure_flush_loop(self) -> None:
+        # After aclose the loop must not be respawned: a late coalesced message
+        # would otherwise leave a flush task running that nothing cancels.
+        if self._closed:
+            return
+        if self._flush_task is None or self._flush_task.done():
+            self._flush_task = asyncio.create_task(self._flush_loop())
+
     async def aclose(self) -> None:
-        """Stop coalescing and deliver anything still queued."""
+        """Stop coalescing and deliver anything still queued.
+
+        Messages coalesced after this point are held in the pending map and
+        delivered by the next explicit flush, never by a respawned loop.
+        """
+        self._closed = True
         task = self._flush_task
         self._flush_task = None
         if task is not None:

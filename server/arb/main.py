@@ -287,16 +287,18 @@ async def start_pipeline(pipeline: Pipeline) -> PipelineTasks:
 async def shutdown_pipeline(pipeline: Pipeline, tasks: PipelineTasks) -> None:
     """Stop producers before consumers so nothing enqueues into a closed component.
 
-    Adapters and the reconciler are cancelled first, then the broadcaster closes,
-    then the adapters' shared REST pool, then the store. The persistence task is
-    awaited last so it can drain what the adapters enqueued before cancellation.
+    Adapters and the reconciler are cancelled and awaited first: cancellation only
+    lands at their next await, and their teardown publishes final disconnected
+    statuses. The broadcaster then closes and flushes those, then the adapters'
+    shared REST pool closes, then the store. The persistence task is awaited last
+    so it can drain what the adapters enqueued before cancellation.
     """
     pipeline.supervisor.stop()
     for task in tasks.adapters:
         task.cancel()
     tasks.reconciler.cancel()
-    await pipeline.broadcaster.aclose()
     await asyncio.gather(*tasks.adapters, tasks.reconciler, return_exceptions=True)
+    await pipeline.broadcaster.aclose()
     # Adapters hold a reused REST pool; close it only once nothing can fetch.
     await asyncio.gather(
         *(adapter.aclose() for adapter in pipeline.adapters), return_exceptions=True
