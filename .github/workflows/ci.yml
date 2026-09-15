@@ -38,7 +38,7 @@ jobs:
       - name: Sync locked backend dependencies
         run: uv sync --locked --extra dev
       - name: Run backend tests with coverage
-        run: uv run pytest --cov=arb.orderbook --cov=arb.detector --cov-fail-under=80
+        run: uv run pytest --cov=arb --cov-fail-under=85
       - name: Run mypy
         run: uv run mypy --strict server/arb
       - name: Run ruff
