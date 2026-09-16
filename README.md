@@ -201,8 +201,8 @@ Run backend checks from the repository root:
 ```powershell
 uv run pytest -q server/tests
 uv run mypy --strict server/arb
-uv run ruff check server
-uv run ruff format --check server
+uv run ruff check server tools
+uv run ruff format --check server tools
 ```
 
 Install or run the same cross-platform checks as Git hooks:
@@ -248,8 +248,9 @@ uv run python tools/replay.py server/tests/fixtures/synthetic
 See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for methodology and
 [`artifacts/benchmarks/results.json`](artifacts/benchmarks/results.json) for the
 committed raw results.
-The live observer is documented there as well; the repository includes short smoke
-runs, but not yet the planned multi-hour soak.
+The live observer is documented there as well. The committed long-duration evidence is a
+four-hour uninterrupted live soak from 2026-09-16, reviewed in
+[`docs/VALIDATION.md`](docs/VALIDATION.md#live-soak-2026-09-16).
 
 ## Repository map
 
@@ -280,9 +281,12 @@ trading and withdrawal fees, slippage, transfer latency, inventory constraints,
 partial fills, rate limits, and execution risk. The detector uses only top-of-book
 liquidity and is an observability project, not an execution engine or trading system.
 
-The largest remaining validation gap is a documented uninterrupted multi-hour live soak
-covering memory stability, reconnect recovery, sequence gaps, and the 60-second freshness
-threshold.
+Long-duration evidence is a single four-hour uninterrupted live soak on one workstation.
+It establishes reconnect recovery, sequence continuity, the 60-second freshness threshold,
+and the absence of short-horizon memory growth; it does not rule out slower growth or
+daily-cycle effects, and it exercised a lightweight WebSocket consumer rather than real
+browser clients. The remaining gaps are listed in
+[`docs/VALIDATION.md`](docs/VALIDATION.md#remaining-validation-gap).
 
 ## Contributing and support
 

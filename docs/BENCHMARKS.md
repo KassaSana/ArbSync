@@ -74,8 +74,8 @@ invalidate attribution. Process CPU and event-loop lag come from unprofiled runs
 The current dashboard has no mounted React profiling wrappers, so
 `react_profile_available: false` explicitly records that missing measurement.
 
-The current verification summary and remaining live-soak gap are tracked in
-[VALIDATION.md](VALIDATION.md).
+The current verification summary, the four-hour live soak, and the remaining evidence
+gaps are tracked in [VALIDATION.md](VALIDATION.md).
 
 ## 3. Live Soak Observer
 

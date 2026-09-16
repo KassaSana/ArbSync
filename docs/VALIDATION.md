@@ -46,7 +46,8 @@ The suite covers:
   restart/statistics, lock contention, query-budget expiry, and atomic failure rollback
 
 CI also runs strict mypy, Ruff, frontend type checking, ESLint, the production
-dashboard build, and coverage checks for the order-book and detector modules.
+dashboard build, and coverage gates: 85% over the whole backend package and 75%
+statements/lines over every dashboard source file.
 
 ### Release preparation verification (2026-09-12)
 
@@ -54,10 +55,11 @@ Local Windows verification passed the backend suite, strict mypy, Ruff, dashboar
 typecheck/lint/tests/build, Markdown filesystem-link checks, and a wheel plus source
 distribution build and content/hash inspection. The new release checker also rejects
 version drift, missing artifact metadata, and accidental runtime/environment files.
-Actionlint accepted the expanded Windows/Ubuntu workflow matrix. Hosted execution of
-that matrix, a fresh candidate secret/license review, and final publication remain
-outstanding; these checks do not establish a published release. See
-[the release process](RELEASING.md) for the reproducible commands and evidence limits.
+Actionlint accepted the expanded Windows/Ubuntu workflow matrix. At the time, hosted
+execution of that matrix, a fresh candidate secret/license review, and final publication
+were still outstanding; the [2026-09-16 section](#release-candidate-verification-2026-09-16)
+below records them. See [the release process](RELEASING.md) for the reproducible commands
+and evidence limits.
 
 ### Dependency maintenance verification (2026-09-12)
 
@@ -74,11 +76,52 @@ Actionlint 1.7.12 accepted both workflows, and static checks verified Dependabot
 ecosystems, SHA pins, read-only permissions, and disabled checkout credential storage.
 GitHub secret scanning and push protection were confirmed enabled by the repository API.
 
-The new scheduled/PR audit workflow is committed locally; hosted execution on Linux
-and Windows with Python 3.11 and Node.js 20 remains to be verified after pushing.
-Advisory results are a point-in-time check, not evidence that every dependency is safe.
+The scheduled/PR audit workflow was committed locally at that point; its hosted
+execution is recorded in the 2026-09-16 section below. Advisory results are a
+point-in-time check, not evidence that every dependency is safe.
 See the [security policy](../SECURITY.md#dependency-maintenance-and-audit-triage) for
 coverage limits, reproduction commands, and triage rules.
+
+### Release candidate verification (2026-09-16)
+
+Candidate commit `dc83459cf967cdbd4b96249798fd8f3c9c6261eb` ("Prepare the 0.1.0 alpha
+release") was verified on Windows 11 10.0.26200 with Python 3.12.10, Node.js 26.5.1,
+uv 0.12.10, and npm 11.17.0, and on hosted runners:
+
+- Hosted CI run [35113421357](https://github.com/KassaSana/ArbSync/actions/runs/35113421357)
+  passed `backend` and `frontend` on `ubuntu-latest` and `windows-latest` with Python 3.11
+  and Node.js 22; the dependency audit run
+  [35113421340](https://github.com/KassaSana/ArbSync/actions/runs/35113421340) passed its
+  Linux/Windows Python and npm jobs on the same push.
+- Locally: 307 backend tests passed with 94.15% coverage against the 85% gate; strict
+  mypy, `ruff check server tools`, `ruff format --check server tools`, and actionlint
+  1.7.12 reported no issues. The dashboard passed `npm ci`, typecheck, ESLint, 99 tests
+  with 83.06% statement coverage against the 75% gate, and the production build.
+- The backend suite also passed in isolated environments on Python 3.13.15 and 3.14.7
+  (307 tests each), which is the evidence for those classifiers in `pyproject.toml`.
+- `tools/check_release.py --require-clean` passed; the synthetic replay, both documented
+  benchmarks, and the installed `arbsync` help, example generation, overwrite refusal,
+  and missing-configuration paths behaved as documented. Re-running the benchmarks
+  rewrites `artifacts/benchmarks/results.json`; the committed values are the citation.
+- A clean checkout built `cross_exchange_arb_detector-0.1.0-py3-none-any.whl` and
+  `cross_exchange_arb_detector-0.1.0.tar.gz`; the checker's `checks.json` records their
+  contents and SHA-256 hashes, which the annotated release tag repeats.
+- `pip-audit` 2.10.1 found no known vulnerabilities in the 59-entry all-extras export of
+  the unchanged lockfile; `npm audit --include=dev --audit-level=low` found none in the
+  383-package dashboard tree.
+- Gitleaks 8.30.1 scanned every commit on every ref (`--log-opts=--all`, 149 scanned)
+  and the built artifacts with no findings. Its worktree scan reported only four
+  false positives inside ignored, untracked tooling caches (its own README and the
+  cached Playwright driver bundle), none in tracked content. The GitHub API reported
+  secret scanning and push protection enabled with zero alerts. Dependabot security
+  alerts are not enabled on the repository; advisory coverage comes from the audit
+  workflow.
+- The dependency license inventory was re-derived from both lockfiles; see the
+  [September 16 refresh](DEPENDENCY_LICENSES.md#lockfile-refresh-september-16-2026).
+
+Documentation corrections found during this pass were committed after the candidate
+commit above, so the tagged release commit is later; its own hosted CI run and rebuilt
+artifact hashes are recorded in the release notes and tag message.
 
 ## Synthetic performance
 
