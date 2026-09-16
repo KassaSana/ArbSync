@@ -170,52 +170,85 @@ These are synthetic databases with uniformly distributed timestamps across nine
 pairs. Real history may cluster differently, and no measurement covers a
 database larger than 4M rows or the rollup's own growth beyond 30 days.
 
-## Live observations
+## Live soak (2026-09-16)
 
-Two short live runs validate the observer and the current 60-second book-age limit:
+A four-hour uninterrupted live soak against all 27 configured books completed on
+2026-09-16 and is the current long-duration reliability evidence:
 
-- [`soak_smoke_5m_2026-09-05.md`](../artifacts/benchmarks/soak_smoke_5m_2026-09-05.md)
-- [`soak_validation_60s_window.md`](../artifacts/benchmarks/soak_validation_60s_window.md)
+- Report: [`soak_4h_2026-09-16_062525.md`](../artifacts/benchmarks/soak/soak_4h_2026-09-16_062525.md)
+  (raw per-sample JSONL retained locally beside it; it is ignored by Git)
+- Duration: `14400.1 s` requested and achieved, 60-second samples, status `complete`,
+  zero excessive sample gaps
+- Backend and observer commit: `a9d7a358e3674fe8e01bdaec11f7998d19792212`, clean checkout
+- Environment: Windows 11 10.0.26200, Python 3.12.10 project virtualenv, single developer
+  workstation on mains power; backend launched by `tools/run_soak.ps1` under a Windows
+  Scheduled Task so that no interactive session owned its process tree
+- Configuration SHA-256: `851209a633d95f148f871004fb8cb08b9a749ce60dca47ec5d0a3f16f35d35bb`
 
-The five-minute run observed 29,001 Coinbase events, 2,042 Gemini events, and 1,760
-Binance.US events with no adapter reconnects or detected sequence gaps. A subsequent
-90-second run kept all 27 configured books eligible for every successful sample.
+Results:
 
-These are smoke tests, not long-duration reliability evidence.
+- **Process:** no restart, no counter reset, no background-task failure. RSS ranged
+  52.6–119.1 MiB, mean 104.2 MiB, start-to-end change **+7.4 MiB** with no upward trend;
+  the minimum coincides with Windows trimming the working set during the outage below,
+  and the maximum with the Binance.US resync rebuilding nine books.
+- **Ingestion:** 1,376,144 Coinbase, 107,233 Gemini, and 87,836 Binance.US events with
+  **zero detected sequence gaps** on any exchange. 246 theoretical opportunities recorded.
+- **Eligibility:** every configured book was observed in every successful sample. Each
+  book was eligible in 236–237 of 238 samples; every ineligible observation carries the
+  reason `disconnected` and lies inside the two events below. No book was ever stale,
+  incomplete, discontinuous, or crossed while its adapter was connected. Recovery to
+  eligible completed within one 60-second sampling interval in every case.
+- **Reconciliation:** the snapshot reconciler raised unconfirmed mismatch warnings at a
+  steady 2–5 per minute across all exchanges, the expected noise of comparing a live
+  stream against a non-atomic REST snapshot. Only **four** were confirmed after three
+  consecutive observations: Gemini `LTC-USD` (11:38Z), Gemini `DOT-USD` (11:55Z and
+  12:15Z), and Binance.US `DOT-USDT` (13:18Z), all price divergences on thin markets.
+  Each forced an adapter resync; recovery took 1.8 s, 2.3 s, 2.5 s, and 13.9 s.
+- **WebSocket delivery:** the built-in consumer received 556,260 frames with zero invalid
+  frames and zero stream-sequence gaps; zero client queue overflows and zero sender
+  failures. It reconnected once during the outage below, disconnected for at most 31.6 s.
+
+Two events during the run deserve explicit review rather than a summary line:
+
+1. **Host network outage, 13:25–13:32Z.** Keepalive pings timed out on all three exchange
+   sockets at once, REST snapshot fetches failed with connection timeouts, and the
+   observer's own loopback requests to the backend failed for three consecutive samples
+   (two `ReadTimeout`, one `RemoteProtocolError`). Windows logged power-source changes at
+   13:32:32Z and 13:33:00Z. Three independent exchanges do not fail simultaneously; the
+   workstation's connectivity did. The backend did not restart. Disconnected books were
+   excluded from detection for the duration, all adapters reconnected with exponential
+   backoff, and every book was eligible again by 13:32:38Z. The four samples reporting the
+   backend not ready fall in this window. This is environmental, but it exercised the
+   disconnect, exclusion, and recovery path under real conditions.
+2. **Whole-exchange resync on Binance.US, 13:18:27–13:18:41Z.** One confirmed `DOT-USDT`
+   price drift caused all nine Binance.US books to report `disconnected` for one sample,
+   because that adapter carries every pair on a single combined stream and resyncs the
+   whole socket. Detection excluded them correctly and recovery took 13.9 s, but a
+   single thin pair should not blink the whole venue; see ARB-028.
+
+The carry-forward observation from the September 13–14 attempt is resolved: `gemini:DOT-USD`
+never went stale in this run. Its p95 age was 6.2 s and maximum 32.8 s, both under the
+60-second limit; its two confirmed price drifts were caught and repaired by reconciliation.
+
+Earlier attempts are retained as diagnostic evidence only. The September 12–13 run
+observed 923 samples with no restart, reset, gap, or unbounded RSS trend, but contained
+nine sample gaps including one of 9.5 hours. The September 13–14 run was cut short at 107
+minutes when its launcher process was killed. The two short smoke runs,
+[`soak_smoke_5m_2026-09-05.md`](../artifacts/benchmarks/soak_smoke_5m_2026-09-05.md) and
+[`soak_validation_60s_window.md`](../artifacts/benchmarks/soak_validation_60s_window.md),
+validated the observer and the 60-second book-age limit.
 
 ## Remaining validation gap
 
-A documented uninterrupted live soak of at least four hours is still required. It should
-capture:
+The four-hour requirement is met. The following would strengthen the evidence but are not
+prerequisites for the first alpha release:
 
-- memory usage and start-to-end drift
-- reconnect and sequence-gap counts per exchange
-- book eligibility and maximum update age
-- recovery duration after disconnects
-- persistence queue drops and WebSocket client overflows
-- built-in WebSocket delivery frames, sequence continuity, reconnects, and outages
-- background-task and observer HTTP failures
-- process crashes or restarts
-
-Run the observer as described in [`BENCHMARKS.md`](BENCHMARKS.md) and commit the
-generated report only after the full run completes. Whatever duration is achieved, the
-published claim must state that duration rather than a longer intended one.
-
-The requirement was 24 hours. Two attempts on a single developer workstation failed for
-environmental reasons rather than defects, so the bar is now a shorter window that can
-actually be met without interruption. Twenty-four hours remains the better evidence if a
-machine can ever be dedicated to it.
-
-An attempted run on September 12-13 observed 923 successful samples and no process
-restart, counter reset, sequence gap, background failure, or unbounded RSS trend, but it
-contained nine sample gaps over two minutes, including a 9.5-hour gap. It is retained as
-local diagnostic evidence and does not satisfy the uninterrupted requirement. The observer
-now fails fast and labels such a run `interrupted` instead of allowing elapsed wall time to
-produce a misleading `complete` status.
-
-A second attempt on September 13-14 ran 107 minutes before its launcher process was killed,
-so it is not citable either. It is worth one carry-forward observation to confirm in a valid
-run: across 108 samples every configured book stayed eligible except `gemini:DOT-USD`, which
-went stale five times with a maximum age of 283 seconds against the 60-second limit and
-recovered each time. Thin-market staleness is the eligibility rules behaving correctly, not
-a defect, but a long run should confirm it stays bounded and recovers.
+- A 24-hour run on a dedicated machine. Four hours establishes recovery behavior and the
+  absence of short-horizon leaks; it cannot rule out slower growth or daily-cycle effects.
+- A run with independently connected dashboard clients under real browser load, in addition
+  to the observer's lightweight consumer. Rendering evidence remains the connected-dashboard
+  benchmark above.
+- Host-connectivity attribution in the observer (ARB-029), so an outage like the one above
+  is recorded as such rather than inferred afterwards from correlated failures.
+- Per-pair resynchronization on Binance.US (ARB-028), so one confirmed drift on a thin
+  pair no longer removes the whole venue from detection for the recovery interval.

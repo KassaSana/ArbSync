@@ -501,7 +501,7 @@ atomic rollup rebuilding, and bounded lock waits. History remains opt-in to prun
 Boundary, concurrent-write, rollback, restart, statistics, and installed CLI checks
 pass with the full backend suite and static checks.
 
-### [ ] ARB-021 — Complete and publish an uninterrupted multi-hour live soak
+### [x] ARB-021 — Complete and publish an uninterrupted multi-hour live soak
 
 - Priority: P2
 - Estimate: 4 engineer-hours plus at least 4 hours elapsed runtime
@@ -533,6 +533,14 @@ samples every configured book stayed eligible except `gemini:DOT-USD`, which wen
 five times, reached 283 seconds against the 60-second limit, and recovered each time.
 Thin-market staleness is the eligibility rules working, but a longer run should show it
 stays bounded.
+
+Resolution (2026-09-16): a four-hour run completed with 238 of 241 samples successful,
+no restart or counter reset, zero sequence gaps, RSS +7.4 MiB start to end, and every
+book eligible in all but one or two samples. The exceptions were a seven-minute host
+network outage and one whole-venue Binance.US resync, both recovered within one interval.
+`gemini:DOT-USD` never went stale. Details, environment, and the two reviewed events are
+in [`VALIDATION.md`](docs/VALIDATION.md#live-soak-2026-09-16); the anomalies became
+ARB-028 and ARB-029 rather than being folded into a pass.
 
 Acceptance criteria:
 
@@ -656,7 +664,47 @@ same side and direction across a separately configurable five-cycle streak. Caus
 metrics distinguish price, size, and combined evidence while canonical invalidation,
 adapter-owned recovery, cooldown, and fail-closed behavior remain unchanged.
 
-P2 total: **25 engineer-hours plus the soak runtime**.
+### [ ] ARB-028 — Resynchronize one Binance.US pair without dropping the venue
+
+- Priority: P2
+- Estimate: 4 hours
+- Dependencies: ARB-010, ARB-021
+
+Problem: the Binance.US adapter carries every configured pair on one combined stream, so
+a confirmed reconciliation drift on a single thin pair (`DOT-USDT`, 13:18Z in the
+2026-09-16 soak) reconnects the whole socket and reports all nine books `disconnected`
+until the rebuild finishes (13.9 s observed). Detection excluded them correctly, but one
+pair's drift should not remove a venue from detection.
+
+Acceptance criteria:
+
+- A confirmed drift on one Binance.US pair re-fetches and re-aligns that pair's book
+  without disconnecting the others, or the design decision not to is recorded in
+  [`RESYNC.md`](docs/RESYNC.md) with the measured cost.
+- Sequence validation for the untouched pairs is unaffected; tests cover a mid-stream
+  single-pair resync while other pairs keep receiving deltas.
+- Book eligibility for the other pairs stays `true` across the resync in a replay test.
+
+### [ ] ARB-029 — Attribute host connectivity loss in the soak observer
+
+- Priority: P3
+- Estimate: 2 hours
+- Dependencies: ARB-021 observer tooling
+
+Problem: the 2026-09-16 soak contained a seven-minute window in which every exchange
+socket, every REST snapshot, and the observer's own loopback requests failed together.
+That is a host outage, but the report can only show correlated failures; the attribution
+was made afterwards from the Windows event log.
+
+Acceptance criteria:
+
+- Each sample records a lightweight host-connectivity probe (for example a DNS lookup or
+  TCP connect to a stable public endpoint) alongside the backend sample.
+- The report distinguishes "backend unreachable while host connectivity was lost" from
+  "backend unreachable while the host was online", and summarizes outage windows.
+- Probe failures never fail or shorten the run on their own.
+
+P2 total: **29 engineer-hours plus the soak runtime**.
 
 ## Planning summary
 
