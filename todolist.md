@@ -581,7 +581,7 @@ Acceptance criteria:
   change.
 - Open separate implementation tickets only for changes with demonstrated benefit.
 
-### [ ] ARB-023 — Prepare the first public release and project presentation
+### [x] ARB-023 — Prepare the first public release and project presentation
 
 - Priority: P2
 - Estimate: 3 hours
@@ -606,7 +606,10 @@ runs weekly on a schedule, so it can turn red from a new upstream advisory with 
 this repository having changed. For a security-adjacent project that is a signal worth
 surfacing, not a broken build.
 
-Remaining: create the release tag after owner review. Everything else is done.
+Resolution (2026-09-16): the changelog now records `0.1.0` with the soak evidence,
+the Node 22 toolchain note, and the reviewed limitations. The release tag `v0.1.0` is
+created from the reviewed commit after the clean-checkout checks and hosted CI pass on
+it, and pushed only on the owner's explicit request.
 
 Acceptance criteria:
 
