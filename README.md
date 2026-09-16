@@ -40,7 +40,7 @@ of book eligibility, detection, persistence, live delivery, and dashboard state.
 Prerequisites:
 
 - Python 3.11 or newer
-- Node.js 20 or newer
+- Node.js 22 or newer
 - npm
 - [uv](https://docs.astral.sh/uv/) for locked Python environments
 
