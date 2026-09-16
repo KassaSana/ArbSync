@@ -369,3 +369,10 @@ async def test_soak_fails_fast_when_sample_start_gap_exceeds_limit(
     assert "- Status: `interrupted`" in output.read_text(encoding="utf-8")
     records = [json.loads(line) for line in evidence.read_text(encoding="utf-8").splitlines()]
     assert "interruption" in records[-1]
+
+
+def test_describe_error_omits_an_empty_message() -> None:
+    from soak import describe_error
+
+    assert describe_error(TimeoutError()) == "TimeoutError"
+    assert describe_error(ValueError("bad value")) == "ValueError: bad value"

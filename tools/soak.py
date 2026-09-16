@@ -22,6 +22,12 @@ import httpx
 from websockets.asyncio.client import connect as websocket_connect
 
 
+def describe_error(exc: BaseException) -> str:
+    """Name the exception type, and its message only when it has one."""
+    message = str(exc)
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -226,7 +232,7 @@ async def observe_websocket(
                         )
                     except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
                         observation.invalid_frames += 1
-                        observation.last_error = f"{type(exc).__name__}: {exc}"
+                        observation.last_error = describe_error(exc)
                         continue
                     if sequence_gap:
                         observation.sequence_gaps += 1
@@ -241,7 +247,7 @@ async def observe_websocket(
             raise
         except Exception as exc:
             observation.disconnects += 1
-            observation.last_error = f"{type(exc).__name__}: {exc}"
+            observation.last_error = describe_error(exc)
         finally:
             observation.connected = False
             observation.disconnected_since = observation.disconnected_since or loop.time()
@@ -717,7 +723,7 @@ async def run_soak(
                     counters=parse_operational_counters(metrics.text),
                 )
             except (httpx.HTTPError, KeyError, TypeError, ValueError, AssertionError) as exc:
-                failure = f"{utc_now()}: {type(exc).__name__}: {exc}"
+                failure = f"{utc_now()}: {describe_error(exc)}"
                 report.http_failures.append(failure)
                 evidence["error"] = failure
 
