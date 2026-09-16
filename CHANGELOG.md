@@ -62,8 +62,9 @@ theoretical cross-exchange spreads; it does not trade.
   to loopback; public deployments require the documented proxy and origin controls.
 - Retention is opt-in through explicit pruning; upgrading does not start automatic
   history deletion on a schedule.
-- The dashboard toolchain now requires Node.js 22 or newer (Vite 8, jsdom 30). The
-  backend requires Python 3.11 or newer as before.
+- The dashboard toolchain now requires Node.js 22 or newer (Vite 8, jsdom 30); the
+  dashboard package declares this in its `engines` field. The backend requires Python
+  3.11 or newer as before, and its suite has been run on 3.11 through 3.14.
 
 ### Known limitations
 
