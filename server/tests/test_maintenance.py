@@ -71,7 +71,10 @@ async def test_active_writer_and_pruner_preserve_rollups(tmp_path: Path) -> None
     try:
         for index in range(20):
             assert await store.enqueue(make_opp(MINUTE_NS + index))
-        assert await asyncio.to_thread(prune_batch, path, MINUTE_NS) == 30
+        # This test is about coexisting with the writer, not about the budget:
+        # the default 0.5 s expired under lock contention on a slow CI runner.
+        # Budget expiry has its own deterministic test below.
+        assert await asyncio.to_thread(prune_batch, path, MINUTE_NS, timeout_seconds=2.0) == 30
     finally:
         await store.close()
         await runner
