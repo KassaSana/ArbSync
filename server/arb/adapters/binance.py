@@ -10,11 +10,15 @@ from typing import Any
 from arb.adapters.base import ExchangeAdapter, parse_levels
 from arb.types import EventKind, MarketEvent, PriceLevel
 
+# Longer quote assets first: "BTCBUSD" is BTC/BUSD, not BTCB/USD.
+_BINANCE_QUOTE_ASSETS = ("USDT", "USDC", "BUSD", "USD")
+
 
 def normalize_binance_symbol(symbol: str) -> str:
     upper = symbol.upper()
-    if upper.endswith("USDT"):
-        return f"{upper[:-4]}-USDT"
+    for quote in _BINANCE_QUOTE_ASSETS:
+        if upper.endswith(quote) and len(upper) > len(quote):
+            return f"{upper[: -len(quote)]}-{quote}"
     return upper
 
 

@@ -103,8 +103,8 @@ uv 0.12.10, and npm 11.17.0, and on hosted runners:
   benchmarks, and the installed `arbsync` help, example generation, overwrite refusal,
   and missing-configuration paths behaved as documented. Re-running the benchmarks
   rewrites `artifacts/benchmarks/results.json`; the committed values are the citation.
-- A clean checkout built `cross_exchange_arb_detector-0.1.0-py3-none-any.whl` and
-  `cross_exchange_arb_detector-0.1.0.tar.gz`; the checker's `checks.json` records their
+- A clean checkout built `arbsync-0.1.0-py3-none-any.whl` and
+  `arbsync-0.1.0.tar.gz`; the checker's `checks.json` records their
   contents and SHA-256 hashes, which the annotated release tag repeats.
 - `pip-audit` 2.10.1 found no known vulnerabilities in the 59-entry all-extras export of
   the unchanged lockfile; `npm audit --include=dev --audit-level=low` found none in the
@@ -300,9 +300,11 @@ What the rows say beyond the fee table:
 
 - The spread distribution is p50 0.124%, p99 0.35%, maximum 0.353%. A round trip on two
   US retail venues costs 0.5–1.2%, so no threshold setting closes the gap.
-- Every opportunity is Coinbase–Gemini in USD. Binance.US is configured USDT-only and
-  USD and USDT are distinct markets, so it contributed none; the roster is effectively
-  two venues for detection.
+- Every opportunity is Coinbase–Gemini in USD. During this soak Binance.US was
+  configured for its USDT markets, and USD and USDT are distinct markets, so it contributed
+  none; the roster was effectively two venues for detection. The shipped configuration now
+  subscribes to Binance.US's USD markets, which the adapter normalizes to the same canonical
+  pairs, so later runs compare all three venues.
 - 76% of rows are DOT, UNI, and AAVE; BTC has four and LTC one. Median capturable
   notional at top of book is $97, maximum $4,229. These are thin-book dislocations of
   the kind the reconciler also flagged, not liquid mispricing.

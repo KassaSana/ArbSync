@@ -424,8 +424,15 @@ def test_binance_snapshot_requests_documented_depth_limit() -> None:
     assert requested_url.endswith("symbol=BTCUSDT&limit=5000")
 
 
-def test_binance_symbol_normalization_handles_non_usdt() -> None:
+def test_binance_symbol_normalization_separates_usd_and_usdt() -> None:
     assert normalize_binance_symbol("ethusdt") == "ETH-USDT"
     assert normalize_binance_symbol("BTCUSDT") == "BTC-USDT"
-    # Non-USDT pairs pass through uppercased.
-    assert normalize_binance_symbol("btcbusd") == "BTCBUSD"
+    # Binance.US lists USD-quoted markets; they must land on the same canonical
+    # pair as Coinbase and Gemini so cross-venue detection can see them.
+    assert normalize_binance_symbol("btcusd") == "BTC-USD"
+    assert normalize_binance_symbol("AAVEUSD") == "AAVE-USD"
+    # Stablecoin quotes are distinct markets and must not be mistaken for USD.
+    assert normalize_binance_symbol("btcbusd") == "BTC-BUSD"
+    assert normalize_binance_symbol("ETHUSDC") == "ETH-USDC"
+    # Unknown quote assets pass through uppercased.
+    assert normalize_binance_symbol("btceth") == "BTCETH"

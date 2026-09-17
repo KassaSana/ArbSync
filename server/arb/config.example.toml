@@ -5,7 +5,9 @@ threshold_pct = 0.1
 [exchanges]
 gemini = ["btcusd", "ethusd"]
 coinbase = ["BTC-USD", "ETH-USD"]
-binance = ["BTCUSDT", "ETHUSDT"]
+# Binance.US lists both USD and USDT markets. USD matches the other venues' quote asset;
+# USDT symbols are accepted but form a separate market that is never compared with USD.
+binance = ["BTCUSD", "ETHUSD"]
 
 [server]
 # Loopback is the safe default. Use a terminating reverse proxy for public hosting.

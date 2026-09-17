@@ -4,7 +4,7 @@ threshold_pct = 0.1
 [exchanges]
 gemini = ["btcusd", "ethusd", "solusd", "avaxusd", "linkusd", "ltcusd", "uniusd", "dotusd", "aaveusd"]
 coinbase = ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "LINK-USD", "LTC-USD", "UNI-USD", "DOT-USD", "AAVE-USD"]
-binance = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "UNIUSDT", "DOTUSDT", "AAVEUSDT"]
+binance = ["BTCUSD", "ETHUSD", "SOLUSD", "AVAXUSD", "LINKUSD", "LTCUSD", "UNIUSD", "DOTUSD", "AAVEUSD"]
 
 [server]
 host = "127.0.0.1"
