@@ -10,6 +10,13 @@ opportunities in SQLite, and streams live state to a React dashboard.
 
 No API keys are required. ArbSync does not place trades.
 
+**Live demo:** [cross-exch-proj.vercel.app](https://cross-exch-proj.vercel.app) — the
+dashboard is static, but its backend runs on a free tier that sleeps when idle, so the
+first load can take up to a minute to connect. Everything below runs locally in a few
+minutes without an account.
+
+![ArbSync dashboard: exchange connectivity, live cross-venue spreads for nine USD pairs, and the opportunity feed](docs/dashboard.png)
+
 ![ArbSync architecture](docs/architecture.svg)
 
 ## What it demonstrates
@@ -22,8 +29,9 @@ No API keys are required. ArbSync does not place trades.
 - A React/TypeScript dashboard for spreads, feed health, opportunities, and statistics
 - Fixture replay, property-based tests, synthetic benchmarks, and live-soak tooling
 
-The default configuration tracks 9 assets on all 3 exchanges: 27 exchange/pair
-subscriptions in total. See [`config.toml`](config.toml) for the exact symbols.
+The default configuration tracks 9 assets on all 3 exchanges in USD: 27 exchange/pair
+subscriptions forming 9 three-venue markets. See [`config.toml`](config.toml) for the
+exact symbols.
 
 ## How data moves through the system
 
@@ -190,7 +198,9 @@ accounting or execution decisions.
 
 USD and USDT are separate quote assets. ArbSync does not infer a conversion or parity between
 them: `BTC-USD` is compared only with other `BTC-USD` books, while `BTC-USDT` remains a
-separate market. Theoretical profit is reported in its pair's quote asset, and dashboard/API
+separate market. The shipped configuration subscribes to Binance.US's USD markets so that all
+three venues compare the same quote asset; its USDT symbols are still accepted and form their
+own markets. Theoretical profit is reported in its pair's quote asset, and dashboard/API
 profit totals are grouped by quote asset rather than added across currencies. Updating to this
 version clears legacy opportunity history because earlier Binance.US USDT rows were labelled USD.
 
@@ -280,9 +290,10 @@ Every reported opportunity and profit value is theoretical. Calculations exclude
 trading and withdrawal fees, slippage, transfer latency, inventory constraints,
 partial fills, rate limits, and execution risk. The detector uses only top-of-book
 liquidity and is an observability project, not an execution engine or trading system.
-Measured against the four-hour soak, none of the 246 recorded opportunities survives a
-retail taker fee on both legs; the observed venue price differences (p50 0.12%) are
-smaller than the venue fee differences. The analysis and the tool that reproduces it are
+Measured against the four-hour soak (run while Binance.US was configured for USDT, so its
+books were a separate market), none of the 246 recorded Coinbase–Gemini opportunities
+survives a retail taker fee on both legs; the observed venue price differences (p50 0.12%)
+are smaller than the venue fee differences. The analysis and the tool that reproduces it are
 in [`docs/VALIDATION.md`](docs/VALIDATION.md#fee-adjusted-survival-of-the-soaks-opportunities).
 
 Long-duration evidence is a single four-hour uninterrupted live soak on one workstation.
