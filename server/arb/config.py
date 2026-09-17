@@ -46,6 +46,11 @@ class OrderBookConfig:
 
 
 @dataclass(frozen=True)
+class CaptureConfig:
+    queue_maxsize: int
+
+
+@dataclass(frozen=True)
 class ReconciliationConfig:
     cycle_seconds: float
     confirmation_count: int
@@ -61,6 +66,7 @@ class AppConfig:
     persistence: PersistenceConfig
     order_books: OrderBookConfig
     reconciliation: ReconciliationConfig
+    capture: CaptureConfig
 
 
 def load_config(path: str | Path = "config.toml") -> AppConfig:
@@ -105,6 +111,12 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         "order_books.max_age_seconds",
         raw.get("order_books", {}).get("max_age_seconds", 30.0),
     )
+    capture = raw.get("capture", {})
+    if not isinstance(capture, dict):
+        raise ConfigError(f"capture must be a table; got {capture!r}")
+    capture_queue_maxsize = _positive_integer(
+        "capture.queue_maxsize", capture.get("queue_maxsize", 10_000)
+    )
     reconciliation = raw.get("reconciliation", {})
     if not isinstance(reconciliation, dict):
         raise ConfigError(f"reconciliation must be a table; got {reconciliation!r}")
@@ -148,6 +160,9 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
             confirmation_count=confirmation_count,
             size_confirmation_count=size_confirmation_count,
             cooldown_seconds=cooldown_seconds,
+        ),
+        capture=CaptureConfig(
+            queue_maxsize=capture_queue_maxsize,
         ),
     )
 

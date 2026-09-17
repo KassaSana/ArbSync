@@ -25,6 +25,11 @@ queue_maxsize = 10000
 [order_books]
 max_age_seconds = 60.0
 
+[capture]
+# Bounded frames waiting for disk; a full queue drops capture frames and
+# counts them instead of blocking ingestion.
+queue_maxsize = 10000
+
 [reconciliation]
 # Checks are spread across the cycle rather than launched as one REST burst.
 cycle_seconds = 60.0

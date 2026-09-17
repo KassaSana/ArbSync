@@ -65,6 +65,20 @@ persistence_unflushed_rows = Gauge(
     "arb_persistence_unflushed_rows",
     "Accepted opportunities not yet committed to SQLite",
 )
+capture_frames_total = Counter(
+    "arb_capture_frames_total",
+    "Capture frames accepted for writing",
+    ["exchange", "kind"],
+)
+capture_drops_total = Counter(
+    "arb_capture_drops_total",
+    "Capture frames not accepted for writing",
+    ["reason"],
+)
+capture_unflushed_frames = Gauge(
+    "arb_capture_unflushed_frames",
+    "Accepted capture frames not yet written to disk",
+)
 background_task_failures_total = Counter(
     "arb_background_task_failures_total",
     "Unexpected background task exits",
