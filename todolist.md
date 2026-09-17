@@ -709,6 +709,158 @@ Acceptance criteria:
 
 P2 total: **29 engineer-hours plus the soak runtime**.
 
+## Executability roadmap (post-0.1.0)
+
+The 0.1.0 fee-survival analysis showed that top-of-book cross-venue spreads exist but none
+survives retail fees at the recorded sizes. The project's thesis from here is: **top-of-book
+cross-venue spreads exist, but depth, fees, and decay determine whether they are
+executable.** Each ticket below adds one term of that model. Capture/replay comes first
+because every later feature needs deterministic tests against real exchange traffic, and
+the consumer interface between the books and their readers is allowed to stay a plain
+callback list until replay shows what shape it needs; a plugin framework is out of scope.
+
+Release grouping: 0.2.0 = ARB-030 and ARB-031; 0.3.0 = ARB-032, ARB-033, ARB-034;
+0.4.0+ = ARB-035 and further research modules (Kraken with book checksums, latency
+analysis) as separate tickets once these land.
+
+### [ ] ARB-030 — Capture and replay real exchange traffic
+
+- Priority: P2
+- Estimate: 10 hours
+- Dependencies: ARB-021 tooling, 0.1.0 tag
+
+Problem: regression tests run on hand-written synthetic fixtures and live verification
+needs the internet. Real protocol quirks (thin-book transitions, resync ordering,
+Binance.US depth limits) are never exercised deterministically, and the hosted demo
+depends on a free-tier backend that sleeps.
+
+Acceptance criteria:
+
+- `arbsync capture --duration 10m --output PATH` records, per frame: exchange, local
+  receive timestamp (wall clock and monotonic), exchange timestamp when the message
+  carries one, sequence identifiers when present, and the raw WebSocket text. Output is
+  JSONL, optionally zstd-compressed.
+- The capture writer is a bounded queue drained off the receive path with a drop counter
+  and metric, following `OpportunityStore`; it never blocks ingestion.
+- `arbsync replay CAPTURE [--speed N]` feeds frames through the real adapters, books, and
+  detector without network access, at recorded or accelerated pacing.
+- Replaying the same capture twice produces identical normalized book transitions and
+  detector output; a test asserts this by hashing the event stream.
+- A committed three-venue capture of a few minutes lives under
+  `server/tests/fixtures/captured/`, compressed, with a test enforcing a per-file size
+  cap (5 MB); longer captures stay outside Git. SQLite still stores opportunities only.
+- The dashboard can be driven from a replayed capture, so a demo needs no live backend.
+
+### [ ] ARB-031 — Track opportunities as episodes (schema v3)
+
+- Priority: P2
+- Estimate: 8 hours
+- Dependencies: ARB-030
+
+Problem: the detector inserts one row per book update while a spread persists. The soak's
+246 rows were 108 distinct resting-quote pairs, so counts and profit sums overstate what
+existed, and nothing records how long a dislocation lasted.
+
+Acceptance criteria:
+
+- One episode spans appearance to disappearance for a (pair, buy venue, sell venue) and
+  records `start_ns`, `end_ns`, peak spread, spread at close, and size at peak.
+- Identity and correlation use wall-clock `time.time_ns()`; duration uses monotonic
+  deltas, so a system-clock step can never yield a negative or inflated lifetime.
+- Schema version 3 is migrated on startup like the quote-currency migration; the pruner
+  and statistics rollups are updated and tested against the new shape.
+- Lifetime distribution (p50, p90, max) is available from the API and shown in the
+  dashboard; `tools/fee_survival.py` reads episodes instead of deduplicating rows.
+- Episode boundaries are verified deterministically with an ARB-030 replay test.
+
+### [ ] ARB-032 — Depth-aware executable pricing with explicit insufficient depth
+
+- Priority: P2
+- Estimate: 8 hours
+- Dependencies: ARB-030, ARB-031
+
+Problem: detection compares top-of-book only. "Where is it cheapest to buy $10k" cannot
+be answered, and the top-of-book number overstates what a real order would pay.
+
+Acceptance criteria:
+
+- For configured notionals (default `100`, `1000`, `10000`, `50000` in quote units) the
+  book is walked to a decimal-exact VWAP per venue and side; results are decimal strings
+  on the wire.
+- When the subscribed depth cannot fill the notional the result is an explicit
+  `insufficient_depth` value, never a fabricated price, and every result carries the
+  venue's subscribed depth ceiling (`subscribed_depth_levels`) so fill-rate statistics
+  are not compared across venues with different caps (Binance.US snapshots are limited;
+  Coinbase and Gemini stream full books).
+- Property tests: VWAP is monotonically non-improving in notional, equals top-of-book for
+  a notional within the first level, and reports insufficient depth exactly when the
+  summed depth is short.
+- Fill-rate per venue and notional ("could fill $50k in N% of observations") is exposed as
+  a statistic; replay tests cover thin alt books and a mid-resync window.
+
+### [ ] ARB-033 — Fee-aware net pricing in the product
+
+- Priority: P2
+- Estimate: 5 hours
+- Dependencies: ARB-032
+
+Problem: fees live only in the offline `tools/fee_survival.py` scenarios. Users cannot see
+net executable spread, and the offline tool's assumptions are not the product's.
+
+Acceptance criteria:
+
+- `config.toml` gains a per-venue fee schedule (taker first; maker optional and unused
+  until a use exists), validated at startup like other settings.
+- Every episode and executable-price result carries the ledger
+  `top-of-book spread -> depth impact -> fees -> net executable spread`, without a separate
+  "expected slippage" term, because depth impact is measured by ARB-032.
+- Net values are decimal strings on the wire and in SQLite; dashboard statistics may
+  remain `REAL`.
+- The soak-style survival report is reproducible from stored net values, and
+  `tools/fee_survival.py` either reads them or is retired with its documentation updated.
+
+### [ ] ARB-034 — Venue-comparison dashboard view
+
+- Priority: P2
+- Estimate: 8 hours
+- Dependencies: ARB-032, ARB-033
+
+Problem: the dashboard answers "was an arbitrage detected", which the fee analysis shows
+is rarely the useful question.
+
+Acceptance criteria:
+
+- Per pair: each venue's executable buy and sell price at the selected notional, the
+  cheapest venue to buy and best to sell, available depth or `insufficient_depth`, gross
+  spread, net spread after fees, and the current or last episode lifetime.
+- No "price leader" or lead/lag cell in the live view: single-vantage measurements cannot
+  separate market leadership from network path and exchange clock differences.
+- Existing eligibility, freshness, and connectivity panels remain; boundary validation
+  covers every new REST and live message shape; coverage gates hold.
+
+### [ ] ARB-035 — Offline lead/lag and market-structure research
+
+- Priority: P3
+- Estimate: 6 hours to first module
+- Dependencies: ARB-030, ARB-031
+
+Problem: captures make cross-venue questions answerable, but naive "who moved first"
+comparisons from one machine are contaminated by differential network latency and
+exchange clock offsets.
+
+Acceptance criteria:
+
+- Research runs over captures offline, never on the ingestion path, and writes datasets
+  as files (JSONL or Parquet), not SQLite tables.
+- First modules: episode lifetime distribution, fee-survival and executable-size survival
+  rates, and per-venue fill rate by notional (liquidity fragmentation).
+- Lead/lag uses an estimator designed for asynchronous ticks (Hayashi–Yoshida or
+  Hoffmann–Rosenbaum–Yoshida), reports confidence intervals, and documents the
+  measurement floor from network geography and clock skew; results are labelled as
+  research, not product metrics.
+
+Roadmap total: **45 engineer-hours** to the end of ARB-034, plus open-ended research.
+
 ## Planning summary
 
 | Milestone | Engineer effort | Release requirement |
