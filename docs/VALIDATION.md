@@ -281,6 +281,41 @@ minutes when its launcher process was killed. The two short smoke runs,
 [`soak_validation_60s_window.md`](../artifacts/benchmarks/soak_validation_60s_window.md),
 validated the observer and the 60-second book-age limit.
 
+### Fee-adjusted survival of the soak's opportunities
+
+The 246 opportunities recorded during the soak window were re-read from the soak
+database with [`tools/fee_survival.py`](../tools/fee_survival.py) and charged an
+assumed taker fee on both legs. The fee tiers are illustrative base-tier public
+schedules, not live quotes; the conclusion does not depend on their exact values
+because the deficit is a multiple of the spread, not a fraction of it.
+
+| Per-side taker fee (Coinbase / Gemini) | Rows surviving | Distinct quote pairs | Net at top-of-book size |
+| --- | ---: | ---: | ---: |
+| 0.60% / 0.40% (base retail) | 0 / 246 | 0 | $0.00 |
+| 0.35% / 0.25% (mid-volume tier) | 0 / 246 | 0 | $0.00 |
+| 0.10% / 0.10% (institutional) | 36 / 246 | 22 | $3.91 |
+| 0% (theoretical upper bound) | 246 / 246 | 108 | $76.21 |
+
+What the rows say beyond the fee table:
+
+- The spread distribution is p50 0.124%, p99 0.35%, maximum 0.353%. A round trip on two
+  US retail venues costs 0.5–1.2%, so no threshold setting closes the gap.
+- Every opportunity is Coinbase–Gemini in USD. Binance.US is configured USDT-only and
+  USD and USDT are distinct markets, so it contributed none; the roster is effectively
+  two venues for detection.
+- 76% of rows are DOT, UNI, and AAVE; BTC has four and LTC one. Median capturable
+  notional at top of book is $97, maximum $4,229. These are thin-book dislocations of
+  the kind the reconciler also flagged, not liquid mispricing.
+- The 246 rows collapse to 108 distinct resting-quote pairs. The detector reports a
+  persisting spread on every book update, which is right for observability but means
+  the naive sum of `theoretical_profit` ($149.55) double counts levels that could be
+  taken once. The tool pays each distinct pair once.
+
+Survival here is an upper bound. Slippage, latency, inventory pre-positioning on both
+venues, partial fills, and withdrawal costs are still excluded. The number that is
+useful to a person is therefore not the arbitrage but the venue price difference
+against the venue fee difference, which is larger; see the scope section of the README.
+
 ## Remaining validation gap
 
 The four-hour requirement is met. The following would strengthen the evidence but are not

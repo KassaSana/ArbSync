@@ -280,6 +280,10 @@ Every reported opportunity and profit value is theoretical. Calculations exclude
 trading and withdrawal fees, slippage, transfer latency, inventory constraints,
 partial fills, rate limits, and execution risk. The detector uses only top-of-book
 liquidity and is an observability project, not an execution engine or trading system.
+Measured against the four-hour soak, none of the 246 recorded opportunities survives a
+retail taker fee on both legs; the observed venue price differences (p50 0.12%) are
+smaller than the venue fee differences. The analysis and the tool that reproduces it are
+in [`docs/VALIDATION.md`](docs/VALIDATION.md#fee-adjusted-survival-of-the-soaks-opportunities).
 
 Long-duration evidence is a single four-hour uninterrupted live soak on one workstation.
 It establishes reconnect recovery, sequence continuity, the 60-second freshness threshold,

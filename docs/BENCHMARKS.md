@@ -77,6 +77,21 @@ The current dashboard has no mounted React profiling wrappers, so
 The current verification summary, the four-hour live soak, and the remaining evidence
 gaps are tracked in [VALIDATION.md](VALIDATION.md).
 
+## Fee-adjusted survival
+
+`tools/fee_survival.py` re-reads stored opportunities and charges a per-side taker fee on
+both legs, reporting how many remain positive, how many distinct resting-quote pairs
+they represent, and the net value once per pair. Built-in scenarios are illustrative;
+`--fee EXCHANGE=PCT` replaces them, `--start`/`--end` bound the window, and `--json`
+emits a document. It opens the database read-only and can run against a live one.
+
+```bash
+uv run python tools/fee_survival.py --database var/arb.sqlite3   --start 2026-09-16T10:25:38Z --end 2026-09-16T14:25:38Z
+```
+
+The result for the four-hour soak is recorded in
+[VALIDATION.md](VALIDATION.md#fee-adjusted-survival-of-the-soaks-opportunities).
+
 ## 3. Live Soak Observer
 
 On Windows, run the launcher. It starts the backend, waits for readiness, blocks

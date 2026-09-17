@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- `tools/fee_survival.py` charges stored opportunities an assumed taker fee on both
+  legs and counts survivors once per distinct resting-quote pair. Applied to the
+  four-hour soak, no opportunity survives retail fees; the analysis is recorded in
+  [validation status](docs/VALIDATION.md).
 
 ## 0.1.0 — 2026-09-16
 
