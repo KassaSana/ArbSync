@@ -113,6 +113,7 @@ origins, persistence limits, and freshness threshold before running it.
 | Section | Controls |
 | --- | --- |
 | `detector` | Minimum spread percentage that emits an opportunity |
+| `pricing` | Quote notionals walked to a VWAP, and the book sampling interval for fill rates |
 | `exchanges` | Exchange-native symbols to subscribe to |
 | `server` | Bind address, port, SQLite path, and browser CORS allowlist |
 | `persistence` | Batch size, flush interval, and bounded queue size |
@@ -185,6 +186,8 @@ the dashboard suitable for trading or accounting decisions.
 | `GET /api/system/overview` | Uptime, all-time peaks, open episode count and all-time lifetimes |
 | `GET /api/system/stats?window=1h` | Windowed aggregate statistics and episode lifetime p50/p90/max |
 | `GET /api/system/timeseries?window=1h&bucket_seconds=60` | Chart buckets (`bucket_seconds`: 1–86,400) |
+| `GET /api/pricing/depth?pair=BTC-USD` | Depth-walked VWAP per venue, side and configured notional (`pair` optional) |
+| `GET /api/pricing/fill-rates` | How often each venue could fill each notional across periodic samples |
 | `GET /metrics` | Prometheus exposition |
 | `WS /ws/live` | Initial state followed by live book/status/opportunity messages |
 
@@ -216,6 +219,15 @@ a thin pair's lifetime can overrun by that gap. Schema version 3 drops earlier p
 startup because they cannot be folded into episodes after the fact; back up first if that
 history matters. The earlier quote-currency migration likewise cleared Binance.US USDT rows
 that had been labelled USD.
+
+Depth pricing walks each eligible book to the volume-weighted average price for the configured
+notionals (`100`, `1000`, `10000`, `50000` quote units by default), in exact decimal arithmetic.
+When the subscribed depth cannot cover a notional the result is an explicit `insufficient_depth`
+with the amount that was available, never a fabricated price. Every quote carries the venue's
+`subscribed_depth_levels` (`5000` for Binance.US, whose snapshot is capped; `null` for Coinbase
+and Gemini, which stream full books) because a fill rate on a capped book is not comparable
+with one on a full book. Fill rates come from periodic samples of every book, off the ingestion
+path; an ineligible book is counted as an ineligible sample, not as a failed fill.
 
 ## Verify a change
 

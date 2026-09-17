@@ -34,3 +34,10 @@ confirmation_count = 3
 size_confirmation_count = 5
 # Also serves as the deadline for reporting a started recovery as unresolved.
 cooldown_seconds = 300.0
+
+[pricing]
+# Quote notionals, in each pair's quote asset, walked to a VWAP per venue and
+# side. Books are sampled on this interval, off the ingestion path, to build
+# per-venue fill rates. Omitting this section uses these same values.
+notionals = [100, 1000, 10000, 50000]
+sample_interval_seconds = 5.0

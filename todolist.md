@@ -785,7 +785,7 @@ Acceptance criteria:
   dashboard; `tools/fee_survival.py` reads episodes instead of deduplicating rows.
 - Episode boundaries are verified deterministically with an ARB-030 replay test.
 
-### [ ] ARB-032 — Depth-aware executable pricing with explicit insufficient depth
+### [x] ARB-032 — Depth-aware executable pricing with explicit insufficient depth
 
 - Priority: P2
 - Estimate: 8 hours
