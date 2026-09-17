@@ -211,9 +211,11 @@ profit totals are grouped by quote asset rather than added across currencies.
 Opportunities are stored as **episodes**: one row per `(pair, buy venue, sell venue)` route from
 the moment its spread crosses the threshold to the moment it stops, with the peak spread, the
 size and profit at that peak, the spread at close and why it closed (`spread_closed`,
-`book_ineligible`, `shutdown`). A spread that rests across hundreds of book updates is one
-episode, so counts and profit sums describe distinct dislocations, and every closed episode has
-a lifetime measured on the monotonic clock. An episode closes when its spread narrows, when a
+`book_ineligible`, `shutdown`, `orphaned`). A spread that rests across hundreds of book updates is one
+episode, so counts and profit sums describe distinct dislocations, and every normally closed
+episode has a lifetime measured on the monotonic clock. An episode a previous process left
+open is marked `orphaned`: it keeps its count, contributes no lifetime, and must not appear as
+currently open. An episode closes when its spread narrows, when a
 leg's book is rejected, invalidated or disconnected, or at shutdown; a leg that merely ages past
 the freshness threshold with no further events on either venue is noticed at the next event, so
 a thin pair's lifetime can overrun by that gap. Schema version 4 adds stored fee/depth ledgers;

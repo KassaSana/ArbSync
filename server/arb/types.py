@@ -67,8 +67,10 @@ class TopOfBook:
 # Why an episode closed. `spread_closed`: the route fell below threshold while
 # both books stayed eligible. `book_ineligible`: a leg's book left the eligible
 # set, so the spread's existence became unknown rather than gone. `shutdown`:
-# the process stopped with the spread still standing.
-EpisodeCloseReason = Literal["spread_closed", "book_ineligible", "shutdown"]
+# the process stopped with the spread still standing. `orphaned`: a previous
+# process died while the episode was still open, so the actual close time and
+# lifetime are unknown; the row must not appear as currently open.
+EpisodeCloseReason = Literal["spread_closed", "book_ineligible", "shutdown", "orphaned"]
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,10 @@ class OpportunityEpisode:
     widest spread seen and the size and profit at that moment. `pricing_ledgers`
     snapshot the configured notionals at that same open or peak observation.
     An open episode has `end_ns`, `close_spread_pct` and `close_reason` unset.
+    A normally closed episode has `end_ns` and a close reason other than
+    `orphaned`. An `orphaned` episode keeps `end_ns` and `close_spread_pct`
+    unset: it is not currently open, but its lifetime is unknown and must
+    not be fabricated.
     """
 
     start_ns: int
@@ -149,7 +155,7 @@ class OpportunityEpisode:
 
     @property
     def is_open(self) -> bool:
-        return self.end_ns is None
+        return self.end_ns is None and self.close_reason is None
 
     @property
     def duration_ns(self) -> int | None:
