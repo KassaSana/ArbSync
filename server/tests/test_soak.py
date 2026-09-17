@@ -10,6 +10,12 @@ import httpx
 import pytest
 import soak
 from soak import (
+    HOST_OFFLINE_BACKEND_DOWN,
+    HOST_OFFLINE_BACKEND_OK,
+    HOST_ONLINE_BACKEND_DOWN,
+    HOST_ONLINE_BACKEND_OK,
+    HostConnectivityObservation,
+    HostProbeResult,
     SamplingGap,
     SoakReport,
     WebSocketObservation,
@@ -20,6 +26,19 @@ from soak import (
     process_rss_bytes,
     write_report,
 )
+
+ONLINE = HostProbeResult(True, "1.1.1.1:443", 12, None)
+OFFLINE = HostProbeResult(False, None, None, "8.8.8.8:443: OSError: unreachable")
+
+
+@pytest.fixture(autouse=True)
+def hermetic_host_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep every soak test off the real network; tests override this to script outages."""
+
+    async def always_online(*args: object, **kwargs: object) -> HostProbeResult:
+        return ONLINE
+
+    monkeypatch.setattr(soak, "probe_host_connectivity", always_online)
 
 
 def test_soak_report_tracks_recovery_and_counters() -> None:
@@ -381,3 +400,191 @@ def test_describe_error_omits_an_empty_message() -> None:
 
     assert describe_error(TimeoutError()) == "TimeoutError"
     assert describe_error(ValueError("bad value")) == "ValueError: bad value"
+
+
+def test_host_connectivity_observation_classifies_samples_and_windows() -> None:
+    # ARB-029: each sample is labeled by (host link, backend) together. Runs of
+    # one non-healthy label form an outage window; a healthy sample or a
+    # change of label closes it, and an unfinished window is still reported.
+    observation = HostConnectivityObservation(("1.1.1.1:443",))
+    script = [
+        ("t0", ONLINE, True),
+        ("t1", OFFLINE, False),
+        ("t2", OFFLINE, False),
+        ("t3", ONLINE, False),
+        ("t4", ONLINE, True),
+        ("t5", OFFLINE, True),
+    ]
+    states = [observation.observe(at, probe, ok) for at, probe, ok in script]
+
+    assert states == [
+        HOST_ONLINE_BACKEND_OK,
+        HOST_OFFLINE_BACKEND_DOWN,
+        HOST_OFFLINE_BACKEND_DOWN,
+        HOST_ONLINE_BACKEND_DOWN,
+        HOST_ONLINE_BACKEND_OK,
+        HOST_OFFLINE_BACKEND_OK,
+    ]
+    assert observation.probes == 6
+    assert observation.online_samples == 3
+    assert observation.max_latency_ms == 12
+    assert observation.last_error == OFFLINE.error
+    windows = [(w.kind, w.started_at, w.ended_at, w.samples) for w in observation.all_windows()]
+    assert windows == [
+        (HOST_OFFLINE_BACKEND_DOWN, "t1", "t2", 2),
+        (HOST_ONLINE_BACKEND_DOWN, "t3", "t3", 1),
+        (HOST_OFFLINE_BACKEND_OK, "t5", "t5", 1),
+    ]
+    # The last window is still open: it is reported but not yet closed.
+    assert len(observation.windows) == 2
+
+
+@pytest.mark.asyncio
+async def test_probe_host_connectivity_reports_a_reachable_target_and_never_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.undo()  # use the real probe against local sockets
+    from soak import probe_host_connectivity
+
+    async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        writer.close()
+
+    server = await asyncio.start_server(accept, "127.0.0.1", 0)
+    open_port = server.sockets[0].getsockname()[1]
+    # Reserve a port then release it so the connect below is refused.
+    closed = await asyncio.start_server(accept, "127.0.0.1", 0)
+    closed_port = closed.sockets[0].getsockname()[1]
+    closed.close()
+    await closed.wait_closed()
+    try:
+        # First target refused, second accepted: the probe walks targets in order.
+        result = await probe_host_connectivity(
+            (("127.0.0.1", closed_port), ("127.0.0.1", open_port)), timeout_seconds=0.5
+        )
+        assert result.online is True
+        assert result.target == f"127.0.0.1:{open_port}"
+        assert result.latency_ms is not None and result.latency_ms >= 0
+        assert result.error is None
+
+        refused = await probe_host_connectivity((("127.0.0.1", closed_port),), timeout_seconds=0.5)
+        assert refused.online is False
+        assert refused.target is None
+        assert refused.error is not None and refused.error.startswith(f"127.0.0.1:{closed_port}")
+
+        assert (await probe_host_connectivity(())).error == "no probe targets"
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+def test_parse_host_probe_target_requires_host_and_numeric_port() -> None:
+    import argparse
+
+    from soak import parse_host_probe_target
+
+    assert parse_host_probe_target("1.1.1.1:443") == ("1.1.1.1", 443)
+    assert parse_host_probe_target("[::1]:53") == ("[::1]", 53)
+    for bad in ("1.1.1.1", ":443", "host:port", "host:"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse_host_probe_target(bad)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend_fails", [False, True])
+async def test_soak_attributes_backend_failures_to_host_connectivity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend_fails: bool
+) -> None:
+    # ARB-029: a backend failure in the same sample as a failed host probe is
+    # attributed to the host; the probe result is part of the raw evidence.
+    async def offline(*args: object, **kwargs: object) -> HostProbeResult:
+        return OFFLINE
+
+    monkeypatch.setattr(soak, "probe_host_connectivity", offline)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if backend_fails:
+            raise httpx.ConnectError("connection refused", request=request)
+        if request.url.path == "/metrics":
+            return httpx.Response(200, text="")
+        payloads: dict[str, object] = {
+            "/api/adapters": [],
+            "/api/book-status": [],
+            "/readyz": {"status": "ready", "background_task_failures": []},
+            "/api/system/overview": {"all_time_count": 0, "started_at_ns": "1"},
+        }
+        return httpx.Response(200, json=payloads[request.url.path])
+
+    client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
+    output = tmp_path / "report.md"
+    evidence = tmp_path / "samples.jsonl"
+
+    report = await soak.run_soak(
+        "http://test",
+        0,
+        1,
+        None,
+        output,
+        samples_output=evidence,
+        observe_websocket_delivery=False,
+        host_probe_targets=(("192.0.2.1", 443),),
+    )
+
+    assert report.completed
+    assert report.host is not None
+    assert report.host.targets == ("192.0.2.1:443",)
+    expected = HOST_OFFLINE_BACKEND_DOWN if backend_fails else HOST_OFFLINE_BACKEND_OK
+    assert dict(report.host.states) == {expected: 1}
+    assert len(report.http_failures) == int(backend_fails)
+    sample = json.loads(evidence.read_text(encoding="utf-8"))
+    assert sample["host_probe"] == OFFLINE.as_payload()
+    assert sample["host_state"] == expected
+    markdown = output.read_text(encoding="utf-8")
+    assert "## Host connectivity" in markdown
+    assert "- Probe targets: `192.0.2.1:443`" in markdown
+    assert "- Host online: `0/1`" in markdown
+    assert f"- Backend unreachable while host offline: `{int(backend_fails)}`" in markdown
+    assert f"- `{expected}`: `{sample['sampled_at']}` to `{sample['sampled_at']}` (1 sample)" in (
+        markdown
+    )
+
+
+@pytest.mark.asyncio
+async def test_soak_completes_when_host_probe_breaks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ARB-029: probe failures never fail or shorten the run on their own.
+    async def broken(*args: object, **kwargs: object) -> HostProbeResult:
+        raise RuntimeError("probe exploded")
+
+    monkeypatch.setattr(soak, "probe_host_connectivity", broken)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/metrics":
+            return httpx.Response(200, text="")
+        payloads: dict[str, object] = {
+            "/api/adapters": [],
+            "/api/book-status": [],
+            "/readyz": {"status": "ready", "background_task_failures": []},
+            "/api/system/overview": {"all_time_count": 0, "started_at_ns": "1"},
+        }
+        return httpx.Response(200, json=payloads[request.url.path])
+
+    client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
+    monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
+
+    report = await soak.run_soak(
+        "http://test", 0, 1, None, tmp_path / "report.md", observe_websocket_delivery=False
+    )
+
+    assert report.completed
+    assert not report.interrupted
+    assert report.samples == 1
+    assert report.host is not None
+    assert dict(report.host.states) == {HOST_OFFLINE_BACKEND_OK: 1}
+    assert report.host.last_error == "RuntimeError: probe exploded"
+
+
+def test_markdown_states_when_host_probe_is_disabled() -> None:
+    report = SoakReport("2026-09-17T00:00:00+00:00", 1, 1)
+    assert "Host probe disabled" in report.markdown()

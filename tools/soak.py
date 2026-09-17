@@ -10,6 +10,7 @@ import re
 import statistics
 import subprocess
 import sys
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -141,6 +142,127 @@ class SamplingGap:
     started_at: str
     ended_at: str
     duration_seconds: float
+
+
+# Public anycast resolvers answer TCP on 443 from anywhere; connecting by IP
+# leaves DNS out of the question so a failure means the host link, not the
+# resolver. Two independent operators so one endpoint's blip is not an outage.
+DEFAULT_HOST_PROBE_TARGETS: tuple[tuple[str, int], ...] = (("1.1.1.1", 443), ("8.8.8.8", 443))
+HOST_PROBE_TIMEOUT_SECONDS = 3.0
+
+
+@dataclass(frozen=True)
+class HostProbeResult:
+    online: bool
+    target: str | None
+    latency_ms: int | None
+    error: str | None
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "online": self.online,
+            "target": self.target,
+            "latency_ms": self.latency_ms,
+            "error": self.error,
+        }
+
+
+async def probe_host_connectivity(
+    targets: tuple[tuple[str, int], ...] = DEFAULT_HOST_PROBE_TARGETS,
+    timeout_seconds: float = HOST_PROBE_TIMEOUT_SECONDS,
+) -> HostProbeResult:
+    """Report whether this host can open a TCP connection to any target.
+
+    The first target that connects wins. Every failure mode, including a
+    timeout or an unexpected exception, yields ``online=False`` with the last
+    error; this never raises, so a broken probe cannot end a soak.
+    """
+    last_error: str | None = None
+    for host, port in targets:
+        started = time.perf_counter()
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=timeout_seconds
+            )
+        except Exception as exc:
+            last_error = f"{host}:{port}: {describe_error(exc)}"
+            continue
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return HostProbeResult(True, f"{host}:{port}", latency_ms, None)
+    return HostProbeResult(False, None, None, last_error or "no probe targets")
+
+
+def parse_host_probe_target(value: str) -> tuple[str, int]:
+    host, separator, port = value.rpartition(":")
+    if not separator or not host or not port.isdigit():
+        raise argparse.ArgumentTypeError(f"expected host:port, got {value!r}")
+    return host, int(port)
+
+
+@dataclass(frozen=True)
+class OutageWindow:
+    kind: str
+    started_at: str
+    ended_at: str
+    samples: int
+
+
+# One label per sample: what the backend and the host link looked like together.
+HOST_ONLINE_BACKEND_OK = "backend_ok_host_online"
+HOST_ONLINE_BACKEND_DOWN = "backend_unreachable_host_online"
+HOST_OFFLINE_BACKEND_OK = "backend_ok_host_offline"
+HOST_OFFLINE_BACKEND_DOWN = "backend_unreachable_host_offline"
+
+
+@dataclass
+class HostConnectivityObservation:
+    targets: tuple[str, ...]
+    probes: int = 0
+    online_samples: int = 0
+    states: Counter[str] = field(default_factory=Counter)
+    max_latency_ms: int | None = None
+    last_error: str | None = None
+    windows: list[OutageWindow] = field(default_factory=list)
+    _open: OutageWindow | None = None
+
+    def observe(self, sampled_at: str, probe: HostProbeResult, backend_ok: bool) -> str:
+        self.probes += 1
+        if probe.online:
+            self.online_samples += 1
+            if probe.latency_ms is not None:
+                self.max_latency_ms = max(self.max_latency_ms or 0, probe.latency_ms)
+            state = HOST_ONLINE_BACKEND_OK if backend_ok else HOST_ONLINE_BACKEND_DOWN
+        else:
+            self.last_error = probe.error
+            state = HOST_OFFLINE_BACKEND_OK if backend_ok else HOST_OFFLINE_BACKEND_DOWN
+        self.states[state] += 1
+
+        # Outage windows are runs of consecutive samples in one non-healthy
+        # state. A healthy sample or a change of state closes the open window.
+        if state == HOST_ONLINE_BACKEND_OK:
+            self._close()
+        elif self._open is not None and self._open.kind == state:
+            self._open = OutageWindow(
+                state, self._open.started_at, sampled_at, self._open.samples + 1
+            )
+        else:
+            self._close()
+            self._open = OutageWindow(state, sampled_at, sampled_at, 1)
+        return state
+
+    def _close(self) -> None:
+        if self._open is not None:
+            self.windows.append(self._open)
+            self._open = None
+
+    def all_windows(self) -> list[OutageWindow]:
+        """Closed windows plus the one still open at the end of the run."""
+        return [*self.windows, *([self._open] if self._open is not None else [])]
 
 
 LIVE_MESSAGE_TYPES = {"state_snapshot", "top_of_book", "book_status", "opportunity"}
@@ -286,6 +408,7 @@ class SoakReport:
     interrupted: bool = False
     interruption_reasons: list[str] = field(default_factory=list)
     websocket: WebSocketObservation | None = None
+    host: HostConnectivityObservation | None = None
 
     def observe(
         self,
@@ -470,6 +593,35 @@ class SoakReport:
             )
             for message_type, count in sorted(websocket.frames_by_type.items()):
                 lines.append(f"- `{message_type}` frames: `{count}`")
+        lines.extend(["", "## Host connectivity", ""])
+        if self.host is None:
+            lines.append(
+                "- Host probe disabled (`--no-host-probe`); backend outages are unattributed."
+            )
+        else:
+            host = self.host
+            lines.extend(
+                [
+                    f"- Probe targets: `{', '.join(host.targets)}`",
+                    f"- Probes: `{host.probes}`",
+                    f"- Host online: `{host.online_samples}/{host.probes}`",
+                    f"- Backend unreachable while host online: `{host.states[HOST_ONLINE_BACKEND_DOWN]}`",
+                    f"- Backend unreachable while host offline: `{host.states[HOST_OFFLINE_BACKEND_DOWN]}`",
+                    f"- Backend reachable while host offline: `{host.states[HOST_OFFLINE_BACKEND_OK]}`",
+                    f"- Maximum probe latency: `{'-' if host.max_latency_ms is None else f'{host.max_latency_ms} ms'}`",
+                    f"- Last probe error: `{host.last_error or '-'}`",
+                ]
+            )
+            windows = host.all_windows()
+            if windows:
+                lines.extend(
+                    ["", "Outage windows (sample resolution; the last may still be open):", ""]
+                )
+                lines.extend(
+                    f"- `{window.kind}`: `{window.started_at}` to `{window.ended_at}` "
+                    f"({window.samples} sample{'s' if window.samples != 1 else ''})"
+                    for window in windows
+                )
         lines.extend(["", "## Operational counters", ""])
         lines.append(
             "Deltas retain metric labels; resets or process restarts invalidate simple subtraction. "
@@ -562,6 +714,7 @@ async def run_soak(
     max_sample_gap_seconds: float | None = None,
     websocket_url: str | None = None,
     observe_websocket_delivery: bool = True,
+    host_probe_targets: tuple[tuple[str, int], ...] | None = DEFAULT_HOST_PROBE_TARGETS,
 ) -> SoakReport:
     report = SoakReport(utc_now(), duration_seconds, sample_interval_seconds)
     report.max_sample_gap_seconds = (
@@ -612,6 +765,10 @@ async def run_soak(
     except (OSError, subprocess.SubprocessError):
         report.metadata.setdefault("observer_checkout_commit", "unavailable")
         report.metadata["observer_checkout_dirty"] = "unavailable"
+    if host_probe_targets is not None:
+        report.host = HostConnectivityObservation(
+            tuple(f"{host}:{port}" for host, port in host_probe_targets)
+        )
     loop = asyncio.get_running_loop()
     websocket_task: asyncio.Task[None] | None = None
     websocket_ready = asyncio.Event()
@@ -692,6 +849,15 @@ async def run_soak(
             previous_sample_started = loop.time()
             previous_sampled_at = sampled_at
             evidence = {"sampled_at": sampled_at, "elapsed_seconds": elapsed}
+            # Probe concurrently with the backend sample so the two observations
+            # describe the same moment; that alignment is what makes a backend
+            # failure attributable to the host link.
+            probe_task = (
+                None
+                if host_probe_targets is None
+                else asyncio.create_task(probe_host_connectivity(host_probe_targets))
+            )
+            backend_ok = True
             try:
                 adapters = await fetch_json(client, "/api/adapters")
                 books = await fetch_json(client, "/api/book-status")
@@ -728,6 +894,15 @@ async def run_soak(
                 failure = f"{utc_now()}: {describe_error(exc)}"
                 report.http_failures.append(failure)
                 evidence["error"] = failure
+                backend_ok = False
+
+            if probe_task is not None and report.host is not None:
+                try:
+                    probe = await probe_task
+                except Exception as exc:
+                    probe = HostProbeResult(False, None, None, describe_error(exc))
+                evidence["host_probe"] = probe.as_payload()
+                evidence["host_state"] = report.host.observe(sampled_at, probe, backend_ok)
 
             if samples_output is not None:
                 with samples_output.open("a", encoding="utf-8") as stream:
@@ -779,6 +954,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable the built-in live delivery consumer (not valid for release evidence)",
     )
+    parser.add_argument(
+        "--host-probe",
+        action="append",
+        type=parse_host_probe_target,
+        metavar="HOST:PORT",
+        help="TCP endpoint for the per-sample host connectivity probe (repeatable; "
+        "default: 1.1.1.1:443 and 8.8.8.8:443)",
+    )
+    parser.add_argument(
+        "--no-host-probe",
+        action="store_true",
+        help="Disable the host connectivity probe; backend outages are then unattributed",
+    )
     return parser.parse_args()
 
 
@@ -800,6 +988,13 @@ def main() -> None:
             max_sample_gap_seconds=args.max_sample_gap_seconds,
             websocket_url=args.websocket_url,
             observe_websocket_delivery=not args.no_websocket,
+            host_probe_targets=(
+                None
+                if args.no_host_probe
+                else tuple(args.host_probe)
+                if args.host_probe
+                else DEFAULT_HOST_PROBE_TARGETS
+            ),
         )
     )
     print(json.dumps({"output": str(args.output), "samples": report.samples}))
