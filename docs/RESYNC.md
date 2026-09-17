@@ -17,10 +17,13 @@ Why this approach:
 
 `OrderBookManager` owns the shared validity check. When it rejects a snapshot or otherwise
 clears a normalized chain, it returns a resynchronization signal to the pipeline. The
-pipeline asks the originating adapter to reconnect; the adapter still owns connection reset,
-snapshot acquisition, buffering, and exchange-native sequence alignment. Because each
-adapter currently uses one connection for all configured pairs, recovery invalidates that
-exchange's other books until the new connection rebuilds them.
+pipeline asks the originating adapter for a scoped single-pair resync when the
+adapter supports one (Binance.US does, via `request_pair_resync`) and falls back
+to a full reconnect otherwise. Scoped recovery still starts from a cleared book
+for the affected pair, so detection stays fail-closed for that pair while the
+venue's other books keep flowing. Adapters without scoped recovery still reset
+the whole connection, which invalidates that exchange's other books until the
+new connection rebuilds them.
 
 The periodic reconciler uses the same boundary after repeated live-versus-REST divergence.
 It brackets each REST request with live reads and requires disagreement with both, so market
@@ -32,10 +35,12 @@ non-atomic comparison from causing a recovery storm.
 
 Tradeoffs:
 - Binance's REST snapshot introduces extra latency during its resync window.
-- Books stay ineligible throughout reconnect and reconstruction.
+- The affected pair's book stays ineligible throughout its own resync; other
+  pairs on the same socket are unaffected unless recovery escalates to a full
+  reconnect.
 - Exchange update identifiers validate protocol continuity; normalized local sequences remain consecutive for `OrderBookManager`.
 
 Per exchange:
 - `Gemini`: reconnects to `wss://ws.gemini.com?snapshot=-1`, treats the first `depthUpdate` per pair as the full snapshot, and validates later `U/u` ranges. `GET /v1/book/{symbol}` is used only for reconciliation comparisons, never stream recovery.
 - `Coinbase`: waits for a fresh Level 2 stream snapshot and never mixes REST Exchange sequence numbers with Advanced Trade WebSocket sequence numbers.
-- `Binance.US`: reads and bounds WebSocket updates while fetching `GET /api/v3/depth?symbol=...&limit=5000`. It discards updates covered by `lastUpdateId`, requires the first retained range to contain the snapshot ID, then checks every later `U/u` range. Overflow, snapshot failure, misalignment, `serverShutdown`, or a sequence gap aborts synchronization and reconnects.
+- `Binance.US`: reads and bounds WebSocket updates while fetching `GET /api/v3/depth?symbol=...&limit=5000`. It discards updates covered by `lastUpdateId`, requires the first retained range to contain the snapshot ID, then checks every later `U/u` range. A sequence gap or an externally requested pair resync (confirmed reconciliation drift, invalid book) discards only that pair's sync state and re-fetches only that pair over the still-open socket, reusing the per-pair snapshot-task machinery from initial sync. Overflow, snapshot failure, repeated misalignment, `serverShutdown`, or an external pair request that lands while a snapshot task for that pair is already in flight (its buffer is dropped, so alignment escalates) aborts to a full-venue reconnect, which remains the bounded fallback. Scoped resyncs are counted in `arb_adapter_pair_resyncs_total` by trigger (`sequence_gap`, `external`).

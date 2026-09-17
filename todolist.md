@@ -667,7 +667,7 @@ same side and direction across a separately configurable five-cycle streak. Caus
 metrics distinguish price, size, and combined evidence while canonical invalidation,
 adapter-owned recovery, cooldown, and fail-closed behavior remain unchanged.
 
-### [ ] ARB-028 — Resynchronize one Binance.US pair without dropping the venue
+### [x] ARB-028 — Resynchronize one Binance.US pair without dropping the venue
 
 - Priority: P2
 - Estimate: 4 hours
@@ -678,6 +678,18 @@ a confirmed reconciliation drift on a single thin pair (`DOT-USDT`, 13:18Z in th
 2026-09-16 soak) reconnects the whole socket and reports all nine books `disconnected`
 until the rebuild finishes (13.9 s observed). Detection excluded them correctly, but one
 pair's drift should not remove a venue from detection.
+
+Resolution: a sequence gap or an externally requested recovery now discards only
+the affected pair's sync state and re-fetches that pair over the still-open
+socket, reusing the per-pair snapshot-task machinery from initial sync.
+`SnapshotReconciler` and `consume_adapter` prefer the new `request_pair_resync`
+hook and fall back to a full reconnect for adapters without one; buffer
+overflow, snapshot failure, and repeated misalignment keep the full-venue
+reconnect as the bounded fallback. Scoped resyncs are counted in
+`arb_adapter_pair_resyncs_total` by trigger. Covered by mid-stream,
+replay-eligibility, reconciler, and consumer tests in `test_binance.py`,
+`test_reconcile.py`, and `test_pipeline.py`; behavior documented in
+[`RESYNC.md`](docs/RESYNC.md).
 
 Acceptance criteria:
 
