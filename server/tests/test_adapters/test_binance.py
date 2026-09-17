@@ -245,7 +245,11 @@ def test_binance_gap_resyncs_pair_without_requesting_reconnect() -> None:
     events = asyncio.run(
         adapter.parse_message('{"s":"BTCUSDT","u":110,"U":108,"E":1,"b":[],"a":[]}')
     )
-    assert events == []
+    # The gap is announced downstream as a level-less RESET at the last
+    # trusted local sequence; no delta is emitted for the gapped range.
+    assert [event.kind for event in events] == [EventKind.RESET]
+    assert events[0].sequence == 100
+    assert events[0].bids == () and events[0].asks == ()
     assert adapter.gap_count == 1
     assert adapter._reconnect_requested is False
     assert "BTC-USDT" not in adapter._initialized
@@ -429,7 +433,7 @@ async def test_binance_single_pair_gap_keeps_other_pair_flowing() -> None:
     stream = adapter.stream_events(socket)
 
     try:
-        events = [await anext(stream) for _ in range(3)]
+        events = [await anext(stream) for _ in range(4)]
     finally:
         await stream.aclose()
 
@@ -438,6 +442,7 @@ async def test_binance_single_pair_gap_keeps_other_pair_flowing() -> None:
         by_pair.setdefault(event.pair, []).append(event)
     assert [event.kind for event in by_pair["ETH-USDT"]] == [EventKind.DELTA]
     assert [event.kind for event in by_pair["BTC-USDT"]] == [
+        EventKind.RESET,
         EventKind.SNAPSHOT,
         EventKind.DELTA,
     ]
@@ -521,7 +526,10 @@ def test_single_pair_resync_keeps_venue_eligible_in_replay() -> None:
     btc_kinds = [
         transition.kind for transition in report.transitions if transition.pair == "BTC-USDT"
     ]
-    assert btc_kinds == ["snapshot", "delta", "delta", "snapshot", "delta"]
+    assert btc_kinds == ["snapshot", "delta", "delta", "reset", "snapshot", "delta"]
+    reset = next(t for t in report.transitions if t.pair == "BTC-USDT" and t.kind == "reset")
+    assert reset.accepted is False
+    assert reset.reason == "adapter_reset"
     eth = [transition for transition in report.transitions if transition.pair == "ETH-USDT"]
     assert [transition.kind for transition in eth] == [
         "snapshot",
@@ -587,6 +595,64 @@ async def test_external_resync_during_inflight_snapshot_keeps_connection() -> No
 
 
 @pytest.mark.asyncio
+async def test_gapped_pair_is_ineligible_while_scoped_snapshot_is_in_flight() -> None:
+    # A gap is known to the adapter the moment it is detected, but the
+    # replacement snapshot takes a REST round-trip. The book manager must
+    # stop trusting the pair for that whole window, not only once the
+    # snapshot lands; a full-venue reconnect used to clear it immediately.
+    from arb.orderbook import OrderBookManager
+
+    adapter = BinanceAdapter(["BTCUSDT", "ETHUSDT"])
+    manager = OrderBookManager()
+    for message in (
+        '{"symbol":"BTCUSDT","lastUpdateId":100,"bids":[["100","1"]],"asks":[["101","1"]]}',
+        '{"symbol":"ETHUSDT","lastUpdateId":50,"bids":[["200","1"]],"asks":[["201","1"]]}',
+    ):
+        for event in await adapter.parse_message(message):
+            manager.apply(event)
+    assert manager.eligibility("binance", "BTC-USDT").eligible is True
+
+    release_snapshot = asyncio.Event()
+
+    async def delayed_snapshot(
+        self: BinanceAdapter, pair: str, trigger_sequence: int
+    ) -> MarketEvent:
+        await release_snapshot.wait()
+        return binance_snapshot(111)
+
+    adapter.fetch_snapshot = types.MethodType(delayed_snapshot, adapter)
+    socket = ControlledSocket()
+    stream = adapter.stream_events(socket)
+    try:
+        await socket.push(
+            '{"s":"BTCUSDT","U":110,"u":112,"E":1,"b":[["100","1"]],"a":[["101","1"]]}'
+        )
+        reset = await asyncio.wait_for(anext(stream), timeout=5)
+        assert reset.kind is EventKind.RESET
+        result = manager.apply(reset)
+        assert result.accepted is False
+        assert result.reason == "adapter_reset"
+        assert result.requires_resync is False
+        # Snapshot still in flight: the gapped pair is out, its sibling is not.
+        assert manager.eligibility("binance", "BTC-USDT").eligible is False
+        assert manager.eligibility("binance", "ETH-USDT").eligible is True
+        assert adapter._reconnect_requested is False
+
+        release_snapshot.set()
+        snapshot = await asyncio.wait_for(anext(stream), timeout=5)
+        delta = await asyncio.wait_for(anext(stream), timeout=5)
+    finally:
+        await stream.aclose()
+
+    assert snapshot.kind is EventKind.SNAPSHOT
+    assert delta.kind is EventKind.DELTA
+    for event in (snapshot, delta):
+        assert manager.apply(event).accepted is True
+    assert manager.eligibility("binance", "BTC-USDT").eligible is True
+    assert adapter._reconnect_requested is False
+
+
+@pytest.mark.asyncio
 async def test_binance_server_shutdown_requests_reconnect() -> None:
     adapter = BinanceAdapter(["BTCUSDT"])
     socket = ControlledSocket()
@@ -604,14 +670,38 @@ def test_binance_initial_update_must_span_snapshot_id() -> None:
         adapter._decode_depth_update({"s": "BTCUSDT", "U": 95, "u": 99, "b": [], "a": []})
     )
     adapter._buffer(
-        adapter._decode_depth_update({"s": "BTCUSDT", "U": 101, "u": 105, "b": [], "a": []})
+        adapter._decode_depth_update({"s": "BTCUSDT", "U": 102, "u": 105, "b": [], "a": []})
     )
 
+    # Exchange id 101 is neither in the snapshot (100) nor in any buffered
+    # range, so this is a real gap.
     events = adapter._align_snapshot("BTC-USDT", binance_snapshot(100))
 
     assert events == []
     assert adapter.gap_count == 1
     assert adapter._reconnect_requested is True
+
+
+def test_binance_aligns_when_next_range_starts_one_past_snapshot() -> None:
+    # Binance's rule is U <= lastUpdateId + 1 <= u. A snapshot whose
+    # lastUpdateId equals the `u` of a buffered range is contiguous with the
+    # following range and must not escalate to a full-venue reconnect.
+    adapter = BinanceAdapter(["BTCUSDT"])
+    adapter._buffer(
+        adapter._decode_depth_update({"s": "BTCUSDT", "U": 100, "u": 105, "b": [], "a": []})
+    )
+    adapter._buffer(
+        adapter._decode_depth_update({"s": "BTCUSDT", "U": 106, "u": 110, "b": [], "a": []})
+    )
+
+    events = adapter._align_snapshot("BTC-USDT", binance_snapshot(105))
+
+    assert events is not None
+    assert [event.kind for event in events] == [EventKind.SNAPSHOT, EventKind.DELTA]
+    assert events[1].exchange_first_sequence == 106
+    assert adapter.gap_count == 0
+    assert adapter._reconnect_requested is False
+    assert "BTC-USDT" in adapter._initialized
 
 
 def test_binance_retries_snapshot_that_predates_first_buffered_update() -> None:

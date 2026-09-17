@@ -131,6 +131,32 @@ def test_gap_detection_marks_book_stale() -> None:
     assert manager.eligibility("gemini", "BTC-USD").eligible is False
 
 
+def test_adapter_reset_clears_book_without_requesting_resync() -> None:
+    # An adapter that detected its own discontinuity and is already
+    # recovering announces it with a level-less RESET. The manager only has
+    # to stop trusting the book; asking for another resync would be a loop.
+    manager = OrderBookManager()
+    manager.apply(
+        event(kind=EventKind.SNAPSHOT, sequence=10, bids=[("100", "2")], asks=[("101", "3")])
+    )
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
+
+    result = manager.apply(event(kind=EventKind.RESET, sequence=10, bids=[], asks=[]))
+
+    assert result.accepted is False
+    assert result.reason == "adapter_reset"
+    assert result.stale is True
+    assert result.requires_resync is False
+    assert manager.eligibility("gemini", "BTC-USD").eligible is False
+    assert manager.top_of_book("gemini", "BTC-USD") is None
+
+    resumed = manager.apply(
+        event(kind=EventKind.SNAPSHOT, sequence=20, bids=[("100", "2")], asks=[("101", "3")])
+    )
+    assert resumed.accepted is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
+
+
 def test_stale_book_blocks_new_deltas_until_snapshot() -> None:
     manager = OrderBookManager()
     manager.apply(

@@ -142,6 +142,11 @@ class OrderBookManager:
         if not book.connected:
             return BookUpdateResult(accepted=False, reason="disconnected", stale=True)
 
+        if event.kind is EventKind.RESET:
+            # The adapter already owns the recovery; only eligibility changes.
+            book.clear()
+            return BookUpdateResult(accepted=False, reason="adapter_reset", stale=True)
+
         if event.kind is EventKind.SNAPSHOT:
             self._apply_snapshot(book, event, received_at)
             top = self.top_of_book(event.exchange, event.pair)

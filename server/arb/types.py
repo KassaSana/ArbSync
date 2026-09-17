@@ -9,6 +9,9 @@ from typing import Literal
 class EventKind(str, Enum):
     SNAPSHOT = "snapshot"
     DELTA = "delta"
+    # Adapter-detected discontinuity: the book is unusable until the next
+    # snapshot. Carries no levels.
+    RESET = "reset"
 
 
 class Side(str, Enum):

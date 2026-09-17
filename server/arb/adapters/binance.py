@@ -276,11 +276,27 @@ class BinanceAdapter(ExchangeAdapter):
             # the snapshot alignment has something to span, and the stream
             # loop (or the next parse_message call) re-fetches just this pair.
             # Buffer overflow inside _buffer still escalates to a full
-            # reconnect, which is the bounded fallback.
+            # reconnect, which is the bounded fallback. The RESET event is
+            # emitted first so the book manager stops trusting this pair
+            # before the replacement snapshot arrives; nothing else tells it.
+            reset = self._reset_event(update)
             self._begin_pair_resync(update.pair, trigger="sequence_gap")
             self._buffer(update)
-            return []
+            return [reset]
         return [self._delta_event(update)]
+
+    def _reset_event(self, update: _DepthUpdate) -> MarketEvent:
+        """Mark one pair discontinuous at its last trusted local sequence."""
+        return MarketEvent(
+            exchange=self.name,
+            pair=update.pair,
+            kind=EventKind.RESET,
+            sequence=self._local_seq[update.pair],
+            timestamp_ns=time.time_ns(),
+            exchange_first_sequence=update.first_id,
+            exchange_last_sequence=update.last_id,
+            received_monotonic_ns=update.received_monotonic_ns,
+        )
 
     async def _synchronize(self, pair: str) -> list[MarketEvent]:
         for _ in range(3):
@@ -302,7 +318,10 @@ class BinanceAdapter(ExchangeAdapter):
             return None
 
         pending = [update for update in buffer if update.last_id > snapshot_id]
-        if pending and not (pending[0].first_id <= snapshot_id <= pending[0].last_id):
+        # Binance rule: the first applied range must satisfy
+        # U <= lastUpdateId + 1 <= u. A range starting exactly one past the
+        # snapshot is contiguous, not a gap.
+        if pending and pending[0].first_id > snapshot_id + 1:
             self.gap_count += 1
             self._restart_sync(pair)
             return []
