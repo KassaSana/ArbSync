@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- `arbsync capture` records real three-venue traffic (WebSocket texts plus REST
+  snapshot payloads) to gzipped JSONL through a bounded non-blocking writer, and
+  `arbsync replay` replays it through the production adapters, books, and detector
+  with no network access. Replaying a capture twice yields identical transitions
+  and detector outputs; `replay --serve` drives the dashboard from a capture.
+  A 150-second three-venue sample is committed under
+  `server/tests/fixtures/captured/`. Capture files use plain JSONL or gzip;
+  zstd stays a future option.
 
 ## 0.1.0 — 2026-09-17
 

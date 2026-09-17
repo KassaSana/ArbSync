@@ -118,6 +118,7 @@ origins, persistence limits, and freshness threshold before running it.
 | `persistence` | Batch size, flush interval, and bounded queue size |
 | `order_books` | Maximum accepted age for otherwise trusted books |
 | `reconciliation` | Full-cycle cadence, price/size confirmations, and recovery cooldown |
+| `capture` | Bounded queue size for the capture writer |
 
 Startup rejects invalid settings before opening exchange connections. Ports must be
 between 1 and 65535; the detector threshold must be non-negative; persistence limits,
@@ -233,11 +234,27 @@ npm run build
 ```
 
 The backend suite covers protocol recovery, canonical book eligibility, detection,
-persistence, API behavior, and synthetic fixture replay. CI runs tests with coverage,
+persistence, API behavior, and capture/replay. CI runs tests with coverage,
 strict type checking, linting, and the production dashboard build. The dated verification
 baseline lives in [`docs/VALIDATION.md`](docs/VALIDATION.md).
 
-## Benchmarks and replay
+## Benchmarks, capture, and replay
+
+Record real traffic and replay it through the production pipeline without network
+access; replaying the same capture twice produces identical book transitions and
+detector outputs:
+
+```bash
+arbsync capture --duration 150s --output var/capture.jsonl.gz
+arbsync replay var/capture.jsonl.gz
+arbsync replay var/capture.jsonl.gz --serve
+```
+
+`--serve` streams the capture through the dashboard API at real-time pacing
+(`--speed 2` doubles it), so the dashboard runs with no live backend. A
+three-venue sample lives under
+[`server/tests/fixtures/captured/`](server/tests/fixtures/captured/README.md)
+and is replayed deterministically by the backend suite.
 
 The committed synthetic results are hardware-specific and do not represent live
 exchange or network performance.
@@ -252,7 +269,6 @@ Reproduce them from the repository root:
 ```powershell
 uv run python tools/benchmark.py
 uv run python tools/bench_e2e.py --iterations 10000
-uv run python tools/replay.py server/tests/fixtures/synthetic
 ```
 
 See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for methodology and

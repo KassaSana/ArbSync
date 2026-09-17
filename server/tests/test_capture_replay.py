@@ -101,6 +101,50 @@ def test_replay_runs_detector_on_the_real_path(tmp_path: Path) -> None:
     assert all(opp.pair == "BTC-USD" for opp in report.opportunities)
 
 
+def test_replay_serves_snapshots_per_request_url(tmp_path: Path) -> None:
+    """Snapshots for different pairs must not leak into each other's sync."""
+    from arb.capture import read_capture
+
+    async def scenario() -> tuple[str, str, int]:
+        path = tmp_path / "capture.jsonl"
+        writer = CaptureWriter(path, {"binance": ["BTCUSD", "ETHUSD"]})
+        task = asyncio.create_task(writer.run())
+        assert writer.record_ws(
+            "binance", '{"s":"BTCUSD","U":95,"u":99,"E":1,"b":[["100","1"]],"a":[]}', []
+        )
+        assert writer.record_ws(
+            "binance", '{"s":"ETHUSD","U":50,"u":55,"E":2,"b":[["200","1"]],"a":[]}', []
+        )
+        assert writer.record_snapshot(
+            "binance",
+            "https://api.binance.us/api/v3/depth?symbol=ETHUSD&limit=5000",
+            {"lastUpdateId": 60, "bids": [["199", "1"]], "asks": [["201", "1"]]},
+        )
+        assert writer.record_snapshot(
+            "binance",
+            "https://api.binance.us/api/v3/depth?symbol=BTCUSD&limit=5000",
+            {"lastUpdateId": 100, "bids": [["99", "1"]], "asks": [["101", "1"]]},
+        )
+        assert writer.record_ws(
+            "binance", '{"s":"BTCUSD","U":100,"u":105,"E":3,"b":[["99.5","1"]],"a":[]}', []
+        )
+        assert writer.record_ws(
+            "binance", '{"s":"ETHUSD","U":60,"u":65,"E":4,"b":[["199.5","1"]],"a":[]}', []
+        )
+        await writer.close()
+        await task
+        header, frames = read_capture(path)
+        first = await replay_frames(header, frames)
+        second = await replay_frames(header, frames)
+        pairs = {(t.pair, t.kind, t.sequence) for t in first.transitions}
+        return first.digest, second.digest, len(pairs)
+
+    first_digest, second_digest, distinct = asyncio.run(scenario())
+
+    assert first_digest == second_digest
+    assert distinct == 4
+
+
 def test_replay_without_snapshot_data_fails(tmp_path: Path) -> None:
     async def scenario() -> None:
         path = tmp_path / "capture.jsonl"

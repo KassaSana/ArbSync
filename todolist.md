@@ -723,7 +723,7 @@ Release grouping: 0.2.0 = ARB-030 and ARB-031; 0.3.0 = ARB-032, ARB-033, ARB-034
 0.4.0+ = ARB-035 and further research modules (Kraken with book checksums, latency
 analysis) as separate tickets once these land.
 
-### [ ] ARB-030 — Capture and replay real exchange traffic
+### [x] ARB-030 — Capture and replay real exchange traffic
 
 - Priority: P2
 - Estimate: 10 hours

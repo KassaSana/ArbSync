@@ -74,26 +74,27 @@ class _VirtualClock:
 class _SnapshotStub:
     """Serve recorded REST snapshot payloads to `fetch_snapshot` in order.
 
-    The reconciler also fetches snapshots during a live capture, so its
-    frames share this queue. Ordering is preserved, and Binance's own
-    align-and-retry logic skips entries that predate the buffered updates,
-    exactly as it would against live REST responses. An empty queue means
-    the capture genuinely lacks the data, which is an error, never a
-    live fetch.
+    Queued per request URL, because sync and reconciler fetches for different
+    pairs share one exchange but their payloads are pair-specific. The
+    reconciler also fetches during a live capture, so its frames share these
+    queues; ordering is preserved, and Binance's own align-and-retry logic
+    skips entries that predate the buffered updates, exactly as it would
+    against live REST responses. An empty queue means the capture genuinely
+    lacks the data, which is an error, never a live fetch.
     """
 
     def __init__(self) -> None:
-        self._payloads: dict[str, deque[dict[str, Any]]] = {}
+        self._payloads: dict[tuple[str, str], deque[dict[str, Any]]] = {}
         self.consumed = 0
 
-    def add(self, exchange: str, payload: dict[str, Any]) -> None:
-        self._payloads.setdefault(exchange, deque()).append(payload)
+    def add(self, exchange: str, url: str, payload: dict[str, Any]) -> None:
+        self._payloads.setdefault((exchange, url or ""), deque()).append(payload)
 
-    def pop(self, exchange: str) -> dict[str, Any]:
-        queue = self._payloads.get(exchange)
+    def pop(self, exchange: str, url: str) -> dict[str, Any]:
+        queue = self._payloads.get((exchange, url or ""))
         if not queue:
             raise ReplayError(
-                f"capture has no snapshot data for {exchange}; "
+                f"capture has no snapshot data for {exchange} {url}; "
                 "the recording is missing REST traffic and cannot replay"
             )
         self.consumed += 1
@@ -198,7 +199,7 @@ async def replay_frames(
         async def fake_client_get_json(
             url: str, _adapter: ExchangeAdapter = original
         ) -> dict[str, Any]:
-            return stub.pop(_adapter.name)
+            return stub.pop(_adapter.name, url)
 
         adapter.client_get_json = fake_client_get_json  # type: ignore[method-assign]
     clock = _VirtualClock(frames[0].mono_ns if frames else 0)
@@ -223,7 +224,7 @@ async def replay_frames(
                 continue
             if frame.payload is None:
                 raise ReplayError(f"capture frame {index} has no snapshot payload")
-            stub.add(frame.exchange, frame.payload)
+            stub.add(frame.exchange, frame.url or "", frame.payload)
         previous_mono_ns: int | None = None
         for index, frame in enumerate(frames):
             if frame.kind == "snapshot":

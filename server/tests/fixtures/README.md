@@ -8,3 +8,6 @@ They are not live captures, do not represent five minutes of traffic, and are no
 of sustained exchange behavior. Because the payloads were created for tests rather than
 recorded from users or authenticated sessions, they contain no credentials, account data,
 or personal information requiring sanitization.
+
+Genuine recorded traffic lives under [`captured/`](captured/README.md) and is replayed
+through the production pipeline by `test_replay.py`.
