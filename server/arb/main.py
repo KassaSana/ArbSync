@@ -87,17 +87,28 @@ async def process_market_event(
     detector: ArbitrageDetector,
     store: OpportunityStore,
     broadcaster: LiveBroadcaster,
+    detected_at_ns: int | None = None,
+    now_monotonic_ns: int | None = None,
 ) -> BookUpdateResult:
-    """Apply one event, publish its book, then detect and deliver opportunities."""
+    """Apply one event, publish its book, then detect and deliver opportunities.
+
+    `detected_at_ns` and `now_monotonic_ns` default to the live clocks and
+    exist so offline replay can run the identical path on the recorded
+    timeline instead of wall-clock time.
+    """
     received_monotonic_ns = (
         event.received_monotonic_ns
         if event.received_monotonic_ns is not None
+        else now_monotonic_ns
+        if now_monotonic_ns is not None
         else time.monotonic_ns()
     )
     metrics = book_metrics(event.exchange, event.pair)
     metrics.ingested.inc()
     result = book_manager.apply(event, received_monotonic_ns=received_monotonic_ns)
-    eligibility_checked_ns = time.monotonic_ns()
+    eligibility_checked_ns = (
+        now_monotonic_ns if now_monotonic_ns is not None else time.monotonic_ns()
+    )
     status = book_manager.eligibility(event.exchange, event.pair, eligibility_checked_ns)
     if not result.accepted or result.top_of_book is None:
         metrics.eligible.set(0)
@@ -122,7 +133,8 @@ async def process_market_event(
         event.pair, eligibility_checked_ns, known=result.top_of_book
     )
     detect_started = time.perf_counter()
-    opportunities = detector.detect_for_pair(event.pair, pair_books, time.time_ns())
+    detected_ns = detected_at_ns if detected_at_ns is not None else time.time_ns()
+    opportunities = detector.detect_for_pair(event.pair, pair_books, detected_ns)
     detection_latency_seconds.observe(time.perf_counter() - detect_started)
     for opportunity in opportunities:
         opportunity_counter(opportunity.pair).inc()
