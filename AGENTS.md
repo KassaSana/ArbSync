@@ -1,14 +1,14 @@
 # ArbSync repository guidance
 
-ArbSync ingests public Gemini, Coinbase, and Binance.US order books, maintains
-trusted in-memory L2 books, detects theoretical cross-exchange opportunities, stores
-them in SQLite, and streams state to a React dashboard.
+ArbSync is a cross-exchange market-data and execution-quality research platform. It
+ingests public Gemini, Coinbase, and Binance.US order books, maintains trusted in-memory
+L2 books, analyzes cross-venue opportunities (episodes, depth-walked pricing), persists
+research data in SQLite, streams state to a React dashboard, and supports capture/replay
+of real exchange traffic for offline work.
 
-This file is the model- and tool-neutral source of instructions for coding agents
-working in this repository. `CLAUDE.md` imports it; Codex and Cursor read it directly;
-Gemini CLI is pointed at it by `.gemini/settings.json`. Edit this file, not the shims.
-Describe required outcomes and repository constraints here without pinning model names,
-versions, or product-specific capabilities.
+This file is the shared, tool-neutral instruction source: `CLAUDE.md` imports it, Codex
+and Cursor read it directly, and `.gemini/settings.json` points at it. Edit this file,
+not the shims, and do not pin model names or product-specific capabilities here.
 
 ## Layout
 
@@ -39,8 +39,10 @@ var/                 Ignored runtime data
 - Canonical prices, sizes, spreads, profits, persisted opportunity rows, and wire values
   remain decimal-exact strings. Derived minute rollups and dashboard statistics use SQLite
   `REAL`/binary64 and are approximate observability summaries, not accounting values.
-- Opportunities are theoretical and exclude fees, slippage, latency, inventory, and
-  execution risk.
+- Preserve the documented semantics of each opportunity and pricing field. Top-of-book
+  `spread_pct`/`theoretical_profit`, depth-walked executable pricing, and fee-adjusted net
+  values are distinct tiers; never silently present one as another, and keep fee, slippage,
+  latency, and inventory assumptions explicit wherever they enter.
 
 See [`docs/RESYNC.md`](docs/RESYNC.md) before changing adapter recovery or normalized
 sequence behavior.
@@ -78,44 +80,31 @@ the remaining validation gap materially changes.
 
 - For each ticket, review its dependencies and acceptance criteria, inspect the existing
   implementation and worktree, and decide on a scoped approach before editing.
-- Implement the ticket and add or update tests whenever behavior changes. Documentation-
-  only or metadata-only work does not require artificial tests; run the relevant static,
-  packaging, link, or content checks instead.
+- Add or update tests whenever behavior changes. Documentation- or metadata-only work
+  needs the relevant static, packaging, link, or content checks instead of artificial tests.
+- Passing tests are evidence, not proof. When behavior depends on an external protocol or a
+  documented invariant, verify boundary behavior against that specification rather than
+  trusting existing tests.
 - Run verification proportionate to the change and review the final diff before declaring
   the ticket complete. Keep unrelated user changes out of the ticket commit.
 - When a ticket in [`todolist.md`](todolist.md) is complete, update its checkbox from `[ ]`
-  to `[x]` in the same commit without waiting for a separate request. If work is partial
-  or blocked, leave it unchecked and record the remaining gap where appropriate.
-- After verification, create a focused local commit with an accurate imperative message
-  and verify its complete author, committer, and message.
-- Never push automatically. Push only when the owner explicitly requests it after reviewing
-  the local result.
+  to `[x]` in the same commit. If work is partial or blocked, leave it unchecked and record
+  the remaining gap.
 
-## Explanatory collaboration
+## Collaboration
 
-- Use a teaching-oriented style so the owner can learn while work progresses. Before
-  implementation, explain the problem, intended approach, and meaningful tradeoffs in
-  plain language.
-- During implementation, call out important repository patterns, architectural constraints,
-  and findings that materially affect the solution. Define unfamiliar technical terms when
-  they first matter, without turning routine steps into noise.
-- When recommending a different approach, say so directly and explain the evidence, risks,
-  and practical consequences. Do not assume the owner's initial approach must be accepted.
-- In the final handoff, explain what changed, why the solution works, what verification
-  passed, any limitations or follow-up work, and the main engineering lessons from the
-  ticket. Keep explanations concrete and proportionate to the change.
+- Explain important design decisions, invariants, unexpected findings, and tradeoffs in
+  plain language. When recommending a different approach, say so directly with the evidence.
+- Keep routine implementation narration concise. In the final handoff, summarize what
+  changed, verification performed, limitations, and important engineering lessons.
 
-## Commit authorship
+## Git
 
-- When a coding agent creates a commit on the owner's behalf, use the repository owner's
-  configured Git identity as both author and committer. If that identity is unavailable or
-  ambiguous, ask before committing; never invent an identity.
-- Preserve truthful author and co-author credit for real human contributors. Do not rewrite
-  a human contributor's authorship to the repository owner.
-- Never identify Claude, Codex, Gemini, Cursor, Copilot, or any other AI/coding agent as an
-  author, committer, co-author, contributor, or commit-signature identity. Never add
-  generated-by, assisted-by, or similar AI-tool attribution to commits or contribution
-  credits.
-- Verify the author, committer, and complete commit message after every commit.
-- Apply these rules to every future commit in this repository unless the owner explicitly
-  changes them.
+- Create focused local commits with imperative messages when ticket work is complete and
+  verified. Never push unless the owner explicitly requests it.
+- Use the repository owner's configured Git identity as author and committer. If it is
+  unavailable or ambiguous, ask before committing. Never invent an identity or replace a
+  human contributor's.
+- Never add AI-tool authorship, co-authorship, contribution credit, generated-by/assisted-by
+  attribution, or commit-signature identity.
+- After committing, verify the complete author, committer, and commit message.
