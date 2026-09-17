@@ -1,4 +1,4 @@
-export type EpisodeCloseReason = "spread_closed" | "book_ineligible" | "shutdown";
+export type EpisodeCloseReason = "spread_closed" | "book_ineligible" | "shutdown" | "orphaned";
 
 export type PricingLedger = {
   notional: string;
@@ -20,6 +20,9 @@ export type PricingLedger = {
  * second message with the same `start_ns` and `end_ns` filled in. The plain
  * price, spread, size and profit fields are the values at open; `peak_*` are
  * the widest spread seen and the size and profit at that moment.
+ * `close_reason` `"orphaned"` means a previous process died while the episode
+ * was still open: `end_ns` and `duration_ns` stay null because the lifetime is
+ * unknown, and the row must not be treated as currently open.
  */
 export type Opportunity = {
   start_ns: string;
@@ -241,6 +244,7 @@ const CLOSE_REASONS: readonly EpisodeCloseReason[] = [
   "spread_closed",
   "book_ineligible",
   "shutdown",
+  "orphaned",
 ];
 
 function closeReason(value: unknown, location: string): EpisodeCloseReason {
@@ -298,6 +302,14 @@ export function decodeOpportunity(value: unknown, location = "opportunity"): Opp
   if ((endNs === null) !== (durationNs === null)) {
     throw new PayloadValidationError(location, "closed with both end_ns and duration_ns or open");
   }
+  const reason = nullable(
+    field(source, "close_reason", location),
+    `${location}.close_reason`,
+    closeReason,
+  );
+  if (reason === "orphaned" && (endNs !== null || durationNs !== null)) {
+    throw new PayloadValidationError(location, "orphaned without end_ns or duration_ns");
+  }
   return {
     start_ns: nanoseconds(field(source, "start_ns", location), `${location}.start_ns`),
     end_ns: endNs,
@@ -330,11 +342,7 @@ export function decodeOpportunity(value: unknown, location = "opportunity"): Opp
       `${location}.close_spread_pct`,
       signedDecimal,
     ),
-    close_reason: nullable(
-      field(source, "close_reason", location),
-      `${location}.close_reason`,
-      closeReason,
-    ),
+    close_reason: reason,
   };
 }
 

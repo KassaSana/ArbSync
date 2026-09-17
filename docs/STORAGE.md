@@ -82,7 +82,8 @@ owns migrations. The episode migration (version 3) discards per-update opportuni
 and the earlier quote-currency migration discarded conflated USD/USDT history; back up
 before upgrading if that historical data must be retained for investigation. Startup also
 marks episodes a previous process left open as `orphaned`: they keep their count but
-contribute no lifetime.
+contribute no lifetime, and the API and dashboard accept that reason without treating
+the row as currently open.
 Restore only while all database users are stopped, into a fresh directory with no old
 WAL/SHM sidecars, and point an explicit config at the restored file. Verify integrity
 and application statistics before resuming service. Do not combine a restored main file

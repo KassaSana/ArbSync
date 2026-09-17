@@ -82,6 +82,21 @@ describe("opportunity feed", () => {
     expect(screen.getByText("4.5s")).toHaveAttribute("title", "book dropped");
   });
 
+  it("shows an orphaned episode as unknown, not currently open", () => {
+    render(
+      <OpportunityFeed
+        opportunities={{
+          state: "ready",
+          data: [episode({ close_reason: "orphaned" })],
+        }}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("unknown")).toHaveAttribute("title", "orphaned");
+    expect(screen.queryByText("open")).not.toBeInTheDocument();
+  });
+
   it("shows stored net executable spread separately from the theoretical peak", () => {
     render(
       <OpportunityFeed

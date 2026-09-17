@@ -24,6 +24,9 @@ function spreadTone(value: string): string {
 }
 
 function lifetime(row: Opportunity): string {
+  if (row.close_reason === "orphaned") {
+    return "unknown";
+  }
   if (row.duration_ns === null) {
     return "open";
   }
@@ -34,6 +37,7 @@ const CLOSE_LABEL: Record<NonNullable<Opportunity["close_reason"]>, string> = {
   spread_closed: "spread closed",
   book_ineligible: "book dropped",
   shutdown: "shutdown",
+  orphaned: "orphaned",
 };
 
 export function OpportunityFeed({ opportunities, onRetry }: Props) {

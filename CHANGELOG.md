@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Correctness
+
+- Accept crash-recovered episodes with `close_reason="orphaned"` on the API and
+  dashboard. They were still open when the previous process died, so their
+  lifetime stays unknown and they must not appear as currently open.
+
 ### Added
 
 - `arbsync capture` records real three-venue traffic (WebSocket texts plus REST

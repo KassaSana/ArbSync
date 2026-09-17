@@ -55,6 +55,11 @@ const closedOpportunity = {
   close_reason: "spread_closed",
 };
 
+const orphanedOpportunity = {
+  ...opportunity,
+  close_reason: "orphaned",
+};
+
 const lifetime = { closed_count: 3, p50_seconds: 4, p90_seconds: 30.5, max_seconds: 30.5 };
 
 const book = {
@@ -82,7 +87,7 @@ const status = {
 
 describe("network payload schemas", () => {
   it.each([
-    ["opportunities", decodeOpportunities, [opportunity, closedOpportunity]],
+    ["opportunities", decodeOpportunities, [opportunity, closedOpportunity, orphanedOpportunity]],
     ["pairs", decodePairs, [{ exchange: "gemini", pair: "BTC-USD" }]],
     [
       "statistics",
@@ -190,6 +195,14 @@ describe("network payload schemas", () => {
         type: "opportunity",
         stream_sequence: 1,
         payload: { ...closedOpportunity, close_reason: "evaporated" },
+      },
+    ],
+    [
+      "an orphaned episode with a fabricated lifetime",
+      {
+        type: "opportunity",
+        stream_sequence: 1,
+        payload: { ...closedOpportunity, close_reason: "orphaned" },
       },
     ],
     ["unknown message types", { type: "unknown", stream_sequence: 1, payload: {} }],

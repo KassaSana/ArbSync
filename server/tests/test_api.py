@@ -75,6 +75,31 @@ async def test_recent_endpoint_returns_saved_rows(tmp_path: Path) -> None:
     assert response.json()[0]["theoretical_profit"] == "0.5"
 
 
+@pytest.mark.asyncio
+async def test_recent_endpoint_accepts_orphaned_crash_recovered_episode(tmp_path: Path) -> None:
+    path = str(tmp_path / "orphans.sqlite3")
+    store = OpportunityStore(path, batch_size=10, flush_interval_seconds=0.05)
+    await store.initialize()
+    await store._flush([make_episode(start_ns=1)])
+    await store._close_db()
+
+    restarted = OpportunityStore(path)
+    await restarted.initialize()
+    client = TestClient(create_app(restarted, OrderBookManager(), LiveBroadcaster()))
+
+    recent = client.get("/api/opportunities/recent?limit=10").json()
+    assert len(recent) == 1
+    row = recent[0]
+    assert row["close_reason"] == "orphaned"
+    assert row["end_ns"] is None
+    assert row["duration_ns"] is None
+    assert row["close_spread_pct"] is None
+
+    overview = client.get("/api/system/overview").json()
+    assert overview["open_count"] == 0
+    assert overview["all_time_lifetime"] is None
+
+
 def test_test_client_prefers_httpx2() -> None:
     """The httpx2 development dependency is required, and only implicitly.
 
