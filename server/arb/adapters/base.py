@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 import structlog
 
+from arb.capture import CaptureWriter
 from arb.metrics import adapter_reconnects_total
 from arb.types import MarketEvent, PriceLevel
 
@@ -70,6 +71,15 @@ class ExchangeAdapter(abc.ABC):
         self._connection_state_callback: Callable[[str, bool], Awaitable[None] | None] | None = None
         self._reconnect_requested = False
         self._client: httpx.AsyncClient | None = None
+        self._capture_sink: CaptureWriter | None = None
+
+    def set_capture_sink(self, sink: CaptureWriter | None) -> None:
+        """Attach the capture writer that receives exact inbound traffic.
+
+        The sink's record calls never block, so capturing cannot slow down
+        ingestion; a full writer drops frames and counts them instead.
+        """
+        self._capture_sink = sink
 
     def set_connection_state_callback(
         self, callback: Callable[[str, bool], Awaitable[None] | None]
@@ -123,9 +133,19 @@ class ExchangeAdapter(abc.ABC):
         """Normalize one connection's messages, preserving their receipt time."""
         async for message in websocket:
             received_monotonic_ns = time.monotonic_ns()
-            self.last_message_ns = time.time_ns()
+            received_wall_ns = time.time_ns()
+            self.last_message_ns = received_wall_ns
             text_message = message.decode() if isinstance(message, bytes) else message
-            for event in await self.parse_message(text_message):
+            events = await self.parse_message(text_message)
+            if self._capture_sink is not None:
+                self._capture_sink.record_ws(
+                    self.name,
+                    text_message,
+                    events,
+                    wall_ns=received_wall_ns,
+                    mono_ns=received_monotonic_ns,
+                )
+            for event in events:
                 yield (
                     event
                     if event.received_monotonic_ns is not None
@@ -177,7 +197,10 @@ class ExchangeAdapter(abc.ABC):
         """
         response = await self.http_client().get(url)
         response.raise_for_status()
-        return response.json()  # type: ignore[no-any-return]
+        payload = response.json()
+        if self._capture_sink is not None and isinstance(payload, dict):
+            self._capture_sink.record_snapshot(self.name, url, payload)
+        return payload  # type: ignore[no-any-return]
 
     def http_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:

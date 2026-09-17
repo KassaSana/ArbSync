@@ -107,16 +107,17 @@ class BinanceAdapter(ExchangeAdapter):
                         read_task = None
                     else:
                         received_monotonic_ns = time.monotonic_ns()
-                        self.last_message_ns = time.time_ns()
+                        received_wall_ns = time.time_ns()
+                        self.last_message_ns = received_wall_ns
                         text_message = message.decode() if isinstance(message, bytes) else message
                         payload = json.loads(text_message)
                         if payload.get("e") == "serverShutdown":
                             self.request_reconnect()
                         elif "b" in payload and "a" in payload and "s" in payload:
                             update = self._decode_depth_update(payload, received_monotonic_ns)
+                            emitted: list[MarketEvent] = []
                             if update.pair in self._initialized:
-                                for event in self._emit_initialized(update):
-                                    yield event
+                                emitted = self._emit_initialized(update)
                             else:
                                 self._buffer(update)
                                 if update.pair not in snapshot_tasks:
@@ -124,8 +125,27 @@ class BinanceAdapter(ExchangeAdapter):
                                     snapshot_tasks[update.pair] = asyncio.create_task(
                                         self.fetch_snapshot(update.pair, trigger_sequence=0)
                                     )
+                            if self._capture_sink is not None:
+                                self._capture_sink.record_ws(
+                                    self.name,
+                                    text_message,
+                                    emitted,
+                                    wall_ns=received_wall_ns,
+                                    mono_ns=received_monotonic_ns,
+                                )
+                            for event in emitted:
+                                yield event
                         else:
-                            for event in await self.parse_message(text_message):
+                            parsed = await self.parse_message(text_message)
+                            if self._capture_sink is not None:
+                                self._capture_sink.record_ws(
+                                    self.name,
+                                    text_message,
+                                    parsed,
+                                    wall_ns=received_wall_ns,
+                                    mono_ns=received_monotonic_ns,
+                                )
+                            for event in parsed:
                                 yield event
                                 if self._reconnect_requested:
                                     raise RuntimeError("adapter requested reconnect")

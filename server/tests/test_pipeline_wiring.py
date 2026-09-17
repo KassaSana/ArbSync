@@ -12,6 +12,7 @@ from arb import main
 from arb.adapters.base import ExchangeAdapter
 from arb.config import (
     AppConfig,
+    CaptureConfig,
     DetectorConfig,
     OrderBookConfig,
     PersistenceConfig,
@@ -58,6 +59,7 @@ def make_config(tmp_path: Path) -> AppConfig:
             size_confirmation_count=4,
             cooldown_seconds=30.0,
         ),
+        capture=CaptureConfig(queue_maxsize=11),
     )
 
 

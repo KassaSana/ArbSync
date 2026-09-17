@@ -20,6 +20,7 @@ from arb.adapters import ADAPTER_TYPES
 from arb.adapters.base import ExchangeAdapter
 from arb.api import create_app
 from arb.broadcast import LiveBroadcaster
+from arb.capture import CaptureWriter
 from arb.config import AppConfig, ConfigError, load_config
 from arb.detector import ArbitrageDetector
 from arb.metrics import (
@@ -307,6 +308,44 @@ async def shutdown_pipeline(pipeline: Pipeline, tasks: PipelineTasks) -> None:
     await tasks.persistence
 
 
+async def run_capture(
+    config_path: str | Path,
+    duration_seconds: float,
+    output: Path,
+    *,
+    adapter_types: Sequence[type[ExchangeAdapter]] = ADAPTER_TYPES,
+) -> None:
+    """Run ingestion only for a fixed duration, recording traffic to disk.
+
+    The HTTP server is not started: the pipeline's adapters, reconciler, and
+    store run exactly as in serving mode while every adapter also taps its
+    inbound traffic into the capture file. The duration uses asyncio.sleep,
+    which follows the monotonic clock.
+    """
+    configure_logging()
+    config = load_config(config_path)
+    pipeline = build_pipeline(config, adapter_types=adapter_types)
+    writer = CaptureWriter(output, config.exchanges, queue_maxsize=config.capture.queue_maxsize)
+    for adapter in pipeline.adapters:
+        adapter.set_capture_sink(writer)
+    tasks = await start_pipeline(pipeline)
+    capture_task = pipeline.supervisor.create("capture", writer.run())
+    try:
+        await asyncio.sleep(duration_seconds)
+    finally:
+        await shutdown_pipeline(pipeline, tasks)
+        await writer.close()
+        await asyncio.gather(capture_task, return_exceptions=True)
+    for failure in pipeline.supervisor.failures():
+        logger.error("capture_background_failure", **failure)
+    logger.info(
+        "capture_finished",
+        path=str(output),
+        frames=writer.frame_count,
+        duration_seconds=duration_seconds,
+    )
+
+
 async def run_pipeline(config_path: str | Path = "config.toml") -> None:
     configure_logging()
     config = load_config(config_path)
@@ -338,7 +377,40 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="write a safe example configuration to PATH and exit",
     )
+    subparsers = parser.add_subparsers(dest="command")
+    capture_parser = subparsers.add_parser(
+        "capture",
+        help="record real exchange traffic to a file without serving the dashboard",
+    )
+    capture_parser.add_argument(
+        "--duration",
+        required=True,
+        help="how long to record, e.g. 90s, 10m, 1h (plain numbers are seconds)",
+    )
+    capture_parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="capture file path (.jsonl, or .jsonl.gz for gzip compression)",
+    )
     return parser
+
+
+def parse_duration(value: str) -> float:
+    """Parse a capture duration like 90s, 10m, or 1h into seconds."""
+    text = value.strip().lower()
+    multiplier = 1.0
+    if text.endswith(("s", "m", "h")):
+        suffix = text[-1]
+        multiplier = {"s": 1.0, "m": 60.0, "h": 3_600.0}[suffix]
+        text = text[:-1]
+    try:
+        seconds = float(text) * multiplier
+    except ValueError as exc:
+        raise ConfigError(f"invalid duration {value!r}; expected like 90s, 10m, or 1h") from exc
+    if seconds <= 0:
+        raise ConfigError(f"duration must be greater than zero; got {value!r}")
+    return seconds
 
 
 def _write_example_config(path: Path, parser: argparse.ArgumentParser) -> None:
@@ -367,7 +439,11 @@ def main(argv: Sequence[str] | None = None) -> None:
             "Pass --config PATH, set ARB_CONFIG, or create one with --init-config PATH."
         )
     try:
-        asyncio.run(run_pipeline(config_path))
+        if args.command == "capture":
+            duration_seconds = parse_duration(args.duration)
+            asyncio.run(run_capture(config_path, duration_seconds, args.output))
+        else:
+            asyncio.run(run_pipeline(config_path))
     except ConfigError as exc:
         parser.error(str(exc))
 

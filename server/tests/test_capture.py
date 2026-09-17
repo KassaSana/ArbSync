@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from arb import main as main_module
 from arb.capture import (
     CaptureError,
     CaptureWriter,
@@ -194,3 +195,70 @@ def test_capture_config_rejects_non_positive_queue_maxsize(tmp_path: Path, value
 def test_capture_config_rejects_non_table(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="capture must be a table"):
         _load(VALID_CONFIG.replace("[detector]", "capture = 5\n[detector]"), tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("90s", 90.0), ("10m", 600.0), ("1h", 3600.0), ("1.5m", 90.0), ("60", 60.0)],
+)
+def test_parse_duration_accepts_suffixes(value: str, expected: float) -> None:
+    assert main_module.parse_duration(value) == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-5s", "0m", "soon", "10x", ""])
+def test_parse_duration_rejects_bad_values(value: str) -> None:
+    with pytest.raises(ConfigError, match="duration|invalid duration"):
+        main_module.parse_duration(value)
+
+
+def test_capture_command_dispatches_to_run_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(VALID_CONFIG)
+    output = tmp_path / "capture.jsonl"
+    received: list[tuple[object, float, Path]] = []
+
+    async def fake_run_capture(
+        path: str | Path,
+        duration_seconds: float,
+        destination: Path,
+        **kwargs: object,
+    ) -> None:
+        received.append((path, duration_seconds, destination))
+
+    monkeypatch.setattr(main_module, "run_capture", fake_run_capture)
+    main_module.main(
+        ["--config", str(config_path), "capture", "--duration", "10m", "--output", str(output)]
+    )
+
+    assert received == [(config_path, 600.0, output)]
+
+
+def test_capture_command_rejects_bad_duration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(VALID_CONFIG)
+    monkeypatch.setenv("ARB_CONFIG", str(config_path))
+
+    with pytest.raises(SystemExit, match="2"):
+        main_module.main(["capture", "--duration", "soon", "--output", str(tmp_path / "o.jsonl")])
+
+    assert "invalid duration" in capsys.readouterr().err
+
+
+def test_run_capture_writes_valid_empty_capture(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(VALID_CONFIG)
+    output = tmp_path / "capture.jsonl"
+
+    asyncio.run(main_module.run_capture(config_path, 0.05, output, adapter_types=[]))
+
+    header, frames = read_capture(output)
+    assert header.exchanges == {
+        "gemini": ["btcusd", "ethusd"],
+        "coinbase": ["BTC-USD"],
+        "binance": ["BTCUSD"],
+    }
+    assert frames == []

@@ -123,6 +123,10 @@ class CaptureWriter:
     def dropped_reason_closed(self) -> str:
         return "writer_closed"
 
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count
+
     def record_ws(
         self,
         exchange: str,
