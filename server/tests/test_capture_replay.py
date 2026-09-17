@@ -386,3 +386,94 @@ def test_replay_reproduces_episode_boundaries_deterministically() -> None:
     assert reopened.start_ns == base_wall + 6 * second
     assert shutdown.end_ns == reopened.start_ns
     assert shutdown.duration_ns == 0
+
+
+def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> None:
+    """ARB-032: fill rates from a replay are deterministic and never fabricated.
+
+    Gemini's DOT book is thin (about $510 a side), so $100 fills and $10,000
+    never does. Binance's book covers $10,000 but goes through a sequence gap
+    whose resync only completes at the next update, three sampling intervals
+    later; those samples count as ineligible, not as depth shortfalls.
+    """
+    from arb.capture import CaptureFrame, CaptureHeader
+    from arb.orderbook import OrderBookManager
+    from arb.pricing import DepthSampler
+
+    second = 1_000_000_000
+    base_wall = 1_700_000_000 * second
+    base_mono = 9_000 * second
+
+    def frame(index: int, exchange: str, raw: str | None, payload: dict | None = None):
+        return CaptureFrame(
+            exchange=exchange,
+            kind="ws" if raw is not None else "snapshot",
+            wall_ns=base_wall + index * second,
+            mono_ns=base_mono + index * second,
+            raw=raw,
+            payload=payload,
+            url=None
+            if raw is not None
+            else "https://api.binance.us/api/v3/depth?symbol=DOTUSD&limit=5000",
+            events=(),
+        )
+
+    def gemini(u: int, bid: str, ask: str) -> str:
+        return (
+            f'{{"e":"depthUpdate","s":"DOTUSD","U":{u},"u":{u},"E":1,'
+            f'"b":[["{bid}","100"]],"a":[["{ask}","100"]]}}'
+        )
+
+    def binance(first: int, last: int, bid: str, ask: str) -> str:
+        return (
+            f'{{"s":"DOTUSD","U":{first},"u":{last},"E":1,'
+            f'"b":[["{bid}","3000"]],"a":[["{ask}","3000"]]}}'
+        )
+
+    deep = {"lastUpdateId": 3, "bids": [["5", "3000"]], "asks": [["5.1", "3000"]]}
+    header = CaptureHeader(
+        exchanges={"gemini": ["dotusd"], "binance": ["DOTUSD"]}, started_wall_ns=base_wall
+    )
+    frames = [
+        frame(0, "gemini", gemini(1, "5", "5.1")),
+        frame(1, "binance", None, deep),
+        frame(1, "binance", binance(1, 5, "5", "5.1")),
+        frame(2, "binance", binance(6, 6, "5", "5.1")),
+        frame(3, "binance", binance(20, 20, "5", "5.1")),  # gap: RESET, ineligible
+        frame(6, "binance", None, {**deep, "lastUpdateId": 21}),
+        frame(6, "binance", binance(21, 25, "5", "5.1")),  # resync completes
+        frame(7, "gemini", gemini(2, "5", "5.1")),
+    ]
+
+    def run() -> tuple[list[dict[str, object]], int, str]:
+        manager = OrderBookManager(max_age_seconds=60.0)
+        sampler = DepthSampler(
+            manager,
+            [Decimal("100"), Decimal("10000")],
+            {"gemini": None, "binance": 5000},
+            interval_seconds=1.0,
+        )
+        report = asyncio.run(
+            replay_frames(header, frames, book_manager=manager, depth_sampler=sampler)
+        )
+        return sampler.tracker.rows(), sampler.samples, report.digest
+
+    rows, samples, digest = run()
+    again, samples_again, digest_again = run()
+    assert (rows, samples, digest) == (again, samples_again, digest_again)
+
+    # Samples fire before frames at t=1..7: seven samples on the recorded clock.
+    assert samples == 7
+    by_key = {(r["exchange"], r["notional"], r["side"]): r for r in rows}
+    thin_small = by_key[("gemini", "100", "buy")]
+    thin_large = by_key[("gemini", "10000", "buy")]
+    assert thin_small["observations"] == 7 and thin_small["filled"] == 7
+    assert thin_large["observations"] == 7 and thin_large["filled"] == 0
+    assert thin_large["subscribed_depth_levels"] is None
+
+    deep_large = by_key[("binance", "10000", "buy")]
+    # Eligible at the samples for t=2 and t=3 (before the gap frame), then
+    # ineligible at t=4, t=5 and t=6, then eligible again at t=7.
+    assert deep_large["observations"] == 3 and deep_large["filled"] == 3
+    assert deep_large["ineligible_samples"] == 3
+    assert deep_large["subscribed_depth_levels"] == 5000

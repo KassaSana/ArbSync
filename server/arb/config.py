@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass
+from decimal import Decimal
 from math import isfinite
 from pathlib import Path
 from typing import Final
@@ -51,6 +52,14 @@ class CaptureConfig:
 
 
 @dataclass(frozen=True)
+class PricingConfig:
+    """Quote notionals, in each pair's quote asset, and how often books are sampled."""
+
+    notionals: tuple[Decimal, ...]
+    sample_interval_seconds: float
+
+
+@dataclass(frozen=True)
 class ReconciliationConfig:
     cycle_seconds: float
     confirmation_count: int
@@ -67,6 +76,7 @@ class AppConfig:
     order_books: OrderBookConfig
     reconciliation: ReconciliationConfig
     capture: CaptureConfig
+    pricing: PricingConfig
 
 
 def load_config(path: str | Path = "config.toml") -> AppConfig:
@@ -135,6 +145,13 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         "reconciliation.cooldown_seconds",
         reconciliation.get("cooldown_seconds", 300.0),
     )
+    pricing = raw.get("pricing", {})
+    if not isinstance(pricing, dict):
+        raise ConfigError(f"pricing must be a table; got {pricing!r}")
+    notionals = _notionals("pricing.notionals", pricing.get("notionals", [100, 1000, 10000, 50000]))
+    sample_interval_seconds = _positive_number(
+        "pricing.sample_interval_seconds", pricing.get("sample_interval_seconds", 5.0)
+    )
     database_path = Path(str(raw["server"]["database_path"])).expanduser()
     if not database_path.is_absolute():
         database_path = config_path.parent / database_path
@@ -164,7 +181,21 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
         capture=CaptureConfig(
             queue_maxsize=capture_queue_maxsize,
         ),
+        pricing=PricingConfig(notionals=notionals, sample_interval_seconds=sample_interval_seconds),
     )
+
+
+def _notionals(field: str, value: object) -> tuple[Decimal, ...]:
+    """Distinct positive quote amounts, kept as decimals from their config literals."""
+    if not isinstance(value, list) or not value:
+        raise ConfigError(f"{field} must be a non-empty list of positive numbers; got {value!r}")
+    notionals: list[Decimal] = []
+    for entry in value:
+        amount = _positive_number(field, entry)
+        notionals.append(Decimal(str(entry)) if isinstance(entry, int) else Decimal(str(amount)))
+    if len(set(notionals)) != len(notionals):
+        raise ConfigError(f"{field} must not repeat a notional; got {value!r}")
+    return tuple(sorted(notionals))
 
 
 def _integer(field: str, value: object) -> int:

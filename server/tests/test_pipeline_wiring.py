@@ -16,6 +16,7 @@ from arb.config import (
     DetectorConfig,
     OrderBookConfig,
     PersistenceConfig,
+    PricingConfig,
     ReconciliationConfig,
     ServerConfig,
 )
@@ -61,6 +62,9 @@ def make_config(tmp_path: Path) -> AppConfig:
             cooldown_seconds=30.0,
         ),
         capture=CaptureConfig(queue_maxsize=11),
+        pricing=PricingConfig(
+            notionals=(Decimal("100"), Decimal("1000")), sample_interval_seconds=0.5
+        ),
     )
 
 
@@ -101,6 +105,9 @@ def test_build_pipeline_wires_configuration_into_each_component(tmp_path: Path) 
     assert pipeline.book_manager._max_age_ns == 12_500_000_000
     assert pipeline.store.batch_size == 7
     assert pipeline.store.flush_interval_seconds == 0.01
+    assert pipeline.depth_sampler.notionals == (Decimal("100"), Decimal("1000"))
+    assert pipeline.depth_sampler.interval_seconds == 0.5
+    assert pipeline.depth_sampler.depth_levels == {"stub": None}
     # Only the registered adapter types are built; other configured exchanges are ignored.
     assert [adapter.name for adapter in pipeline.adapters] == ["stub"]
     assert pipeline.expected_pairs == [("stub", "BTC-USD"), ("stub", "ETH-USD")]
@@ -229,6 +236,7 @@ async def test_shutdown_stops_producers_before_consumers_and_drains_persistence(
         broadcaster=FakeBroadcaster(),  # type: ignore[arg-type]
         supervisor=supervisor,
         reconciler=None,  # type: ignore[arg-type]
+        depth_sampler=None,  # type: ignore[arg-type]
         app=None,  # type: ignore[arg-type]
     )
 
@@ -275,10 +283,10 @@ async def test_start_pipeline_initializes_store_before_any_task_runs(
 
     assert log[0] == "store.initialize"
     assert set(log[1:]) == {"consume:stub", "reconciler.run"}
-    assert [task.get_name() for task in (tasks.persistence, tasks.reconciler, *tasks.adapters)] == [
-        "persistence",
-        "snapshot_reconciler",
-        "adapter:stub",
-    ]
+    assert tasks.depth_sampler is not None
+    assert [
+        task.get_name()
+        for task in (tasks.persistence, tasks.reconciler, *tasks.adapters, tasks.depth_sampler)
+    ] == ["persistence", "snapshot_reconciler", "adapter:stub", "depth_sampler"]
     await main.shutdown_pipeline(pipeline, tasks)
     assert pipeline.supervisor.failures() == []

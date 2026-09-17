@@ -33,6 +33,7 @@ from arb.metrics import (
 )
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
+from arb.pricing import DepthSampler
 from arb.reconcile import SnapshotReconciler
 from arb.types import (
     BookEligibility,
@@ -227,6 +228,7 @@ class Pipeline:
     broadcaster: LiveBroadcaster
     supervisor: BackgroundTaskSupervisor
     reconciler: SnapshotReconciler
+    depth_sampler: DepthSampler
     app: FastAPI
 
 
@@ -235,6 +237,7 @@ class PipelineTasks:
     persistence: asyncio.Task[object]
     reconciler: asyncio.Task[object]
     adapters: list[asyncio.Task[object]]
+    depth_sampler: asyncio.Task[object] | None = None
 
 
 def build_pipeline(
@@ -290,11 +293,18 @@ def build_pipeline(
         cooldown_seconds=config.reconciliation.cooldown_seconds,
         on_book_invalidated=publish_book_status,
     )
+    depth_sampler = DepthSampler(
+        book_manager,
+        config.pricing.notionals,
+        {adapter.name: adapter.subscribed_depth_levels for adapter in adapters},
+        interval_seconds=config.pricing.sample_interval_seconds,
+    )
     app = create_app(
         store,
         book_manager,
         broadcaster,
         adapters=adapters,
+        depth_sampler=depth_sampler,
         expected_pairs=expected_pairs,
         started_at_ns=started_at_ns,
         background_failures=supervisor.failures,
@@ -311,6 +321,7 @@ def build_pipeline(
         broadcaster=broadcaster,
         supervisor=supervisor,
         reconciler=reconciler,
+        depth_sampler=depth_sampler,
         app=app,
     )
 
@@ -334,8 +345,12 @@ async def start_pipeline(pipeline: Pipeline) -> PipelineTasks:
         )
         for adapter in pipeline.adapters
     ]
+    depth_task = pipeline.supervisor.create("depth_sampler", pipeline.depth_sampler.run())
     return PipelineTasks(
-        persistence=persistence_task, reconciler=reconcile_task, adapters=adapter_tasks
+        persistence=persistence_task,
+        reconciler=reconcile_task,
+        adapters=adapter_tasks,
+        depth_sampler=depth_task,
     )
 
 
@@ -352,7 +367,11 @@ async def shutdown_pipeline(pipeline: Pipeline, tasks: PipelineTasks) -> None:
     for task in tasks.adapters:
         task.cancel()
     tasks.reconciler.cancel()
-    await asyncio.gather(*tasks.adapters, tasks.reconciler, return_exceptions=True)
+    background = [tasks.reconciler]
+    if tasks.depth_sampler is not None:
+        tasks.depth_sampler.cancel()
+        background.append(tasks.depth_sampler)
+    await asyncio.gather(*tasks.adapters, *background, return_exceptions=True)
     # Nothing can open an episode once the adapters are gone; close the ones
     # still standing so storage never holds an episode with no end.
     await deliver_episodes(

@@ -4,7 +4,7 @@ import time
 from collections.abc import Callable, Iterable
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
@@ -15,6 +15,7 @@ from arb.broadcast import LiveBroadcaster
 from arb.metrics import book_metrics, render_metrics
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
+from arb.pricing import DepthSampler
 from arb.types import LiveMessage
 
 Window = Literal["1h", "4h", "24h", "1d", "72h", "1w"]
@@ -47,6 +48,7 @@ def create_app(
     started_at_ns: int | None = None,
     background_failures: Callable[[], list[dict[str, str]]] = lambda: [],
     cors_allowed_origins: Iterable[str] = (),
+    depth_sampler: DepthSampler | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Cross-Exchange Arbitrage Detector")
     app.add_middleware(
@@ -118,6 +120,36 @@ def create_app(
             "window": window,
             "bucket_seconds": bucket_seconds,
             "points": serialized_points,
+        }
+
+    @app.get("/api/pricing/depth")
+    async def depth_pricing(pair: str | None = None) -> dict[str, object]:
+        """Walk each eligible book now; an ineligible book simply has no quotes."""
+        if depth_sampler is None:
+            raise HTTPException(status_code=404, detail="depth pricing is not configured")
+        if pair is None:
+            quotes = [
+                quote
+                for exchange, known_pair in book_manager.known_pairs()
+                for quote in depth_sampler.quote(exchange, known_pair)
+            ]
+        else:
+            quotes = depth_sampler.quote_pair(pair)
+        return {
+            "notionals": [str(notional) for notional in depth_sampler.notionals],
+            "quotes": [quote.as_payload() for quote in quotes],
+        }
+
+    @app.get("/api/pricing/fill-rates")
+    async def fill_rates() -> dict[str, object]:
+        """How often each venue could fill each notional across periodic samples."""
+        if depth_sampler is None:
+            raise HTTPException(status_code=404, detail="depth pricing is not configured")
+        return {
+            "sample_interval_seconds": depth_sampler.interval_seconds,
+            "samples": depth_sampler.samples,
+            "notionals": [str(notional) for notional in depth_sampler.notionals],
+            "rows": depth_sampler.tracker.rows(),
         }
 
     @app.get("/api/pairs")

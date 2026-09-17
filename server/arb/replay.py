@@ -34,6 +34,7 @@ from arb.detector import ArbitrageDetector
 from arb.main import process_market_event
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
+from arb.pricing import DepthSampler
 from arb.types import OpportunityEpisode
 
 
@@ -183,6 +184,7 @@ async def replay_frames(
     detector: ArbitrageDetector | None = None,
     store: OpportunityStore | None = None,
     broadcaster: LiveBroadcaster | None = None,
+    depth_sampler: DepthSampler | None = None,
 ) -> ReplayReport:
     """Replay validated capture frames through the production pipeline.
 
@@ -231,9 +233,23 @@ async def replay_frames(
                 raise ReplayError(f"capture frame {index} has no snapshot payload")
             stub.add(frame.exchange, frame.url or "", frame.payload)
         previous_mono_ns: int | None = None
+        # Depth sampling follows the recorded clock at the sampler's interval,
+        # so replayed fill rates are as deterministic as the transitions.
+        sample_every_ns = (
+            None if depth_sampler is None else int(depth_sampler.interval_seconds * 1_000_000_000)
+        )
+        next_sample_ns = clock.now_ns + sample_every_ns if sample_every_ns else None
         for index, frame in enumerate(frames):
             if frame.kind == "snapshot":
                 continue
+            while (
+                depth_sampler is not None
+                and next_sample_ns is not None
+                and sample_every_ns
+                and frame.mono_ns >= next_sample_ns
+            ):
+                depth_sampler.sample_all(next_sample_ns)
+                next_sample_ns += sample_every_ns
             if frame.mono_ns < clock.now_ns:
                 raise ReplayError(
                     f"capture frame {index} goes backwards in monotonic time; "

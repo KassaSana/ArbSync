@@ -669,3 +669,85 @@ async def test_system_endpoints_handle_empty_store(tmp_path: Path) -> None:
 
     ts = client.get("/api/system/timeseries?window=1h&bucket_seconds=60").json()
     assert ts["points"] == []
+
+
+def test_pricing_endpoints_walk_eligible_books_and_report_fill_rates(tmp_path: Path) -> None:
+    # ARB-032: VWAP per venue, side and notional as decimal strings, an
+    # explicit insufficient_depth result rather than a made-up price, and the
+    # venue's depth ceiling on every quote.
+    from arb.pricing import DepthSampler
+
+    manager = OrderBookManager()
+    manager.apply(
+        MarketEvent(
+            "gemini",
+            "BTC-USD",
+            EventKind.SNAPSHOT,
+            1,
+            1,
+            bids=(PriceLevel(Decimal("99"), Decimal("1")),),
+            asks=(
+                PriceLevel(Decimal("100"), Decimal("1")),
+                PriceLevel(Decimal("104"), Decimal("1")),
+            ),
+        )
+    )
+    manager.apply(
+        MarketEvent(
+            "binance",
+            "ETH-USD",
+            EventKind.SNAPSHOT,
+            1,
+            1,
+            bids=(PriceLevel(Decimal("9"), Decimal("1")),),
+            asks=(PriceLevel(Decimal("10"), Decimal("1")),),
+        )
+    )
+    sampler = DepthSampler(
+        manager,
+        [Decimal("50"), Decimal("150")],
+        {"gemini": None, "binance": 5000},
+        interval_seconds=5.0,
+    )
+    sampler.sample_all()
+    store = OpportunityStore(str(tmp_path / "pricing.sqlite3"))
+    client = TestClient(create_app(store, manager, LiveBroadcaster(), depth_sampler=sampler))
+
+    body = client.get("/api/pricing/depth?pair=BTC-USD").json()
+    assert body["notionals"] == ["50", "150"]
+    quotes = {(q["side"], q["notional"]): q for q in body["quotes"]}
+    assert quotes[("buy", "50")]["vwap"] == "100"
+    assert quotes[("buy", "50")]["subscribed_depth_levels"] is None
+    # 100 at 100, then 50 of the 104 at 104: 150 / (1 + 50/104) = 150 * 104 / 154.
+    assert Decimal(quotes[("buy", "150")]["vwap"]) == Decimal(150 * 104) / Decimal(154)
+    assert quotes[("sell", "150")] == {
+        "exchange": "gemini",
+        "pair": "BTC-USD",
+        "side": "sell",
+        "notional": "150",
+        "vwap": None,
+        "insufficient_depth": True,
+        "filled_notional": "99",
+        "filled_base": "1",
+        "levels_used": 1,
+        "subscribed_depth_levels": None,
+    }
+    everything = client.get("/api/pricing/depth").json()["quotes"]
+    assert {(q["exchange"], q["pair"]) for q in everything} == {
+        ("gemini", "BTC-USD"),
+        ("binance", "ETH-USD"),
+    }
+    assert all(
+        q["subscribed_depth_levels"] == 5000 for q in everything if q["exchange"] == "binance"
+    )
+
+    rates = client.get("/api/pricing/fill-rates").json()
+    assert rates["samples"] == 1 and rates["sample_interval_seconds"] == 5.0
+    by_key = {(r["exchange"], r["pair"], r["notional"], r["side"]): r for r in rates["rows"]}
+    assert by_key[("gemini", "BTC-USD", "150", "buy")]["fill_rate"] == 1.0
+    assert by_key[("gemini", "BTC-USD", "150", "sell")]["fill_rate"] == 0.0
+    assert by_key[("binance", "ETH-USD", "50", "buy")]["filled"] == 0
+
+    unconfigured = TestClient(create_app(store, manager, LiveBroadcaster()))
+    assert unconfigured.get("/api/pricing/depth").status_code == 404
+    assert unconfigured.get("/api/pricing/fill-rates").status_code == 404

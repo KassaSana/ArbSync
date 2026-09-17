@@ -433,3 +433,40 @@ def test_invalid_cors_origin_is_rejected(
 
     with pytest.raises(ValueError, match="invalid CORS origin"):
         load_config(path)
+
+
+def test_load_config_defaults_pricing_when_section_missing(tmp_path: Path) -> None:
+    from decimal import Decimal
+
+    path = tmp_path / "config.toml"
+    path.write_text(VALID_CONFIG)
+
+    config = load_config(path)
+
+    assert config.pricing.notionals == tuple(Decimal(n) for n in (100, 1000, 10000, 50000))
+    assert config.pricing.sample_interval_seconds == 5.0
+
+
+def test_pricing_notionals_are_decimal_sorted_and_validated(tmp_path: Path) -> None:
+    from decimal import Decimal
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        VALID_CONFIG + "\n[pricing]\nnotionals = [2500, 100, 0.5]\nsample_interval_seconds = 1.5\n"
+    )
+
+    config = load_config(path)
+
+    assert config.pricing.notionals == (Decimal("0.5"), Decimal("100"), Decimal("2500"))
+    assert config.pricing.sample_interval_seconds == 1.5
+
+    for bad, message in (
+        ("notionals = []", "non-empty list"),
+        ("notionals = [100, 100]", "must not repeat"),
+        ("notionals = [100, -1]", "pricing.notionals"),
+        ('notionals = "100"', "non-empty list"),
+        ("sample_interval_seconds = 0", "sample_interval_seconds"),
+    ):
+        path.write_text(VALID_CONFIG + f"\n[pricing]\n{bad}\n")
+        with pytest.raises(ValueError, match=message):
+            load_config(path)
