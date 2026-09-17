@@ -23,7 +23,7 @@ from collections import deque
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from arb.adapters import ADAPTER_TYPES
 from arb.adapters.base import ExchangeAdapter
@@ -32,6 +32,7 @@ from arb.capture import CaptureFrame, CaptureHeader, read_capture
 from arb.detector import ArbitrageDetector
 from arb.main import process_market_event
 from arb.orderbook import OrderBookManager
+from arb.persistence import OpportunityStore
 from arb.types import ArbitrageOpportunity
 
 
@@ -110,6 +111,19 @@ class _CollectingStore:
         return True
 
 
+class _FanoutStore(_CollectingStore):
+    """Collect opportunities for the report while also persisting them."""
+
+    def __init__(self, stores: list[OpportunityStore]) -> None:
+        super().__init__()
+        self._stores = stores
+
+    async def enqueue(self, opportunity: ArbitrageOpportunity) -> bool:
+        await super().enqueue(opportunity)
+        results = [await store.enqueue(opportunity) for store in self._stores]
+        return all(results)
+
+
 def _build_adapters(header: CaptureHeader) -> dict[str, ExchangeAdapter]:
     known = {adapter_type.name: adapter_type for adapter_type in ADAPTER_TYPES}
     adapters: dict[str, ExchangeAdapter] = {}
@@ -158,8 +172,22 @@ async def replay_frames(
     threshold_pct: Decimal = Decimal("0.1"),
     max_age_seconds: float = 30.0,
     speed: float | None = None,
+    timeline: Literal["recorded", "live"] = "recorded",
+    book_manager: OrderBookManager | None = None,
+    detector: ArbitrageDetector | None = None,
+    store: OpportunityStore | None = None,
+    broadcaster: LiveBroadcaster | None = None,
 ) -> ReplayReport:
-    """Replay validated capture frames through the production pipeline."""
+    """Replay validated capture frames through the production pipeline.
+
+    Components default to fresh offline instances; serve mode passes the
+    pipeline's own so the dashboard reads replayed state. On the `recorded`
+    timeline every stamp follows the capture, which is what makes replays
+    deterministic; on the `live` timeline stamps follow the replay machine,
+    so serve mode streams like a live venue. `speed` paces real sleeping
+    between frames on either timeline; `None` replays as fast as possible.
+    The digest is only comparable across runs on the recorded timeline.
+    """
     if speed is not None and speed <= 0:
         raise ReplayError(f"replay speed must be greater than zero; got {speed!r}")
     adapters = _build_adapters(header)
@@ -174,10 +202,17 @@ async def replay_frames(
 
         adapter.client_get_json = fake_client_get_json  # type: ignore[method-assign]
     clock = _VirtualClock(frames[0].mono_ns if frames else 0)
-    manager = OrderBookManager(max_age_seconds=max_age_seconds, clock=clock)
-    detector = ArbitrageDetector(threshold_pct=threshold_pct)
-    store = _CollectingStore()
-    broadcaster = LiveBroadcaster()
+    active_manager = (
+        book_manager
+        if book_manager is not None
+        else OrderBookManager(max_age_seconds=max_age_seconds, clock=clock)
+    )
+    active_detector = (
+        detector if detector is not None else ArbitrageDetector(threshold_pct=threshold_pct)
+    )
+    active_broadcaster = broadcaster if broadcaster is not None else LiveBroadcaster()
+    active_store = _FanoutStore([store] if store is not None else [])
+    recorded = timeline == "recorded"
     report = ReplayReport()
     try:
         # REST responses arrive concurrently with the messages that trigger
@@ -221,18 +256,18 @@ async def replay_frames(
                 # state so the next message re-synchronizes like live.
                 await frame_adapter.reset_state()
             for event in events:
-                if event.received_monotonic_ns != clock.now_ns:
+                if recorded and event.received_monotonic_ns != clock.now_ns:
                     stamped = replace(event, received_monotonic_ns=clock.now_ns)
                 else:
                     stamped = event
                 result = await process_market_event(
                     stamped,
-                    book_manager=manager,
-                    detector=detector,
-                    store=store,  # type: ignore[arg-type]
-                    broadcaster=broadcaster,
-                    detected_at_ns=frame.wall_ns,
-                    now_monotonic_ns=clock.now_ns,
+                    book_manager=active_manager,
+                    detector=active_detector,
+                    store=cast("OpportunityStore", active_store),
+                    broadcaster=active_broadcaster,
+                    detected_at_ns=frame.wall_ns if recorded else None,
+                    now_monotonic_ns=clock.now_ns if recorded else None,
                 )
                 report.transitions.append(
                     ReplayTransition(
@@ -247,12 +282,12 @@ async def replay_frames(
                         resync_requested=resync_requested,
                     )
                 )
-        report.opportunities.extend(store.opportunities)
+        report.opportunities.extend(active_store.opportunities)
         report.snapshots_consumed = stub.consumed
         report.digest = _digest(report)
         return report
     finally:
-        await broadcaster.aclose()
+        await active_broadcaster.aclose()
 
 
 async def replay_file(
@@ -261,6 +296,7 @@ async def replay_file(
     threshold_pct: Decimal = Decimal("0.1"),
     max_age_seconds: float = 30.0,
     speed: float | None = None,
+    timeline: Literal["recorded", "live"] = "recorded",
 ) -> ReplayReport:
     """Read, validate, and replay one capture file."""
     header, frames = read_capture(path)
@@ -270,6 +306,7 @@ async def replay_file(
         threshold_pct=threshold_pct,
         max_age_seconds=max_age_seconds,
         speed=speed,
+        timeline=timeline,
     )
 
 

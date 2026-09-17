@@ -4,6 +4,7 @@ import asyncio
 import json
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from arb import main as main_module
@@ -262,3 +263,90 @@ def test_run_capture_writes_valid_empty_capture(tmp_path: Path) -> None:
         "binance": ["BTCUSD"],
     }
     assert frames == []
+
+
+@pytest.mark.parametrize(("value", "expected"), [("2", 2.0), ("0.5", 0.5), ("10", 10.0)])
+def test_parse_speed_accepts_positive_numbers(value: str, expected: float) -> None:
+    assert main_module.parse_speed(value) == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "fast", "", "nan", "inf"])
+def test_parse_speed_rejects_bad_values(value: str) -> None:
+    with pytest.raises(ConfigError, match="speed"):
+        main_module.parse_speed(value)
+
+
+def test_replay_command_runs_offline_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(VALID_CONFIG)
+    capture_path = tmp_path / "capture.jsonl"
+    capture_path.touch()
+    received: list[tuple[object, Path, object]] = []
+
+    async def fake_run_replay_offline(path: str | Path, capture: Path, speed: float | None) -> Mock:
+        received.append((path, capture, speed))
+        return Mock(transitions=[], opportunities=[], snapshots_consumed=0, digest="abc")
+
+    monkeypatch.setattr(main_module, "run_replay_offline", fake_run_replay_offline)
+    main_module.main(["--config", str(config_path), "replay", str(capture_path), "--speed", "2"])
+
+    assert received == [(config_path, capture_path, 2.0)]
+
+
+def test_replay_command_uses_max_speed_offline_unless_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(VALID_CONFIG)
+    capture_path = tmp_path / "capture.jsonl"
+    capture_path.touch()
+
+    async def fake_run_replay_offline(path: str | Path, capture: Path, speed: float | None) -> Mock:
+        assert speed is None
+        return Mock(transitions=[], opportunities=[], snapshots_consumed=0, digest="abc")
+
+    monkeypatch.setattr(main_module, "run_replay_offline", fake_run_replay_offline)
+    main_module.main(["--config", str(config_path), "replay", str(capture_path)])
+
+    assert json.loads(capsys.readouterr().out) == {
+        "transitions": 0,
+        "opportunities": 0,
+        "snapshots_consumed": 0,
+        "digest": "abc",
+    }
+
+
+def test_replay_serve_defaults_to_realtime_and_dispatches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(VALID_CONFIG)
+    capture_path = tmp_path / "capture.jsonl"
+    capture_path.touch()
+    received: list[tuple[object, Path, object]] = []
+
+    async def fake_run_replay_serve(path: str | Path, capture: Path, speed: float | None) -> None:
+        received.append((path, capture, speed))
+
+    monkeypatch.setattr(main_module, "run_replay_serve", fake_run_replay_serve)
+    main_module.main(["--config", str(config_path), "replay", str(capture_path), "--serve"])
+
+    assert received == [(config_path, capture_path, 1.0)]
+
+
+def test_replay_command_rejects_bad_speed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(VALID_CONFIG)
+    capture_path = tmp_path / "capture.jsonl"
+    capture_path.touch()
+
+    with pytest.raises(SystemExit, match="2"):
+        main_module.main(
+            ["--config", str(config_path), "replay", str(capture_path), "--speed", "fast"]
+        )
+
+    assert "invalid speed" in capsys.readouterr().err

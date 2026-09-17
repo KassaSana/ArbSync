@@ -220,3 +220,49 @@ async def test_process_market_event_honors_recorded_timestamps(monkeypatch) -> N
 
     detector.detect_for_pair.assert_called_once_with("BTC-USD", [], 999)
     assert manager.eligibility("gemini", "BTC-USD", 2_000).age_ns == 1_000
+
+
+FEED_CONFIG = """
+[detector]
+threshold_pct = 0.1
+
+[exchanges]
+gemini = ["btcusd"]
+coinbase = ["BTC-USD"]
+binance = ["BTCUSD"]
+
+[server]
+host = "127.0.0.1"
+port = 8000
+database_path = "arb.sqlite3"
+cors_allowed_origins = []
+
+[persistence]
+batch_size = 10
+flush_interval_seconds = 0.05
+queue_maxsize = 100
+"""
+
+
+@pytest.mark.asyncio
+async def test_feed_replay_into_pipeline_persists_and_publishes(tmp_path: Path) -> None:
+    from arb.config import load_config
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(FEED_CONFIG)
+    pipeline = main.build_pipeline(load_config(config_path), adapter_types=[])
+    await pipeline.store.initialize()
+    persistence_task = asyncio.create_task(pipeline.store.run())
+    capture_path = tmp_path / "capture.jsonl"
+    await _write_three_venue_capture(capture_path)
+
+    report = await main.feed_replay_into_pipeline(pipeline, capture_path, None)
+
+    await pipeline.store.close()
+    await persistence_task
+    await pipeline.broadcaster.aclose()
+    assert report.transitions
+    assert report.opportunities
+    rows = await pipeline.store.recent()
+    assert any(row["pair"] == "BTC-USD" for row in rows)
+    assert pipeline.book_manager.top_of_book("gemini", "BTC-USD") is not None

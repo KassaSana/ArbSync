@@ -3,14 +3,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib.resources
+import json
 import logging
 import os
 import time
 from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from math import isfinite
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 import uvicorn
@@ -33,6 +35,9 @@ from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
 from arb.reconcile import SnapshotReconciler
 from arb.types import BookEligibility, BookUpdateResult, LiveMessage, MarketEvent
+
+if TYPE_CHECKING:
+    from arb.replay import ReplayReport
 
 logger = structlog.get_logger(__name__)
 
@@ -358,19 +363,94 @@ async def run_capture(
     )
 
 
+async def run_replay_offline(
+    config_path: str | Path, capture_path: Path, speed: float | None
+) -> ReplayReport:
+    """Replay a capture on the recorded timeline and report the outcome."""
+    from arb.replay import replay_file
+
+    config = load_config(config_path)
+    return await replay_file(
+        capture_path,
+        threshold_pct=Decimal(str(config.detector.threshold_pct)),
+        max_age_seconds=config.order_books.max_age_seconds,
+        speed=speed,
+    )
+
+
+async def feed_replay_into_pipeline(
+    pipeline: Pipeline, capture_path: Path, speed: float | None
+) -> ReplayReport:
+    """Stream a capture through a pipeline's own books, store, and broadcaster.
+
+    The `live` timeline stamps replayed events with the replay machine's
+    clocks, so books age and expire like a live venue while paced by
+    `--speed`. No adapter task runs, so nothing touches the network.
+    """
+    from arb.capture import read_capture
+    from arb.replay import replay_frames
+
+    header, frames = read_capture(capture_path)
+    return await replay_frames(
+        header,
+        frames,
+        speed=speed,
+        timeline="live",
+        book_manager=pipeline.book_manager,
+        detector=pipeline.detector,
+        store=pipeline.store,
+        broadcaster=pipeline.broadcaster,
+    )
+
+
+async def run_replay_serve(
+    config_path: str | Path, capture_path: Path, speed: float | None
+) -> None:
+    """Serve the dashboard API while streaming a capture with no live backend."""
+    configure_logging()
+    config = load_config(config_path)
+    pipeline = build_pipeline(config)
+    await pipeline.store.initialize()
+    persistence_task = pipeline.supervisor.create("persistence", pipeline.store.run())
+    replay_task = pipeline.supervisor.create(
+        "replay", feed_replay_into_pipeline(pipeline, capture_path, speed)
+    )
+    try:
+        await _serve_app(pipeline)
+    finally:
+        pipeline.supervisor.stop()
+        replay_task.cancel()
+        await asyncio.gather(replay_task, return_exceptions=True)
+        await pipeline.broadcaster.aclose()
+        await asyncio.gather(
+            *(adapter.aclose() for adapter in pipeline.adapters), return_exceptions=True
+        )
+        await pipeline.store.close()
+        await persistence_task
+    for failure in pipeline.supervisor.failures():
+        logger.error("replay_background_failure", **failure)
+
+
 async def run_pipeline(config_path: str | Path = "config.toml") -> None:
     configure_logging()
     config = load_config(config_path)
     pipeline = build_pipeline(config)
     tasks = await start_pipeline(pipeline)
-    config_uvicorn = uvicorn.Config(
-        app=pipeline.app, host=config.server.host, port=config.server.port, log_level="info"
-    )
-    server = uvicorn.Server(config_uvicorn)
     try:
-        await server.serve()
+        await _serve_app(pipeline)
     finally:
         await shutdown_pipeline(pipeline, tasks)
+
+
+async def _serve_app(pipeline: Pipeline) -> None:
+    config_uvicorn = uvicorn.Config(
+        app=pipeline.app,
+        host=pipeline.config.server.host,
+        port=pipeline.config.server.port,
+        log_level="info",
+    )
+    server = uvicorn.Server(config_uvicorn)
+    await server.serve()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -405,6 +485,23 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="capture file path (.jsonl, or .jsonl.gz for gzip compression)",
     )
+    replay_parser = subparsers.add_parser(
+        "replay",
+        help="replay a capture through the production pipeline, optionally serving it",
+    )
+    replay_parser.add_argument("capture", type=Path, help="capture file to replay")
+    replay_parser.add_argument(
+        "--speed",
+        default=None,
+        help="pacing multiplier for recorded gaps, e.g. 2 for twice as fast "
+        "(default: as fast as possible, or 1.0 with --serve)",
+    )
+    replay_parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="serve the HTTP and WebSocket API while streaming the capture, "
+        "so the dashboard runs with no live backend",
+    )
     return parser
 
 
@@ -423,6 +520,17 @@ def parse_duration(value: str) -> float:
     if seconds <= 0:
         raise ConfigError(f"duration must be greater than zero; got {value!r}")
     return seconds
+
+
+def parse_speed(value: str) -> float:
+    """Parse a replay pacing multiplier, which must be finite and positive."""
+    try:
+        speed = float(value)
+    except ValueError as exc:
+        raise ConfigError(f"invalid speed {value!r}; expected a positive number") from exc
+    if not isfinite(speed) or speed <= 0:
+        raise ConfigError(f"speed must be finite and greater than zero; got {value!r}")
+    return speed
 
 
 def _write_example_config(path: Path, parser: argparse.ArgumentParser) -> None:
@@ -454,6 +562,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         if args.command == "capture":
             duration_seconds = parse_duration(args.duration)
             asyncio.run(run_capture(config_path, duration_seconds, args.output))
+        elif args.command == "replay":
+            speed = (
+                parse_speed(args.speed) if args.speed is not None else (1.0 if args.serve else None)
+            )
+            if args.serve:
+                asyncio.run(run_replay_serve(config_path, args.capture, speed))
+            else:
+                report = asyncio.run(run_replay_offline(config_path, args.capture, speed))
+                print(
+                    json.dumps(
+                        {
+                            "transitions": len(report.transitions),
+                            "opportunities": len(report.opportunities),
+                            "snapshots_consumed": report.snapshots_consumed,
+                            "digest": report.digest,
+                        }
+                    )
+                )
         else:
             asyncio.run(run_pipeline(config_path))
     except ConfigError as exc:
