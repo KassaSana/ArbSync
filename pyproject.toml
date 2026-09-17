@@ -1,5 +1,5 @@
 [project]
-name = "cross-exchange-arb-detector"
+name = "arbsync"
 version = "0.1.0"
 description = "Cross-exchange crypto arbitrage detector with FastAPI backend and React dashboard"
 readme = "README.md"

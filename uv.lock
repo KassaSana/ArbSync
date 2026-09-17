@@ -48,6 +48,62 @@ wheels = [
 ]
 
 [[package]]
+name = "arbsync"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "aiosqlite" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "prometheus-client" },
+    { name = "structlog" },
+    { name = "uvicorn" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "build" },
+    { name = "httpx2" },
+    { name = "hypothesis" },
+    { name = "mypy" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "setuptools" },
+]
+perf = [
+    { name = "playwright" },
+    { name = "psutil" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.20.0" },
+    { name = "build", marker = "extra == 'dev'", specifier = ">=1.2.2" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.12.0" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.0.0" },
+    { name = "playwright", marker = "extra == 'perf'", specifier = ">=1.62.0" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.6.0" },
+    { name = "prometheus-client", specifier = ">=0.25.0" },
+    { name = "psutil", marker = "extra == 'perf'", specifier = ">=7.2.2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0" },
+    { name = "setuptools", marker = "extra == 'dev'", specifier = ">=68.0" },
+    { name = "structlog", specifier = ">=24.1.0" },
+    { name = "uvicorn", specifier = ">=0.30.0" },
+    { name = "websockets", specifier = ">=13.0" },
+]
+provides-extras = ["dev", "perf"]
+
+[[package]]
 name = "ast-serialize"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -279,62 +335,6 @@ wheels = [
 toml = [
     { name = "tomli", marker = "python_full_version <= '3.11'" },
 ]
-
-[[package]]
-name = "cross-exchange-arb-detector"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aiosqlite" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "prometheus-client" },
-    { name = "structlog" },
-    { name = "uvicorn" },
-    { name = "websockets" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "build" },
-    { name = "httpx2" },
-    { name = "hypothesis" },
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "setuptools" },
-]
-perf = [
-    { name = "playwright" },
-    { name = "psutil" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiosqlite", specifier = ">=0.20.0" },
-    { name = "build", marker = "extra == 'dev'", specifier = ">=1.2.2" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.12.0" },
-    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=2.0.0" },
-    { name = "playwright", marker = "extra == 'perf'", specifier = ">=1.62.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.6.0" },
-    { name = "prometheus-client", specifier = ">=0.25.0" },
-    { name = "psutil", marker = "extra == 'perf'", specifier = ">=7.2.2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.1.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0" },
-    { name = "setuptools", marker = "extra == 'dev'", specifier = ">=68.0" },
-    { name = "structlog", specifier = ">=24.1.0" },
-    { name = "uvicorn", specifier = ">=0.30.0" },
-    { name = "websockets", specifier = ">=13.0" },
-]
-provides-extras = ["dev", "perf"]
 
 [[package]]
 name = "distlib"
