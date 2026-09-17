@@ -7,8 +7,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+import structlog
+
 from arb.adapters.base import ExchangeAdapter, parse_levels
+from arb.metrics import adapter_pair_resyncs_total
 from arb.types import EventKind, MarketEvent, PriceLevel
+
+logger = structlog.get_logger(__name__)
 
 # Longer quote assets first: "BTCBUSD" is BTC/BUSD, not BTCB/USD.
 _BINANCE_QUOTE_ASSETS = ("USDT", "USDC", "BUSD", "USD")
@@ -52,6 +57,37 @@ class BinanceAdapter(ExchangeAdapter):
         self._local_seq.clear()
         self._last_exchange_update_id.clear()
         self._buffers.clear()
+
+    def request_pair_resync(self, pair: str) -> bool:
+        """Re-fetch one pair's book without dropping the combined stream.
+
+        External recovery (reconciliation drift, an invalid book) discards
+        only this pair's sync state; the next update for the pair takes the
+        normal uninitialized path and re-aligns from REST while every other
+        pair keeps streaming. No snapshot is fetched here: waking the read
+        loop from another task would race its in-flight snapshot tasks, and
+        a thin pair with no imminent update is safer left ineligible until
+        traffic resumes than rebuilt from a snapshot with nothing to align.
+        """
+        self._begin_pair_resync(pair, trigger="external")
+        self._buffers.pop(pair, None)
+        return True
+
+    def _begin_pair_resync(self, pair: str, *, trigger: str) -> None:
+        """Drop one pair's sync state while keeping the shared connection.
+
+        Unlike :meth:`_restart_sync`, this never sets
+        ``_reconnect_requested``, so the socket and every other pair's
+        sequence tracking survive. Callers that exhaust the bounded recovery
+        (buffer overflow, repeated snapshot misalignment) still fall back to
+        :meth:`_restart_sync`.
+        """
+        self._initialized.discard(pair)
+        self._local_seq.pop(pair, None)
+        self._last_exchange_update_id.pop(pair, None)
+        self._last_sequence_by_pair.pop(pair, None)
+        adapter_pair_resyncs_total.labels(exchange=self.name, trigger=trigger).inc()
+        logger.info("adapter_pair_resync", exchange=self.name, pair=pair, trigger=trigger)
 
     async def subscribe(self, websocket: Any) -> None:
         params = [f"{pair.lower()}@depth" for pair in self.pairs]
@@ -118,6 +154,18 @@ class BinanceAdapter(ExchangeAdapter):
                             emitted: list[MarketEvent] = []
                             if update.pair in self._initialized:
                                 emitted = self._emit_initialized(update)
+                                if (
+                                    update.pair not in self._initialized
+                                    and update.pair not in snapshot_tasks
+                                    and not self._reconnect_requested
+                                ):
+                                    # A sequence gap just demoted this pair.
+                                    # Re-fetch only it; the socket and the
+                                    # other pairs keep flowing.
+                                    snapshot_attempts[update.pair] = 1
+                                    snapshot_tasks[update.pair] = asyncio.create_task(
+                                        self.fetch_snapshot(update.pair, trigger_sequence=0)
+                                    )
                             else:
                                 self._buffer(update)
                                 if update.pair not in snapshot_tasks:
@@ -222,7 +270,13 @@ class BinanceAdapter(ExchangeAdapter):
             return []
         if update.first_id > last_id + 1:
             self.gap_count += 1
-            self._restart_sync(update.pair)
+            # A gap demotes only this pair: the triggering update is kept so
+            # the snapshot alignment has something to span, and the stream
+            # loop (or the next parse_message call) re-fetches just this pair.
+            # Buffer overflow inside _buffer still escalates to a full
+            # reconnect, which is the bounded fallback.
+            self._begin_pair_resync(update.pair, trigger="sequence_gap")
+            self._buffer(update)
             return []
         return [self._delta_event(update)]
 
@@ -287,6 +341,13 @@ class BinanceAdapter(ExchangeAdapter):
         )
 
     def _restart_sync(self, pair: str) -> None:
+        """Fall back to a full-venue reconnect.
+
+        Only ``pair``'s sync state is discarded, but the reconnect request
+        drops the combined stream, so every pair rebuilds. Reserved for
+        bounded-failure paths: buffer overflow, repeated snapshot
+        misalignment, snapshot failure, and server shutdown.
+        """
         self._initialized.discard(pair)
         self._local_seq.pop(pair, None)
         self._last_exchange_update_id.pop(pair, None)

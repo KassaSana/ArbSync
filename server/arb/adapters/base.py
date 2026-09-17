@@ -129,6 +129,17 @@ class ExchangeAdapter(abc.ABC):
     def request_reconnect(self) -> None:
         self._reconnect_requested = True
 
+    def request_pair_resync(self, pair: str) -> bool:
+        """Resynchronize one pair without dropping the shared connection.
+
+        The default adapter cannot do this, so callers must fall back to
+        :meth:`request_reconnect`. Adapters that multiplex pairs on one
+        socket override this to re-fetch only the affected pair and return
+        ``True``. Implementations must not raise; recovery callers treat a
+        ``False`` return as "fall back to a full reconnect".
+        """
+        return False
+
     async def stream_events(self, websocket: Any) -> AsyncIterator[MarketEvent]:
         """Normalize one connection's messages, preserving their receipt time."""
         async for message in websocket:
@@ -227,3 +238,18 @@ class ExchangeAdapter(abc.ABC):
             reconnect_count=self.reconnect_count,
             last_error=self.last_error,
         )
+
+
+def request_scoped_resync(adapter: ExchangeAdapter, pair: str) -> bool:
+    """Prefer a single-pair resync; return whether the connection was kept.
+
+    Returns ``True`` when the adapter handled ``pair`` without dropping its
+    shared socket, in which case the caller must not request a full
+    reconnect. The lookup is type-level so test doubles without a real
+    override (including ``Mock`` adapters) fall back to ``False`` instead of
+    accidentally claiming scoped recovery.
+    """
+    hook = getattr(type(adapter), "request_pair_resync", None)
+    if hook is None or hook is ExchangeAdapter.request_pair_resync:
+        return False
+    return bool(adapter.request_pair_resync(pair))

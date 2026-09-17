@@ -73,6 +73,18 @@ class ReconcileAdapter(ExchangeAdapter):
         super().request_reconnect()
 
 
+class PairResyncAdapter(ReconcileAdapter):
+    """Stub for an adapter that can resync one pair without reconnecting."""
+
+    def __init__(self, pairs: list[str]) -> None:
+        super().__init__(pairs)
+        self.pair_resync_requests: list[str] = []
+
+    def request_pair_resync(self, pair: str) -> bool:
+        self.pair_resync_requests.append(pair)
+        return True
+
+
 def apply_book(
     manager: OrderBookManager,
     pair: str = "BTC-USD",
@@ -99,6 +111,22 @@ def apply_book(
 
 def metric_value(metric: object, **labels: str) -> float:
     return metric.labels(**labels)._value.get()  # type: ignore[attr-defined, no-any-return]
+
+
+@pytest.mark.asyncio
+async def test_confirmed_mismatch_prefers_single_pair_resync() -> None:
+    # ARB-028: when the adapter supports it, confirmed drift re-fetches only
+    # the affected pair instead of reconnecting the whole venue.
+    adapter = PairResyncAdapter(["BTC-USD"])
+    manager = OrderBookManager()
+    apply_book(manager)
+    reconciler = SnapshotReconciler([adapter], manager, [("stub", "BTC-USD")], confirmation_count=1)
+
+    await reconciler.reconcile_next()
+
+    assert adapter.pair_resync_requests == ["BTC-USD"]
+    assert adapter.reconnect_requests == 0
+    assert manager.eligibility("stub", "BTC-USD").eligible is False
 
 
 @pytest.mark.asyncio

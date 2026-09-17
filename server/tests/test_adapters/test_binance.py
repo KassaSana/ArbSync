@@ -223,19 +223,44 @@ def test_binance_initial_buffer_aligns_snapshot_and_discards_covered_updates() -
     assert second[0].exchange_first_sequence == 100
 
 
-def test_binance_gap_requests_reconnect_and_does_not_emit_delta() -> None:
+def test_binance_gap_resyncs_pair_without_requesting_reconnect() -> None:
+    # A sequence gap demotes only the affected pair: no full-venue reconnect
+    # is requested, the triggering update is buffered, and the next update
+    # for the pair re-aligns it from a fresh REST snapshot.
+    from arb.metrics import adapter_pair_resyncs_total
+
+    def pair_resyncs() -> float:
+        return adapter_pair_resyncs_total.labels(
+            exchange="binance", trigger="sequence_gap"
+        )._value.get()
+
     adapter = BinanceAdapter(["BTCUSDT"])
     asyncio.run(
         adapter.parse_message(
             '{"symbol":"BTCUSDT","lastUpdateId":100,"bids":[["100","1"]],"asks":[["101","1"]]}'
         )
     )
+    _stub_snapshot(adapter, sequence=109)
+    before = pair_resyncs()
     events = asyncio.run(
         adapter.parse_message('{"s":"BTCUSDT","u":110,"U":108,"E":1,"b":[],"a":[]}')
     )
     assert events == []
     assert adapter.gap_count == 1
-    assert adapter._reconnect_requested is True
+    assert adapter._reconnect_requested is False
+    assert "BTC-USDT" not in adapter._initialized
+    assert pair_resyncs() - before == 1
+
+    resumed = asyncio.run(
+        adapter.parse_message('{"s":"BTCUSDT","u":115,"U":111,"E":1,"b":[],"a":[]}')
+    )
+    assert [event.kind for event in resumed] == [
+        EventKind.SNAPSHOT,
+        EventKind.DELTA,
+        EventKind.DELTA,
+    ]
+    assert adapter._reconnect_requested is False
+    assert "BTC-USDT" in adapter._initialized
 
 
 @pytest.mark.asyncio
@@ -365,6 +390,148 @@ async def test_binance_reconnects_when_snapshot_never_catches_up() -> None:
         await anext(stream)
     assert calls == 3
     assert adapter._reconnect_requested is True
+
+
+@pytest.mark.asyncio
+async def test_binance_single_pair_gap_keeps_other_pair_flowing() -> None:
+    # ARB-028: a sequence gap on one Binance.US pair re-fetches only that
+    # pair. The untouched pair's deltas keep flowing with unbroken local
+    # sequence and no full-venue reconnect is requested.
+    from arb.orderbook import OrderBookManager
+
+    adapter = BinanceAdapter(["BTCUSDT", "ETHUSDT"])
+    btc_snapshot = await adapter.parse_message(
+        '{"symbol":"BTCUSDT","lastUpdateId":100,"bids":[["100","1"]],"asks":[["101","1"]]}'
+    )
+    eth_snapshot = await adapter.parse_message(
+        '{"symbol":"ETHUSDT","lastUpdateId":50,"bids":[["200","1"]],"asks":[["201","1"]]}'
+    )
+
+    async def fetch_btc_snapshot(
+        self: BinanceAdapter, pair: str, trigger_sequence: int
+    ) -> MarketEvent:
+        assert pair == "BTC-USDT"
+        return MarketEvent(
+            exchange=self.name,
+            pair=pair,
+            kind=EventKind.SNAPSHOT,
+            sequence=111,
+            timestamp_ns=1,
+            bids=(PriceLevel(price=Decimal("100"), size=Decimal("1")),),
+            asks=(PriceLevel(price=Decimal("101"), size=Decimal("1")),),
+            exchange_last_sequence=111,
+        )
+
+    adapter.fetch_snapshot = types.MethodType(fetch_btc_snapshot, adapter)
+    socket = ControlledSocket()
+    await socket.push('{"s":"BTCUSDT","U":110,"u":112,"E":1,"b":[["100","1"]],"a":[["101","1"]]}')
+    await socket.push('{"s":"ETHUSDT","U":51,"u":51,"E":1,"b":[["200","1"]],"a":[["201","1"]]}')
+    stream = adapter.stream_events(socket)
+
+    try:
+        events = [await anext(stream) for _ in range(3)]
+    finally:
+        await stream.aclose()
+
+    by_pair: dict[str, list[MarketEvent]] = {}
+    for event in events:
+        by_pair.setdefault(event.pair, []).append(event)
+    assert [event.kind for event in by_pair["ETH-USDT"]] == [EventKind.DELTA]
+    assert [event.kind for event in by_pair["BTC-USDT"]] == [
+        EventKind.SNAPSHOT,
+        EventKind.DELTA,
+    ]
+    # The untouched pair advances by exactly one local sequence number.
+    assert by_pair["ETH-USDT"][0].sequence == 51
+    assert adapter._reconnect_requested is False
+    assert adapter.gap_count == 1
+
+    manager = OrderBookManager()
+    for event in [*btc_snapshot, *eth_snapshot, *events]:
+        manager.apply(event)
+    assert manager.eligibility("binance", "ETH-USDT").eligible is True
+    assert manager.eligibility("binance", "BTC-USDT").eligible is True
+
+
+def test_single_pair_resync_keeps_venue_eligible_in_replay() -> None:
+    # ARB-028: replay a two-pair Binance.US capture with a sequence gap on
+    # one pair. The gapped pair re-aligns from REST, the other pair's deltas
+    # stay accepted throughout, and no full-venue resync is ever requested.
+    import time
+
+    from arb.capture import CaptureFrame, CaptureHeader
+    from arb.orderbook import OrderBookManager
+    from arb.replay import replay_frames
+
+    base_mono = time.monotonic_ns()
+    base_wall = time.time_ns()
+
+    def ws_frame(index: int, raw: str) -> CaptureFrame:
+        return CaptureFrame(
+            exchange="binance",
+            kind="ws",
+            wall_ns=base_wall + index * 100_000_000,
+            mono_ns=base_mono + index * 100_000_000,
+            raw=raw,
+            payload=None,
+            url=None,
+            events=(),
+        )
+
+    def rest_frame(index: int, symbol: str, last_id: int, bid: str, ask: str) -> CaptureFrame:
+        return CaptureFrame(
+            exchange="binance",
+            kind="snapshot",
+            wall_ns=base_wall + index * 100_000_000,
+            mono_ns=base_mono + index * 100_000_000,
+            raw=None,
+            payload={
+                "lastUpdateId": last_id,
+                "bids": [[bid, "1"]],
+                "asks": [[ask, "1"]],
+            },
+            url=f"https://api.binance.us/api/v3/depth?symbol={symbol}&limit=5000",
+            events=(),
+        )
+
+    header = CaptureHeader(exchanges={"binance": ["BTCUSDT", "ETHUSDT"]}, started_wall_ns=base_wall)
+    frames = [
+        rest_frame(0, "BTCUSDT", 3, "100", "101"),
+        rest_frame(0, "ETHUSDT", 2, "200", "201"),
+        ws_frame(1, '{"s":"BTCUSDT","U":1,"u":5,"E":1,"b":[["100","1"]],"a":[["101","1"]]}'),
+        ws_frame(2, '{"s":"ETHUSDT","U":1,"u":3,"E":1,"b":[["200","1"]],"a":[["201","1"]]}'),
+        ws_frame(3, '{"s":"BTCUSDT","U":6,"u":6,"E":1,"b":[["100","1"]],"a":[["101","1"]]}'),
+        ws_frame(4, '{"s":"ETHUSDT","U":4,"u":4,"E":1,"b":[["200","1"]],"a":[["201","1"]]}'),
+        # Sequence gap on BTC-USDT: last seen exchange id 6, range starts at 20.
+        ws_frame(5, '{"s":"BTCUSDT","U":20,"u":20,"E":1,"b":[["100","1"]],"a":[["101","1"]]}'),
+        rest_frame(5, "BTCUSDT", 21, "100", "101"),
+        ws_frame(6, '{"s":"ETHUSDT","U":5,"u":5,"E":1,"b":[["200","1"]],"a":[["201","1"]]}'),
+        ws_frame(7, '{"s":"BTCUSDT","U":21,"u":25,"E":1,"b":[["100","2"]],"a":[["101","1"]]}'),
+    ]
+
+    manager = OrderBookManager(max_age_seconds=60.0)
+    report = asyncio.run(replay_frames(header, frames, book_manager=manager))
+    repeat = asyncio.run(replay_frames(header, frames))
+
+    assert report.digest == repeat.digest
+    assert report.transitions, "expected the capture to replay to transitions"
+    assert all(transition.resync_requested is False for transition in report.transitions), (
+        "no frame may request a full-venue reconnect"
+    )
+    btc_kinds = [
+        transition.kind for transition in report.transitions if transition.pair == "BTC-USDT"
+    ]
+    assert btc_kinds == ["snapshot", "delta", "delta", "snapshot", "delta"]
+    eth = [transition for transition in report.transitions if transition.pair == "ETH-USDT"]
+    assert [transition.kind for transition in eth] == [
+        "snapshot",
+        "delta",
+        "delta",
+        "delta",
+    ]
+    assert all(transition.accepted for transition in eth)
+    assert manager.eligibility("binance", "ETH-USDT").eligible is True
+    assert manager.eligibility("binance", "BTC-USDT").eligible is True
 
 
 @pytest.mark.asyncio

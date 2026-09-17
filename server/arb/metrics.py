@@ -24,6 +24,11 @@ book_eligible = Gauge(
 adapter_reconnects_total = Counter(
     "arb_adapter_reconnects_total", "Adapter reconnect attempts", ["exchange", "reason"]
 )
+adapter_pair_resyncs_total = Counter(
+    "arb_adapter_pair_resyncs_total",
+    "Single-pair resynchronizations that kept the shared connection",
+    ["exchange", "trigger"],
+)
 ws_clients = Gauge("arb_ws_clients", "Connected WebSocket dashboard clients")
 ws_client_queue_overflows_total = Counter(
     "arb_ws_client_queue_overflows_total",

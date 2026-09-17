@@ -19,7 +19,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from arb.adapters import ADAPTER_TYPES
-from arb.adapters.base import ExchangeAdapter
+from arb.adapters.base import ExchangeAdapter, request_scoped_resync
 from arb.api import create_app
 from arb.broadcast import LiveBroadcaster
 from arb.capture import CaptureWriter
@@ -179,7 +179,8 @@ async def consume_adapter(
                 pair=event.pair,
                 reason=result.reason,
             )
-            adapter.request_reconnect()
+            if not request_scoped_resync(adapter, event.pair):
+                adapter.request_reconnect()
         if on_book_update is not None:
             on_book_update(event.exchange, event.pair)
 

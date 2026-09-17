@@ -9,7 +9,7 @@ from itertools import cycle
 
 import structlog
 
-from arb.adapters.base import ExchangeAdapter
+from arb.adapters.base import ExchangeAdapter, request_scoped_resync
 from arb.metrics import (
     reconcile_confirmations_total,
     reconcile_evidence_total,
@@ -281,7 +281,8 @@ class SnapshotReconciler:
                 )
 
         try:
-            adapter.request_reconnect()
+            if not request_scoped_resync(adapter, target.pair):
+                adapter.request_reconnect()
         except Exception as exc:
             state.recovery_failure_recorded = True
             reconcile_failures_total.labels(

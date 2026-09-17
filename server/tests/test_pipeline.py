@@ -252,6 +252,72 @@ async def test_consumer_requests_adapter_resync_after_invalid_snapshot() -> None
 
 
 @pytest.mark.asyncio
+async def test_consumer_prefers_single_pair_resync() -> None:
+    # ARB-028: consume_adapter routes book-level resync through the
+    # single-pair hook when the adapter supports it, leaving the shared
+    # connection alone.
+    from arb.adapters.base import ExchangeAdapter
+
+    invalid = MarketEvent(
+        "stub",
+        "BTC-USD",
+        EventKind.SNAPSHOT,
+        1,
+        1,
+        bids=(PriceLevel(Decimal("100"), Decimal("1")),),
+    )
+
+    class PairCapableAdapter(ExchangeAdapter):
+        name = "stub"
+        ws_url = "wss://example.test"
+        snapshot_url = "https://example.test/snapshot"
+
+        def __init__(self) -> None:
+            super().__init__(["BTC-USD"])
+            self.pair_resync_calls: list[str] = []
+            self.reconnect_calls = 0
+
+        @staticmethod
+        def normalize_symbol(symbol: str) -> str:
+            return symbol
+
+        async def subscribe(self, websocket: object) -> None:
+            return None
+
+        async def parse_message(self, message: str) -> list[MarketEvent]:
+            return []
+
+        async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
+            raise NotImplementedError
+
+        async def connect(self):  # type: ignore[override]
+            yield invalid
+
+        def request_pair_resync(self, pair: str) -> bool:
+            self.pair_resync_calls.append(pair)
+            return True
+
+        def request_reconnect(self) -> None:
+            self.reconnect_calls += 1
+
+    adapter = PairCapableAdapter()
+    broadcaster = RecordingBroadcaster()
+
+    await main.consume_adapter(
+        adapter,
+        book_manager=OrderBookManager(),
+        detector=ArbitrageDetector(Decimal("0.1")),
+        store=Mock(enqueue=AsyncMock()),
+        broadcaster=broadcaster,
+    )
+
+    assert adapter.pair_resync_calls == ["BTC-USD"]
+    assert adapter.reconnect_calls == 0
+    assert len(broadcaster.messages) == 1
+    assert broadcaster.messages[0].payload["eligible"] is False
+
+
+@pytest.mark.asyncio
 async def test_event_receipt_time_drives_freshness(monkeypatch) -> None:
     event = MarketEvent(
         **{
