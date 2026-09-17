@@ -1,9 +1,11 @@
-"""Apply per-venue taker fees to stored opportunities and count the survivors.
+"""Apply per-venue taker fees to stored opportunity episodes and count the survivors.
 
-Stored opportunities are theoretical and pre-fee by design. This script answers the
-question the detector deliberately does not: how many of them would still have been
-positive after paying a taker fee on both legs, and how much would that have been worth
-at the top-of-book size the detector recorded.
+Stored episodes are theoretical and pre-fee by design. This script answers the
+question the detector deliberately does not: how many of them would, at their widest
+moment, still have been positive after paying a taker fee on both legs, and how much
+that would have been worth at the top-of-book size recorded at that moment. One
+episode is one dislocation from appearance to disappearance, so nothing here needs
+deduplicating; each is paid at most once.
 
 Fees are percentages of notional per side. The built-in scenarios are illustrative
 base-tier public schedules, not live quotes; pass `--fee EXCHANGE=PCT` to use your own.
@@ -46,8 +48,9 @@ BUILT_IN_SCENARIOS: dict[str, dict[str, Decimal]] = {
 
 
 @dataclass(frozen=True)
-class OpportunityRow:
-    timestamp_ns: int
+class EpisodeRow:
+    start_ns: int
+    end_ns: int | None
     pair: str
     buy_exchange: str
     sell_exchange: str
@@ -57,27 +60,25 @@ class OpportunityRow:
     max_size: Decimal
     quote_asset: str
     theoretical_profit: Decimal
+    peak_spread_pct: Decimal
+    peak_size: Decimal
+    peak_profit: Decimal
+    close_reason: str | None
 
     @property
-    def notional(self) -> Decimal:
-        """Quote-currency value of the buy leg at the recorded top-of-book size."""
-        return self.buy_price * self.max_size
+    def peak_notional(self) -> Decimal:
+        """Quote-currency value of the buy leg at the size recorded at peak spread.
 
-    def quote_key(self) -> tuple[str, str, str, Decimal, Decimal, Decimal]:
-        """Identity of the pair of resting quotes that produced this row.
-
-        The detector emits one row per book update while a spread persists, so a
-        single resting order re-detected across cycles appears many times. Rows with
-        the same key could be captured at most once.
+        The buy price at peak is not stored; the open price is the closest
+        recorded figure and differs from it by at most the spread's movement.
         """
-        return (
-            self.pair,
-            self.buy_exchange,
-            self.sell_exchange,
-            self.buy_price,
-            self.sell_price,
-            self.max_size,
-        )
+        return self.buy_price * self.peak_size
+
+    @property
+    def duration_seconds(self) -> Decimal | None:
+        if self.end_ns is None:
+            return None
+        return Decimal(self.end_ns - self.start_ns) / Decimal(1_000_000_000)
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,6 @@ class ScenarioResult:
     name: str
     fees_pct: dict[str, Decimal]
     survivors: int
-    distinct_survivors: int
     net_profit_by_quote: dict[str, Decimal]
     missing_fee_exchanges: tuple[str, ...]
 
@@ -98,54 +98,62 @@ def parse_utc(value: str) -> int:
     return int(parsed.timestamp() * 1_000_000_000)
 
 
-def load_rows(database: Path, start_ns: int | None, end_ns: int | None) -> list[OpportunityRow]:
+EPISODE_COLUMNS = (
+    "start_ns, end_ns, pair, buy_exchange, sell_exchange, buy_price, sell_price, spread_pct, "
+    "max_size, quote_asset, theoretical_profit, peak_spread_pct, peak_size, peak_profit, "
+    "close_reason"
+)
+
+
+def load_rows(database: Path, start_ns: int | None, end_ns: int | None) -> list[EpisodeRow]:
+    """Episodes that started inside the inclusive window, in start order."""
     clauses: list[str] = []
     params: list[int] = []
     if start_ns is not None:
-        clauses.append("timestamp_ns >= ?")
+        clauses.append("start_ns >= ?")
         params.append(start_ns)
     if end_ns is not None:
-        clauses.append("timestamp_ns <= ?")
+        clauses.append("start_ns <= ?")
         params.append(end_ns)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    query = (
-        "SELECT timestamp_ns, pair, buy_exchange, sell_exchange, buy_price, sell_price, "
-        "spread_pct, max_size, quote_asset, theoretical_profit FROM opportunities"
-        f"{where} ORDER BY timestamp_ns, id"
-    )
+    query = f"SELECT {EPISODE_COLUMNS} FROM opportunity_episodes{where} ORDER BY start_ns, id"
     uri = f"{database.resolve().as_uri()}?mode=ro"
     with sqlite3.connect(uri, uri=True) as connection:
         return [
-            OpportunityRow(
-                timestamp_ns=int(row[0]),
-                pair=str(row[1]),
-                buy_exchange=str(row[2]),
-                sell_exchange=str(row[3]),
-                buy_price=Decimal(row[4]),
-                sell_price=Decimal(row[5]),
-                spread_pct=Decimal(row[6]),
-                max_size=Decimal(row[7]),
-                quote_asset=str(row[8]),
-                theoretical_profit=Decimal(row[9]),
+            EpisodeRow(
+                start_ns=int(row[0]),
+                end_ns=None if row[1] is None else int(row[1]),
+                pair=str(row[2]),
+                buy_exchange=str(row[3]),
+                sell_exchange=str(row[4]),
+                buy_price=Decimal(row[5]),
+                sell_price=Decimal(row[6]),
+                spread_pct=Decimal(row[7]),
+                max_size=Decimal(row[8]),
+                quote_asset=str(row[9]),
+                theoretical_profit=Decimal(row[10]),
+                peak_spread_pct=Decimal(row[11]),
+                peak_size=Decimal(row[12]),
+                peak_profit=Decimal(row[13]),
+                close_reason=None if row[14] is None else str(row[14]),
             )
             for row in connection.execute(query, params)
         ]
 
 
-def net_spread_pct(row: OpportunityRow, fees_pct: dict[str, Decimal]) -> Decimal | None:
-    """Spread after a taker fee on each leg, or None when a venue has no fee entry."""
+def net_spread_pct(row: EpisodeRow, fees_pct: dict[str, Decimal]) -> Decimal | None:
+    """Peak spread after a taker fee on each leg, or None when a venue has no fee entry."""
     buy_fee = fees_pct.get(row.buy_exchange)
     sell_fee = fees_pct.get(row.sell_exchange)
     if buy_fee is None or sell_fee is None:
         return None
-    return row.spread_pct - buy_fee - sell_fee
+    return row.peak_spread_pct - buy_fee - sell_fee
 
 
 def apply_scenario(
-    name: str, fees_pct: dict[str, Decimal], rows: list[OpportunityRow]
+    name: str, fees_pct: dict[str, Decimal], rows: list[EpisodeRow]
 ) -> ScenarioResult:
     survivors = 0
-    seen_quotes: set[tuple[str, str, str, Decimal, Decimal, Decimal]] = set()
     profit_by_quote: dict[str, Decimal] = {}
     missing: set[str] = set()
     for row in rows:
@@ -160,20 +168,15 @@ def apply_scenario(
         if net <= 0:
             continue
         survivors += 1
-        key = row.quote_key()
-        if key in seen_quotes:
-            continue
-        seen_quotes.add(key)
-        # Profit is counted once per distinct resting-quote pair: the level is gone
-        # after the first fill, however many times the detector reported it.
+        # Each episode is one dislocation, paid once at its widest moment; the
+        # level is gone after the first fill however long the spread rested.
         profit_by_quote[row.quote_asset] = profit_by_quote.get(
             row.quote_asset, Decimal(0)
-        ) + row.notional * net / Decimal(100)
+        ) + row.peak_notional * net / Decimal(100)
     return ScenarioResult(
         name=name,
         fees_pct=dict(fees_pct),
         survivors=survivors,
-        distinct_survivors=len(seen_quotes),
         net_profit_by_quote=profit_by_quote,
         missing_fee_exchanges=tuple(sorted(missing)),
     )
@@ -187,35 +190,48 @@ def percentile(values: list[Decimal], fraction: float) -> Decimal:
     return values[index]
 
 
-def summarize(rows: list[OpportunityRow]) -> dict[str, object]:
-    spreads = sorted(row.spread_pct for row in rows)
-    notionals = sorted(row.notional for row in rows)
+def summarize(rows: list[EpisodeRow]) -> dict[str, object]:
+    spreads = sorted(row.peak_spread_pct for row in rows)
+    notionals = sorted(row.peak_notional for row in rows)
+    lifetimes = sorted(
+        duration for duration in (row.duration_seconds for row in rows) if duration is not None
+    )
     routes: dict[str, int] = {}
     pairs: dict[str, int] = {}
+    close_reasons: dict[str, int] = {}
     pre_fee: dict[str, Decimal] = {}
     for row in rows:
         route = f"{row.buy_exchange}->{row.sell_exchange} {row.quote_asset}"
         routes[route] = routes.get(route, 0) + 1
         pairs[row.pair] = pairs.get(row.pair, 0) + 1
-        pre_fee[row.quote_asset] = pre_fee.get(row.quote_asset, Decimal(0)) + row.theoretical_profit
+        reason = row.close_reason or "open"
+        close_reasons[reason] = close_reasons.get(reason, 0) + 1
+        pre_fee[row.quote_asset] = pre_fee.get(row.quote_asset, Decimal(0)) + row.peak_profit
     summary: dict[str, object] = {
-        "opportunities": len(rows),
-        "distinct_quote_pairs": len({row.quote_key() for row in rows}),
+        "episodes": len(rows),
         "routes": dict(sorted(routes.items(), key=lambda item: -item[1])),
         "pairs": dict(sorted(pairs.items(), key=lambda item: -item[1])),
-        "pre_fee_profit_by_quote": {asset: str(value) for asset, value in pre_fee.items()},
+        "close_reasons": dict(sorted(close_reasons.items(), key=lambda item: -item[1])),
+        "pre_fee_peak_profit_by_quote": {asset: str(value) for asset, value in pre_fee.items()},
     }
     if rows:
-        summary["spread_pct"] = {
+        summary["peak_spread_pct"] = {
             "min": str(spreads[0]),
             "p50": str(percentile(spreads, 0.5)),
             "p90": str(percentile(spreads, 0.9)),
             "p99": str(percentile(spreads, 0.99)),
             "max": str(spreads[-1]),
         }
-        summary["notional_at_top_of_book"] = {
+        summary["notional_at_peak"] = {
             "p50": str(percentile(notionals, 0.5)),
             "max": str(notionals[-1]),
+        }
+    if lifetimes:
+        summary["lifetime_seconds"] = {
+            "closed": len(lifetimes),
+            "p50": str(percentile(lifetimes, 0.5)),
+            "p90": str(percentile(lifetimes, 0.9)),
+            "max": str(lifetimes[-1]),
         }
     return summary
 
@@ -231,23 +247,32 @@ def parse_fee_argument(value: str) -> tuple[str, Decimal]:
 
 
 def render_text(summary: dict[str, object], results: list[ScenarioResult]) -> str:
-    lines = [f"opportunities: {summary['opportunities']}"]
-    lines.append(f"distinct resting-quote pairs: {summary['distinct_quote_pairs']}")
-    spread = summary.get("spread_pct")
+    lines = [f"episodes: {summary['episodes']}"]
+    spread = summary.get("peak_spread_pct")
     if isinstance(spread, dict):
         lines.append(
-            "spread_pct: "
+            "peak spread_pct: "
             + "  ".join(f"{key} {Decimal(str(value)):.4f}" for key, value in spread.items())
         )
-    notional = summary.get("notional_at_top_of_book")
+    notional = summary.get("notional_at_peak")
     if isinstance(notional, dict):
         lines.append(
-            "notional at top of book: "
+            "notional at peak: "
             + "  ".join(f"{key} {Decimal(str(value)):.2f}" for key, value in notional.items())
+        )
+    lifetime = summary.get("lifetime_seconds")
+    if isinstance(lifetime, dict):
+        lines.append(
+            "lifetime seconds: "
+            + "  ".join(
+                f"{key} {value}" if key == "closed" else f"{key} {Decimal(str(value)):.3f}"
+                for key, value in lifetime.items()
+            )
         )
     lines.append(f"routes: {summary['routes']}")
     lines.append(f"pairs: {summary['pairs']}")
-    lines.append(f"pre-fee theoretical profit: {summary['pre_fee_profit_by_quote']}")
+    lines.append(f"close reasons: {summary['close_reasons']}")
+    lines.append(f"pre-fee theoretical profit at peak: {summary['pre_fee_peak_profit_by_quote']}")
     lines.append("")
     for result in results:
         fees = ", ".join(f"{name} {pct}" for name, pct in result.fees_pct.items())
@@ -256,12 +281,12 @@ def render_text(summary: dict[str, object], results: list[ScenarioResult]) -> st
             or "0"
         )
         lines.append(
-            f"{result.name} ({fees}): {result.survivors}/{summary['opportunities']} survive, "
-            f"{result.distinct_survivors} distinct; net profit once per quote pair = {profit}"
+            f"{result.name} ({fees}): {result.survivors}/{summary['episodes']} survive at peak; "
+            f"net profit once per episode = {profit}"
         )
         if result.missing_fee_exchanges:
             lines.append(
-                "  skipped rows touching venues with no fee entry: "
+                "  skipped episodes touching venues with no fee entry: "
                 + ", ".join(result.missing_fee_exchanges)
             )
     return "\n".join(lines)
@@ -272,8 +297,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--database", type=Path, default=Path("var/arb.sqlite3"), help="SQLite file to read"
     )
-    parser.add_argument("--start", help="ISO 8601 UTC lower bound (inclusive)")
-    parser.add_argument("--end", help="ISO 8601 UTC upper bound (inclusive)")
+    parser.add_argument("--start", help="ISO 8601 UTC lower bound on episode start (inclusive)")
+    parser.add_argument("--end", help="ISO 8601 UTC upper bound on episode start (inclusive)")
     parser.add_argument(
         "--fee",
         action="append",
@@ -306,7 +331,6 @@ def main() -> None:
                     "name": result.name,
                     "fees_pct": {name: str(pct) for name, pct in result.fees_pct.items()},
                     "survivors": result.survivors,
-                    "distinct_survivors": result.distinct_survivors,
                     "net_profit_by_quote": {
                         asset: str(value) for asset, value in result.net_profit_by_quote.items()
                     },

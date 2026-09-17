@@ -39,7 +39,8 @@ Current output:
 
 ```text
 iterations=10000
-opportunities_emitted=10000
+detections_timed=10000
+episode_events=2
 throughput_per_minute=1920581
 p50_latency_us=16.00
 p95_latency_us=17.33

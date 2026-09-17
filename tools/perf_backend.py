@@ -52,8 +52,8 @@ current_sample: contextvars.ContextVar[EventSample] = contextvars.ContextVar("ev
 
 
 class TimedDetector(ArbitrageDetector):
-    def detect_for_pair(self, pair, books, timestamp_ns):
-        result = super().detect_for_pair(pair, books, timestamp_ns)
+    def detect_for_pair(self, pair, books, timestamp_ns, monotonic_ns=None):
+        result = super().detect_for_pair(pair, books, timestamp_ns, monotonic_ns)
         current_sample.get().detected_ns = time.monotonic_ns()
         return result
 

@@ -99,14 +99,15 @@ async def synthetic_feed(websocket: websockets.ServerConnection, iterations: int
 
 
 def summarize_latencies(
-    latencies_ns: list[int], iterations: int, elapsed_seconds: float
+    latencies_ns: list[int], iterations: int, elapsed_seconds: float, episode_events: int = 0
 ) -> dict[str, Any]:
     if len(latencies_ns) < 2:
         raise ValueError("Need at least two samples to compute percentile stats.")
     quantiles = statistics.quantiles(latencies_ns, n=100)
     return {
         "iterations": iterations,
-        "opportunities_emitted": len(latencies_ns),
+        "detections_timed": len(latencies_ns),
+        "episode_events": episode_events,
         "throughput_per_minute": int((iterations / elapsed_seconds) * 60),
         "p50_latency_us": round(statistics.median(latencies_ns) / 1_000, 2),
         "p95_latency_us": round(quantiles[94] / 1_000, 2),
@@ -119,6 +120,7 @@ async def run_benchmark(iterations: int) -> dict[str, Any]:
     detector = ArbitrageDetector(threshold_pct=Decimal("0.1"))
     manager = OrderBookManager()
     latencies_ns: list[int] = []
+    episode_events = 0
 
     async with websockets.serve(
         lambda websocket: synthetic_feed(websocket, iterations), HOST, 0
@@ -138,14 +140,18 @@ async def run_benchmark(iterations: int) -> dict[str, Any]:
                         for exchange in ("gemini", "coinbase", "binance")
                         if (top := manager.top_of_book(exchange, event.pair)) is not None
                     ]
-                    opportunities = detector.detect_for_pair(event.pair, pair_books, recv_ns)
-                    if opportunities and event.kind is EventKind.DELTA:
+                    episodes = detector.detect_for_pair(event.pair, pair_books, recv_ns)
+                    episode_events += len(episodes)
+                    # The detector does the same work whether or not a spread
+                    # transitions, and episodes only emit on transitions, so
+                    # every delta that reached detection is a latency sample.
+                    if len(pair_books) >= 2 and event.kind is EventKind.DELTA:
                         yield_ns = time.perf_counter_ns()
                         latencies_ns.append(yield_ns - recv_ns)
                 processed += 1
         elapsed = time.perf_counter() - started
 
-    return summarize_latencies(latencies_ns, iterations, elapsed)
+    return summarize_latencies(latencies_ns, iterations, elapsed, episode_events)
 
 
 def main() -> None:
@@ -164,7 +170,8 @@ def main() -> None:
     save_result("e2e_benchmark", result)
 
     print(f"iterations={result['iterations']}")
-    print(f"opportunities_emitted={result['opportunities_emitted']}")
+    print(f"detections_timed={result['detections_timed']}")
+    print(f"episode_events={result['episode_events']}")
     print(f"throughput_per_minute={result['throughput_per_minute']}")
     print(f"p50_latency_us={result['p50_latency_us']:.2f}")
     print(f"p95_latency_us={result['p95_latency_us']:.2f}")
