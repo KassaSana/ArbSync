@@ -763,7 +763,7 @@ Acceptance criteria:
   cap (5 MB); longer captures stay outside Git. SQLite still stores opportunities only.
 - The dashboard can be driven from a replayed capture, so a demo needs no live backend.
 
-### [ ] ARB-031 — Track opportunities as episodes (schema v3)
+### [x] ARB-031 — Track opportunities as episodes (schema v3)
 
 - Priority: P2
 - Estimate: 8 hours

@@ -180,10 +180,10 @@ the dashboard suitable for trading or accounting decisions.
 | `GET /api/adapters` | Connection age, reconnects, gaps, and last errors |
 | `GET /api/book-status` | Eligibility and freshness for every configured book |
 | `GET /api/pairs` | Configured and observed `(exchange, pair)` roster, including cold start |
-| `GET /api/opportunities/recent?limit=50` | Recent theoretical opportunities (`limit`: 1–500) |
+| `GET /api/opportunities/recent?limit=50` | Recent theoretical opportunity episodes, open ones first by start (`limit`: 1–500) |
 | `GET /api/stats?window=1h` | Basic opportunity statistics |
-| `GET /api/system/overview` | Uptime and all-time peaks |
-| `GET /api/system/stats?window=1h` | Windowed aggregate statistics |
+| `GET /api/system/overview` | Uptime, all-time peaks, open episode count and all-time lifetimes |
+| `GET /api/system/stats?window=1h` | Windowed aggregate statistics and episode lifetime p50/p90/max |
 | `GET /api/system/timeseries?window=1h&bucket_seconds=60` | Chart buckets (`bucket_seconds`: 1–86,400) |
 | `GET /metrics` | Prometheus exposition |
 | `WS /ws/live` | Initial state followed by live book/status/opportunity messages |
@@ -202,8 +202,17 @@ them: `BTC-USD` is compared only with other `BTC-USD` books, while `BTC-USDT` re
 separate market. The shipped configuration subscribes to Binance.US's USD markets so that all
 three venues compare the same quote asset; its USDT symbols are still accepted and form their
 own markets. Theoretical profit is reported in its pair's quote asset, and dashboard/API
-profit totals are grouped by quote asset rather than added across currencies. Updating to this
-version clears legacy opportunity history because earlier Binance.US USDT rows were labelled USD.
+profit totals are grouped by quote asset rather than added across currencies.
+
+Opportunities are stored as **episodes**: one row per `(pair, buy venue, sell venue)` route from
+the moment its spread crosses the threshold to the moment it stops, with the peak spread, the
+size and profit at that peak, the spread at close and why it closed (`spread_closed`,
+`book_ineligible`, `shutdown`). A spread that rests across hundreds of book updates is one
+episode, so counts and profit sums describe distinct dislocations, and every closed episode has
+a lifetime measured on the monotonic clock. Schema version 3 drops earlier per-update rows on
+startup because they cannot be folded into episodes after the fact; back up first if that
+history matters. The earlier quote-currency migration likewise cleared Binance.US USDT rows
+that had been labelled USD.
 
 ## Verify a change
 

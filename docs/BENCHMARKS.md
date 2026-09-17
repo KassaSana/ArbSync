@@ -80,9 +80,10 @@ gaps are tracked in [VALIDATION.md](VALIDATION.md).
 
 ## Fee-adjusted survival
 
-`tools/fee_survival.py` re-reads stored opportunities and charges a per-side taker fee on
-both legs, reporting how many remain positive, how many distinct resting-quote pairs
-they represent, and the net value once per pair. Built-in scenarios are illustrative;
+`tools/fee_survival.py` re-reads stored opportunity episodes and charges a per-side taker
+fee on both legs at each episode's peak spread, reporting how many remain positive, the
+net value paid once per episode at the size recorded at that peak, and the lifetime
+distribution of closed episodes. Built-in scenarios are illustrative;
 `--fee EXCHANGE=PCT` replaces them, `--start`/`--end` bound the window, and `--json`
 emits a document. It opens the database read-only and can run against a live one.
 

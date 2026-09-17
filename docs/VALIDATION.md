@@ -308,10 +308,12 @@ What the rows say beyond the fee table:
 - 76% of rows are DOT, UNI, and AAVE; BTC has four and LTC one. Median capturable
   notional at top of book is $97, maximum $4,229. These are thin-book dislocations of
   the kind the reconciler also flagged, not liquid mispricing.
-- The 246 rows collapse to 108 distinct resting-quote pairs. The detector reports a
-  persisting spread on every book update, which is right for observability but means
-  the naive sum of `theoretical_profit` ($149.55) double counts levels that could be
-  taken once. The tool pays each distinct pair once.
+- The 246 rows collapse to 108 distinct resting-quote pairs. At the time the detector
+  reported a persisting spread on every book update, so the naive sum of
+  `theoretical_profit` ($149.55) double counted levels that could be taken once, and the
+  tool paid each distinct pair once. Storage has since moved to episodes (ARB-031), which
+  record that collapse directly; the tool now reads episodes and this analysis is not
+  reproducible from a schema version 3 database.
 
 Survival here is an upper bound. Slippage, latency, inventory pre-positioning on both
 venues, partial fills, and withdrawal costs are still excluded. The number that is

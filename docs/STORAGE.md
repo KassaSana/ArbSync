@@ -1,7 +1,7 @@
 # SQLite retention and maintenance
 
 ArbSync keeps history until the operator explicitly prunes it. SQLite contains
-canonical opportunities and approximate minute rollups, not order books. Back up
+canonical opportunity episodes and approximate minute rollups, not order books. Back up
 valuable history before maintenance. Use the database path from the selected config;
 relative runtime paths are resolved beside that config.
 
@@ -15,6 +15,9 @@ observed storage rates were approximately 23, 189, and 862 rows/s respectively.
 These short, deliberately opportunity-heavy synthetic runs are planning examples;
 their old harness predates the quote-currency correction and is not current live evidence.
 
+Those runs predate episodes (schema version 3), which store one row per dislocation
+rather than one per book update while it persists; the four-hour soak's 246 rows would
+have been 108 episodes, and the per-row size grew by the peak and close columns.
 The files used roughly 139–167 bytes per canonical row including indexes and the
 short-run rollups. At a sustained 189 rows/s, 150 bytes/row suggests about 2.28 GiB/day;
 at 862 rows/s, about 10.40 GiB/day. Decimal string lengths, pair distribution, free
@@ -31,8 +34,8 @@ Run from the repository root (or use the installed `arbsync-prune` command):
 uv run arbsync-prune --database var/arb.sqlite3 --before 2026-09-01T00:00:00Z --batch-size 1000 --max-batches 10
 ```
 
-This permanently removes rows strictly older than the supplied timezone-qualified
-timestamp. Rows exactly on the boundary remain. The command prints per-batch and
+This permanently removes episodes whose start is strictly older than the supplied
+timezone-qualified timestamp, open or not. Rows exactly on the boundary remain. The command prints per-batch and
 cumulative committed deletions. With no batch options, it attempts just one batch
 of at most 1,000 rows. A full final batch may leave older rows; rerun to continue.
 Choose the cutoff explicitly; this example is not a recommended retention duration.
@@ -74,9 +77,12 @@ time and acquire locks, so do not run it automatically on the market-data path.
 
 ## Migration and restore
 
-The pruner requires schema version 2 and never migrates a database. Application startup
-owns migrations. The quote-currency migration discards legacy conflated USD/USDT history;
-back up before upgrading if that historical data must be retained for investigation.
+The pruner requires schema version 3 and never migrates a database. Application startup
+owns migrations. The episode migration (version 3) discards per-update opportunity rows,
+and the earlier quote-currency migration discarded conflated USD/USDT history; back up
+before upgrading if that historical data must be retained for investigation. Startup also
+marks episodes a previous process left open as `orphaned`: they keep their count but
+contribute no lifetime.
 Restore only while all database users are stopped, into a fresh directory with no old
 WAL/SHM sidecars, and point an explicit config at the restored file. Verify integrity
 and application statistics before resuming service. Do not combine a restored main file
