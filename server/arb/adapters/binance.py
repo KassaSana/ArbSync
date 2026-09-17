@@ -42,6 +42,9 @@ class BinanceAdapter(ExchangeAdapter):
     ws_url = "wss://stream.binance.us:9443/ws"
     snapshot_url = "https://api.binance.us/api/v3/depth"
     max_buffered_updates = 1_000
+    # The REST snapshot is capped at 5000 levels per side and diffs cannot
+    # add levels beyond what it seeded past the top, so the book is bounded.
+    subscribed_depth_levels = 5_000
     normalize_symbol = staticmethod(normalize_binance_symbol)
 
     def __init__(self, pairs: list[str]) -> None:
@@ -378,7 +381,9 @@ class BinanceAdapter(ExchangeAdapter):
 
     async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
         symbol = pair.replace("-", "")
-        payload = await self.client_get_json(f"{self.snapshot_url}?symbol={symbol}&limit=5000")
+        payload = await self.client_get_json(
+            f"{self.snapshot_url}?symbol={symbol}&limit={self.subscribed_depth_levels}"
+        )
         received_monotonic_ns = time.monotonic_ns()
         sequence = int(payload.get("lastUpdateId", trigger_sequence))
         return MarketEvent(

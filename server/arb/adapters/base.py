@@ -126,6 +126,11 @@ class ExchangeAdapter(abc.ABC):
         self._last_sequence_by_pair.clear()
         self._reconnect_requested = False
 
+    # Levels the venue's subscription can hold at most, or None for a full
+    # book. Depth pricing reports it with every quote because "could not fill"
+    # on a capped book is not comparable with the same result on a full one.
+    subscribed_depth_levels: int | None = None
+
     def request_reconnect(self) -> None:
         self._reconnect_requested = True
 

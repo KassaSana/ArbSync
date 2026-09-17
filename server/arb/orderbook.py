@@ -52,6 +52,9 @@ class SortedLevels:
         price = self._prices[-1] if self.descending else self._prices[0]
         return PriceLevel(price=price, size=self._sizes[price])
 
+    def all_levels(self) -> list[PriceLevel]:
+        return self.top_n(len(self._prices))
+
     def top_n(self, limit: int) -> list[PriceLevel]:
         # A negative-zero slice (prices[-0:]) is the whole list, not nothing.
         if limit <= 0:
@@ -336,6 +339,19 @@ class OrderBookManager:
 
     def known_pairs(self) -> list[tuple[str, str]]:
         return sorted(self._books.keys())
+
+    def depth_levels(
+        self, exchange: str, pair: str, now_monotonic_ns: int | None = None
+    ) -> tuple[list[PriceLevel], list[PriceLevel]] | None:
+        """Every level of one book, best first, only while the book is eligible.
+
+        Eligibility is the same canonical decision detection uses, so a
+        disconnected, discontinuous or stale book yields no depth to price.
+        """
+        if not self.eligibility(exchange, pair, now_monotonic_ns).eligible:
+            return None
+        book = self._books[(exchange, pair)]
+        return (book.bids.all_levels(), book.asks.all_levels())
 
     def level_snapshot(
         self, exchange: str, pair: str, limit: int = 10
