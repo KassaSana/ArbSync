@@ -52,6 +52,10 @@ class ArbitrageDetector:
         self.threshold_pct = threshold_pct
         self._monotonic_clock = monotonic_clock
         self._open: dict[Route, _OpenEpisode] = {}
+        # Wall clocks tick coarsely (about a millisecond on Windows), so a route
+        # that closes and reopens inside one tick would otherwise reuse its
+        # identity. Each route's starts are kept strictly increasing instead.
+        self._last_start_ns: dict[Route, int] = {}
 
     def open_episodes(self) -> list[OpportunityEpisode]:
         return [state.episode for state in self._open.values()]
@@ -95,8 +99,10 @@ class ArbitrageDetector:
         for route, quote in quotes.items():
             existing = self._open.get(route)
             if existing is None:
+                start_ns = max(timestamp_ns, self._last_start_ns.get(route, timestamp_ns - 1) + 1)
+                self._last_start_ns[route] = start_ns
                 episode = OpportunityEpisode(
-                    start_ns=timestamp_ns,
+                    start_ns=start_ns,
                     pair=pair,
                     quote_asset=quote_asset,
                     buy_exchange=route[1],

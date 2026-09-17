@@ -266,6 +266,14 @@ def build_pipeline(
     async def report_connection_state(exchange: str, connected: bool) -> None:
         for status in book_manager.set_exchange_connected(exchange, connected):
             await publish_book_status(status)
+            if not connected:
+                # The venue's books were just cleared without any market event,
+                # so nothing else would close the episodes resting on them.
+                await deliver_episodes(
+                    detector.close_for_book(exchange, status.pair, time.time_ns()),
+                    store=store,
+                    broadcaster=broadcaster,
+                )
 
     for adapter in adapters:
         adapter.set_connection_state_callback(report_connection_state)

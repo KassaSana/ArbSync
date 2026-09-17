@@ -334,3 +334,35 @@ def test_explicit_monotonic_argument_drives_replay_determinism() -> None:
     detector.detect_for_pair("BTC-USD", books, 1, monotonic_ns=1_000)
     [closed] = detector.detect_for_pair("BTC-USD", [books[0]], 2, monotonic_ns=4_000)
     assert closed.duration_ns == 3_000
+
+
+def test_reopen_inside_one_wall_clock_tick_keeps_a_distinct_identity() -> None:
+    # time.time_ns() advances in ~1 ms steps on some hosts, so a route that
+    # closes and reopens between ticks would reuse (start_ns, route) and the
+    # store's upsert would overwrite the first episode with the second.
+    clock = Clock(0)
+    detector = ArbitrageDetector(threshold_pct=Decimal("0.1"), monotonic_clock=clock)
+    wide = [book("a", "99", "1", "100", "1"), book("b", "102", "1", "103", "1")]
+    narrow = [book("a", "99", "1", "100", "1"), book("b", "100", "1", "101", "1")]
+
+    [first] = detector.detect_for_pair("BTC-USD", wide, 5_000)
+    clock.now_ns = 10
+    [closed] = detector.detect_for_pair("BTC-USD", narrow, 5_000)
+    [second] = detector.detect_for_pair("BTC-USD", wide, 5_000)
+
+    assert first.start_ns == 5_000
+    assert closed.end_ns == 5_010
+    assert second.start_ns == 5_001, "nudged past the previous start, not the wall clock"
+    assert (first.start_ns, first.route) != (second.start_ns, second.route)
+    # Once the wall clock moves on, starts follow it again.
+    clock.now_ns = 20
+    detector.detect_for_pair("BTC-USD", narrow, 6_000)
+    [third] = detector.detect_for_pair("BTC-USD", wide, 6_000)
+    assert third.start_ns == 6_000
+    # Other routes are nudged independently.
+    other = [
+        book("a", "9", "1", "10", "1", pair="ETH-USD"),
+        book("b", "12", "1", "13", "1", pair="ETH-USD"),
+    ]
+    [eth] = detector.detect_for_pair("ETH-USD", other, 5_000)
+    assert eth.start_ns == 5_000

@@ -209,7 +209,10 @@ the moment its spread crosses the threshold to the moment it stops, with the pea
 size and profit at that peak, the spread at close and why it closed (`spread_closed`,
 `book_ineligible`, `shutdown`). A spread that rests across hundreds of book updates is one
 episode, so counts and profit sums describe distinct dislocations, and every closed episode has
-a lifetime measured on the monotonic clock. Schema version 3 drops earlier per-update rows on
+a lifetime measured on the monotonic clock. An episode closes when its spread narrows, when a
+leg's book is rejected, invalidated or disconnected, or at shutdown; a leg that merely ages past
+the freshness threshold with no further events on either venue is noticed at the next event, so
+a thin pair's lifetime can overrun by that gap. Schema version 3 drops earlier per-update rows on
 startup because they cannot be folded into episodes after the fact; back up first if that
 history matters. The earlier quote-currency migration likewise cleared Binance.US USDT rows
 that had been labelled USD.

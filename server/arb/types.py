@@ -75,9 +75,10 @@ EpisodeCloseReason = Literal["spread_closed", "book_ineligible", "shutdown"]
 class OpportunityEpisode:
     """One dislocation from appearance to disappearance on a (pair, buy, sell) route.
 
-    `start_ns` is wall-clock and identifies the episode; `end_ns` is derived
-    from a monotonic duration so a system-clock step cannot produce a negative
-    or inflated lifetime. The `*_price`, `spread_pct`, `max_size` and
+    `start_ns` is wall-clock and identifies the episode; the detector keeps it
+    strictly increasing per route so a reopen inside one clock tick is still a
+    distinct episode. `end_ns` is derived from a monotonic duration so a
+    system-clock step cannot produce a negative or inflated lifetime. The `*_price`, `spread_pct`, `max_size` and
     `theoretical_profit` fields are the values at open; `peak_*` track the
     widest spread seen and the size and profit at that moment. An open episode
     has `end_ns`, `close_spread_pct` and `close_reason` unset.

@@ -20,7 +20,7 @@ from arb.config import (
     ServerConfig,
 )
 from arb.detector import ArbitrageDetector
-from arb.types import BookEligibility, EventKind, MarketEvent, PriceLevel
+from arb.types import BookEligibility, EventKind, LiveMessage, MarketEvent, PriceLevel
 
 
 class StubAdapter(ExchangeAdapter):
@@ -77,14 +77,18 @@ def snapshot(exchange: str, pair: str) -> MarketEvent:
 
 
 class RecordingBroadcaster:
-    """Stands in for LiveBroadcaster where only status delivery matters."""
+    """Stands in for LiveBroadcaster where only status and episode delivery matter."""
 
     def __init__(self) -> None:
         self.statuses: list[BookEligibility] = []
+        self.messages: list[LiveMessage] = []
 
     async def broadcast_status(self, status: BookEligibility, *, immediate: bool) -> None:
         assert immediate is True
         self.statuses.append(status)
+
+    async def broadcast(self, message: LiveMessage) -> None:
+        self.messages.append(message)
 
 
 def test_build_pipeline_wires_configuration_into_each_component(tmp_path: Path) -> None:
@@ -124,6 +128,42 @@ async def test_adapter_disconnect_republishes_book_status(
         ("stub", "BTC-USD", False)
     ]
     assert pipeline.book_manager.eligibility("stub", "BTC-USD").eligible is False
+
+
+@pytest.mark.asyncio
+async def test_adapter_disconnect_closes_episodes_resting_on_its_books(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ARB-031: a disconnect clears the venue's books without any market event,
+    # so the episodes standing on them must be closed here or their lifetime
+    # would silently span the outage.
+    monkeypatch.setattr(main, "LiveBroadcaster", RecordingBroadcaster)
+    pipeline = main.build_pipeline(make_config(tmp_path), adapter_types=(StubAdapter,))
+    for exchange in ("stub", "gemini"):
+        pipeline.book_manager.apply(snapshot(exchange, "BTC-USD"))
+    wide = MarketEvent(
+        exchange="gemini",
+        pair="BTC-USD",
+        kind=EventKind.SNAPSHOT,
+        sequence=2,
+        timestamp_ns=2,
+        bids=(PriceLevel(Decimal("103"), Decimal("1")),),
+        asks=(PriceLevel(Decimal("104"), Decimal("1")),),
+    )
+    pipeline.book_manager.apply(wide)
+    books = pipeline.book_manager.eligible_books("BTC-USD", 0)
+    [opened] = pipeline.detector.detect_for_pair("BTC-USD", books, 1)
+    assert opened.route == ("BTC-USD", "stub", "gemini")
+    (adapter,) = pipeline.adapters
+
+    await adapter._report_connection_state(False)
+
+    assert pipeline.detector.open_episodes() == []
+    broadcaster: Any = pipeline.broadcaster
+    [closed] = [m for m in broadcaster.messages if m.type == "opportunity"]
+    assert closed.payload["close_reason"] == "book_ineligible"
+    assert closed.payload["start_ns"] == "1"
+    assert pipeline.store.unflushed_count == 1
 
 
 @pytest.mark.asyncio
