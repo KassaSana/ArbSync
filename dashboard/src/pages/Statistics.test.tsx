@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SystemOverview, Timeseries, WindowStats } from "../api/client";
 import Statistics from "./Statistics";
 
@@ -36,12 +36,22 @@ const windowStats: WindowStats = {
 
 const timeseries: Timeseries = { window: "1h", bucket_seconds: 60, points: [] };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 describe("statistics page", () => {
   beforeEach(() => {
     api.fetchSystemOverview.mockReset().mockResolvedValue(overview);
     api.fetchSystemStats.mockReset().mockResolvedValue(windowStats);
     api.fetchSystemTimeseries.mockReset().mockResolvedValue(timeseries);
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it("starts loading, then renders overview, window stats, and the chart state", async () => {
     render(<Statistics />);
@@ -73,6 +83,50 @@ describe("statistics page", () => {
     expect(screen.getByRole("button", { name: "1 hour" })).toHaveAttribute("aria-pressed", "false");
     expect(api.fetchSystemStats).toHaveBeenLastCalledWith("1d");
     expect(api.fetchSystemTimeseries).toHaveBeenLastCalledWith("1d", 900);
+  });
+
+  it("ignores an older window response that resolves after the selected window", async () => {
+    const oldStats = deferred<WindowStats>();
+    const oldSeries = deferred<Timeseries>();
+    const nextStats = deferred<WindowStats>();
+    const nextSeries = deferred<Timeseries>();
+    api.fetchSystemStats
+      .mockReturnValueOnce(oldStats.promise)
+      .mockReturnValueOnce(nextStats.promise);
+    api.fetchSystemTimeseries
+      .mockReturnValueOnce(oldSeries.promise)
+      .mockReturnValueOnce(nextSeries.promise);
+
+    render(<Statistics />);
+    fireEvent.click(screen.getByRole("button", { name: "1 day" }));
+
+    expect(screen.getByText("Loading window stats.")).toBeInTheDocument();
+    await act(async () => {
+      nextStats.resolve({ ...windowStats, window: "1d", count: 24 });
+      nextSeries.resolve({ ...timeseries, window: "1d", bucket_seconds: 900 });
+    });
+    expect(await screen.findByText("24")).toBeInTheDocument();
+
+    await act(async () => {
+      oldStats.resolve({ ...windowStats, count: 1 });
+      oldSeries.resolve(timeseries);
+    });
+    expect(screen.getByText("24")).toBeInTheDocument();
+    expect(screen.queryByText("1")).not.toBeInTheDocument();
+  });
+
+  it("does not start another polling group while the current group is pending", async () => {
+    vi.useFakeTimers();
+    api.fetchSystemOverview.mockReturnValue(new Promise(() => undefined));
+    api.fetchSystemStats.mockReturnValue(new Promise(() => undefined));
+    api.fetchSystemTimeseries.mockReturnValue(new Promise(() => undefined));
+
+    render(<Statistics />);
+    await act(async () => vi.advanceTimersByTime(15_000));
+
+    expect(api.fetchSystemOverview).toHaveBeenCalledTimes(1);
+    expect(api.fetchSystemStats).toHaveBeenCalledTimes(1);
+    expect(api.fetchSystemTimeseries).toHaveBeenCalledTimes(1);
   });
 
   it("reports an overview failure with a retry and keeps the window controls", async () => {

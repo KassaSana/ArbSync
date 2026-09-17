@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchSystemOverview,
   fetchSystemStats,
@@ -30,29 +30,58 @@ export default function Statistics() {
   const [stats, setStats] = useState<Async<WindowStats>>(loading);
   const [timeseries, setTimeseries] = useState<Async<Timeseries>>(loading);
   const [windowKey, setWindowKey] = useState<WindowKey>("1h");
+  const request = useRef<{ generation: number; pending: boolean; key: WindowKey | null }>({
+    generation: 0,
+    pending: false,
+    key: null,
+  });
 
   const active = WINDOWS.find((entry) => entry.key === windowKey) ?? WINDOWS[0];
 
   const refresh = useCallback(async (key: WindowKey, bucketSeconds: number) => {
+    if (request.current.pending && request.current.key === key) {
+      return;
+    }
+    const generation = request.current.generation + 1;
+    request.current = { generation, pending: true, key };
     const [nextOverview, nextStats, nextSeries] = await Promise.all([
       fetchSystemOverview().then(ready).catch(failed<SystemOverview>),
       fetchSystemStats(key).then(ready).catch(failed<WindowStats>),
       fetchSystemTimeseries(key, bucketSeconds).then(ready).catch(failed<Timeseries>),
     ]);
+    if (request.current.generation !== generation) {
+      return;
+    }
+    request.current = { generation, pending: false, key };
     setOverview(nextOverview);
     setStats(nextStats);
     setTimeseries(nextSeries);
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- polling pattern: refresh awaits the network before it ever sets state
     void refresh(active.key, active.bucketSeconds);
     const id = window.setInterval(
       () => void refresh(active.key, active.bucketSeconds),
       POLL_MS,
     );
-    return () => window.clearInterval(id);
+    return () => {
+      window.clearInterval(id);
+      request.current = {
+        generation: request.current.generation + 1,
+        pending: false,
+        key: null,
+      };
+    };
   }, [active.key, active.bucketSeconds, refresh]);
+
+  const selectWindow = (key: WindowKey) => {
+    if (key === windowKey) {
+      return;
+    }
+    setStats(loading());
+    setTimeseries(loading());
+    setWindowKey(key);
+  };
 
   return (
     <div className="space-y-3">
@@ -94,7 +123,7 @@ export default function Statistics() {
                 key={entry.key}
                 type="button"
                 aria-pressed={selected}
-                onClick={() => setWindowKey(entry.key)}
+                onClick={() => selectWindow(entry.key)}
                 className={`rounded px-3 py-1 text-xs transition-colors ${
                   selected ? "bg-raised text-ink" : "text-ink-3 hover:text-ink-2"
                 }`}
