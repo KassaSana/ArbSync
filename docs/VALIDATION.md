@@ -289,6 +289,10 @@ assumed taker fee on both legs. The fee tiers are illustrative base-tier public
 schedules, not live quotes; the conclusion does not depend on their exact values
 because the deficit is a multiple of the spread, not a fraction of it.
 
+This table predates schema-v4 fee ledgers and is historical evidence. The tool now reads
+stored product net values by default; reproducing this older counterfactual requires
+explicit `--fee` arguments because these episodes contain no measured depth ledger.
+
 | Per-side taker fee (Coinbase / Gemini) | Rows surviving | Distinct quote pairs | Net at top-of-book size |
 | --- | ---: | ---: | ---: |
 | 0.60% / 0.40% (base retail) | 0 / 246 | 0 | $0.00 |

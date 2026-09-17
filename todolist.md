@@ -810,7 +810,7 @@ Acceptance criteria:
 - Fill-rate per venue and notional ("could fill $50k in N% of observations") is exposed as
   a statistic; replay tests cover thin alt books and a mid-resync window.
 
-### [ ] ARB-033 — Fee-aware net pricing in the product
+### [x] ARB-033 — Fee-aware net pricing in the product
 
 - Priority: P2
 - Estimate: 5 hours

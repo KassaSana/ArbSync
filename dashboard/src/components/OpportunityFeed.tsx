@@ -61,7 +61,8 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
           <caption className="sr-only">
             Most recent theoretical arbitrage episodes, newest first, with the venue to
             buy on, the venue to sell on, the widest spread seen, the theoretical profit at
-            that moment and how long the spread lasted.
+            that moment, the first configured notional's net executable spread, and how long
+            the spread lasted.
           </caption>
           <thead className="sticky top-0 bg-panel">
             <tr className="border-b border-line-soft text-left text-micro text-ink-3">
@@ -81,6 +82,9 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
                 Peak profit
               </th>
               <th scope="col" className="px-4 py-2 text-right font-normal">
+                Net executable
+              </th>
+              <th scope="col" className="px-4 py-2 text-right font-normal">
                 Lifetime
               </th>
             </tr>
@@ -88,14 +92,14 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
           <tbody>
             {opportunities.state === "loading" ? (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-ink-3">
+                <td colSpan={7} className="px-4 py-6 text-ink-3">
                   Loading recent opportunities.
                 </td>
               </tr>
             ) : null}
             {opportunities.state === "ready" && rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-ink-3">
+                <td colSpan={7} className="px-4 py-6 text-ink-3">
                   No opportunities detected yet. Spreads this tight are the normal state
                   for liquid pairs.
                 </td>
@@ -119,6 +123,25 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
                 </td>
                 <td className="num px-4 py-1.5 text-right text-ink-2">
                   {quoteAmount(row.peak_profit, row.quote_asset)}
+                </td>
+                <td
+                  className={`num px-4 py-1.5 text-right ${
+                    row.pricing_ledgers[0]?.net_executable_spread_pct === null ||
+                    row.pricing_ledgers[0] === undefined
+                      ? "text-ink-3"
+                      : spreadTone(row.pricing_ledgers[0].net_executable_spread_pct)
+                  }`}
+                  title={
+                    row.pricing_ledgers[0] === undefined
+                      ? "No stored executable-price ledger"
+                      : `${row.pricing_ledgers[0].notional} ${row.quote_asset}; includes measured depth impact and configured taker fees`
+                  }
+                >
+                  {row.pricing_ledgers[0] === undefined
+                    ? "not recorded"
+                    : row.pricing_ledgers[0].net_executable_spread_pct === null
+                      ? "insufficient depth"
+                    : spreadPct(row.pricing_ledgers[0].net_executable_spread_pct)}
                 </td>
                 <td
                   className={`num px-4 py-1.5 text-right ${

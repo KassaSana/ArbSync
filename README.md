@@ -114,6 +114,7 @@ origins, persistence limits, and freshness threshold before running it.
 | --- | --- |
 | `detector` | Minimum spread percentage that emits an opportunity |
 | `pricing` | Quote notionals walked to a VWAP, and the book sampling interval for fill rates |
+| `fees` | Required per-venue taker percentages; optional maker percentages are validated but currently unused |
 | `exchanges` | Exchange-native symbols to subscribe to |
 | `server` | Bind address, port, SQLite path, and browser CORS allowlist |
 | `persistence` | Batch size, flush interval, and bounded queue size |
@@ -186,7 +187,7 @@ the dashboard suitable for trading or accounting decisions.
 | `GET /api/system/overview` | Uptime, all-time peaks, open episode count and all-time lifetimes |
 | `GET /api/system/stats?window=1h` | Windowed aggregate statistics and episode lifetime p50/p90/max |
 | `GET /api/system/timeseries?window=1h&bucket_seconds=60` | Chart buckets (`bucket_seconds`: 1–86,400) |
-| `GET /api/pricing/depth?pair=BTC-USD` | Depth-walked VWAP per venue, side and configured notional (`pair` optional) |
+| `GET /api/pricing/depth?pair=BTC-USD` | Depth-walked venue VWAPs plus directed route ledgers through depth impact, taker fees and net spread (`pair` optional) |
 | `GET /api/pricing/fill-rates` | How often each venue could fill each notional across periodic samples |
 | `GET /metrics` | Prometheus exposition |
 | `WS /ws/live` | Initial state followed by live book/status/opportunity messages |
@@ -215,7 +216,8 @@ episode, so counts and profit sums describe distinct dislocations, and every clo
 a lifetime measured on the monotonic clock. An episode closes when its spread narrows, when a
 leg's book is rejected, invalidated or disconnected, or at shutdown; a leg that merely ages past
 the freshness threshold with no further events on either venue is noticed at the next event, so
-a thin pair's lifetime can overrun by that gap. Schema version 3 drops earlier per-update rows on
+a thin pair's lifetime can overrun by that gap. Schema version 4 adds stored fee/depth ledgers;
+version 3 databases migrate in place, while versions before 3 drop earlier per-update rows on
 startup because they cannot be folded into episodes after the fact; back up first if that
 history matters. The earlier quote-currency migration likewise cleared Binance.US USDT rows
 that had been labelled USD.
@@ -228,6 +230,14 @@ with the amount that was available, never a fabricated price. Every quote carrie
 and Gemini, which stream full books) because a fill rate on a capped book is not comparable
 with one on a full book. Fill rates come from periodic samples of every book, off the ingestion
 path; an ineligible book is counted as an ineligible sample, not as a failed fill.
+
+Fee-aware route pricing keeps the tiers explicit. `spread_pct` and `theoretical_profit` remain
+top-of-book theoretical values. For each configured notional, the route ledger records both
+depth-walked VWAPs, gross executable spread, measured depth impact, the configured taker fee on
+each leg, fee impact, and net executable spread. Insufficient depth leaves executable and net
+values `null`. All ledger numbers are decimal strings on the wire and in the episode's SQLite
+`TEXT` document. There is no fee default: every configured venue must have a `taker_pct`, so a
+missing schedule stops startup instead of silently treating a route as free.
 
 ## Verify a change
 

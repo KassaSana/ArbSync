@@ -20,6 +20,7 @@ function episode(overrides: Partial<Opportunity>): Opportunity {
     peak_spread_pct: "1",
     peak_size: "1",
     peak_profit: "2.5",
+    pricing_ledgers: [],
     close_spread_pct: null,
     close_reason: null,
     ...overrides,
@@ -79,5 +80,42 @@ describe("opportunity feed", () => {
 
     expect(screen.getByText("open")).toBeInTheDocument();
     expect(screen.getByText("4.5s")).toHaveAttribute("title", "book dropped");
+  });
+
+  it("shows stored net executable spread separately from the theoretical peak", () => {
+    render(
+      <OpportunityFeed
+        opportunities={{
+          state: "ready",
+          data: [
+            episode({
+              peak_spread_pct: "1.5",
+              pricing_ledgers: [
+                {
+                  notional: "1000",
+                  top_of_book_spread_pct: "1.5",
+                  buy_vwap: "100",
+                  sell_vwap: "100.8",
+                  gross_executable_spread_pct: "0.8",
+                  depth_impact_pct: "-0.7",
+                  buy_taker_fee_pct: "0.4",
+                  sell_taker_fee_pct: "0.6",
+                  fee_impact_pct: "-1.006",
+                  net_executable_spread_pct: "-0.206",
+                  insufficient_depth: false,
+                },
+              ],
+            }),
+          ],
+        }}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("1.500%")).toBeInTheDocument();
+    expect(screen.getByText("-0.206%")).toHaveAttribute(
+      "title",
+      "1000 USD; includes measured depth impact and configured taker fees",
+    );
   });
 });

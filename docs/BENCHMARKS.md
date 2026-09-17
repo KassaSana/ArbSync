@@ -80,12 +80,13 @@ gaps are tracked in [VALIDATION.md](VALIDATION.md).
 
 ## Fee-adjusted survival
 
-`tools/fee_survival.py` re-reads stored opportunity episodes and charges a per-side taker
-fee on both legs at each episode's peak spread, reporting how many remain positive, the
-net value paid once per episode at the size recorded at that peak, and the lifetime
-distribution of closed episodes. Built-in scenarios are illustrative;
-`--fee EXCHANGE=PCT` replaces them, `--start`/`--end` bound the window, and `--json`
-emits a document. It opens the database read-only and can run against a live one.
+`tools/fee_survival.py` re-reads the exact net executable values stored with schema-v4
+episodes and reports survival, insufficient-depth counts, and net value by configured
+notional. It does not reconstruct current product results from top-of-book prices or a
+new fee schedule. `--start`/`--end` bound the window and `--json` emits a document. It
+opens the database read-only and can run against a live one. Repeated `--fee
+EXCHANGE=PCT` arguments explicitly request the older counterfactual top-of-book analysis
+for historical research; that output is not labelled as product pricing.
 
 ```bash
 uv run python tools/fee_survival.py --database var/arb.sqlite3   --start 2026-09-16T10:25:38Z --end 2026-09-16T14:25:38Z

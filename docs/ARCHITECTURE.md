@@ -52,7 +52,8 @@ never persisted there.
 | --- | --- | --- |
 | Exchange adapters | Protocol parsing, native sequence validation, reconnects, and snapshot recovery | Cross-exchange eligibility or detection |
 | `OrderBookManager` | In-memory L2 state, normalized continuity, freshness, and canonical eligibility | Exchange-native recovery |
-| `ArbitrageDetector` | Pairwise spread, maximum-size, and theoretical-profit calculations | Book trust or trade execution |
+| `ArbitrageDetector` | Pairwise top-of-book spread episodes and snapshots of route-pricing ledgers | Book trust or trade execution |
+| `DepthSampler` | Depth-walked venue VWAPs, fill rates, and explicit fee-aware route ledgers | Fee defaults or order execution |
 | `SnapshotReconciler` | Confirmed live-versus-REST divergence and recovery coordination | Exchange-native recovery |
 | `OpportunityStore` | Bounded queuing, batched SQLite writes, and statistics queries | Order-book storage |
 | `LiveBroadcaster` | State envelopes, book-update coalescing, and bounded per-client delivery | Market-data ingestion or detection |
@@ -181,7 +182,7 @@ raw-mismatch, corroborated cause, and reconciliation-failure events are logged a
 queue. Its worker drains that queue in configurable batches or after a configurable
 flush interval. SQLite runs in write-ahead logging mode and stores:
 
-- canonical opportunity rows, with price and amount values stored as exact text; and
+- canonical opportunity rows, with price, amount, fee, depth-impact and net values stored as exact text (pricing ledgers are JSON objects whose numeric members are strings); and
 - per-minute, per-pair rollups used by statistics endpoints.
 
 The canonical opportunity table is the source of truth. Rollup spread and profit values

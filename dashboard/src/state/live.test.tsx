@@ -62,6 +62,7 @@ function episode(startNs: string, closed = false) {
     peak_spread_pct: "1",
     peak_size: "1",
     peak_profit: "1",
+    pricing_ledgers: [],
     close_spread_pct: closed ? "0" : null,
     close_reason: closed ? "spread_closed" : null,
   };

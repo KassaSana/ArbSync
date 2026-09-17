@@ -1,5 +1,19 @@
 export type EpisodeCloseReason = "spread_closed" | "book_ineligible" | "shutdown";
 
+export type PricingLedger = {
+  notional: string;
+  top_of_book_spread_pct: string;
+  buy_vwap: string | null;
+  sell_vwap: string | null;
+  gross_executable_spread_pct: string | null;
+  depth_impact_pct: string | null;
+  buy_taker_fee_pct: string;
+  sell_taker_fee_pct: string;
+  fee_impact_pct: string | null;
+  net_executable_spread_pct: string | null;
+  insufficient_depth: boolean;
+};
+
 /**
  * One dislocation from appearance to disappearance on a (pair, buy, sell)
  * route. `start_ns` identifies it; a close for the same episode arrives as a
@@ -23,6 +37,7 @@ export type Opportunity = {
   peak_spread_pct: string;
   peak_size: string;
   peak_profit: string;
+  pricing_ledgers: PricingLedger[];
   close_spread_pct: string | null;
   close_reason: EpisodeCloseReason | null;
 };
@@ -241,6 +256,37 @@ function signedDecimal(value: unknown, location: string): string {
   return decimal(value, location);
 }
 
+function decodePricingLedger(value: unknown, location: string): PricingLedger {
+  const source = object(value, location);
+  const optionalDecimal = (name: string) =>
+    nullable(field(source, name, location), `${location}.${name}`, signedDecimal);
+  return {
+    notional: decimal(field(source, "notional", location), `${location}.notional`),
+    top_of_book_spread_pct: signedDecimal(
+      field(source, "top_of_book_spread_pct", location),
+      `${location}.top_of_book_spread_pct`,
+    ),
+    buy_vwap: optionalDecimal("buy_vwap"),
+    sell_vwap: optionalDecimal("sell_vwap"),
+    gross_executable_spread_pct: optionalDecimal("gross_executable_spread_pct"),
+    depth_impact_pct: optionalDecimal("depth_impact_pct"),
+    buy_taker_fee_pct: decimal(
+      field(source, "buy_taker_fee_pct", location),
+      `${location}.buy_taker_fee_pct`,
+    ),
+    sell_taker_fee_pct: decimal(
+      field(source, "sell_taker_fee_pct", location),
+      `${location}.sell_taker_fee_pct`,
+    ),
+    fee_impact_pct: optionalDecimal("fee_impact_pct"),
+    net_executable_spread_pct: optionalDecimal("net_executable_spread_pct"),
+    insufficient_depth: boolean(
+      field(source, "insufficient_depth", location),
+      `${location}.insufficient_depth`,
+    ),
+  };
+}
+
 export function decodeOpportunity(value: unknown, location = "opportunity"): Opportunity {
   const source = object(value, location);
   const endNs = nullable(field(source, "end_ns", location), `${location}.end_ns`, nanoseconds);
@@ -274,6 +320,11 @@ export function decodeOpportunity(value: unknown, location = "opportunity"): Opp
     ),
     peak_size: decimal(field(source, "peak_size", location), `${location}.peak_size`),
     peak_profit: decimal(field(source, "peak_profit", location), `${location}.peak_profit`),
+    pricing_ledgers: array(
+      field(source, "pricing_ledgers", location),
+      `${location}.pricing_ledgers`,
+      decodePricingLedger,
+    ),
     close_spread_pct: nullable(
       field(source, "close_spread_pct", location),
       `${location}.close_spread_pct`,

@@ -28,6 +28,21 @@ const opportunity = {
   peak_spread_pct: ".002",
   peak_size: "0.5",
   peak_profit: "7.50",
+  pricing_ledgers: [
+    {
+      notional: "1000",
+      top_of_book_spread_pct: "1.2",
+      buy_vwap: "100.1",
+      sell_vwap: "100.8",
+      gross_executable_spread_pct: "0.6993",
+      depth_impact_pct: "-0.5007",
+      buy_taker_fee_pct: "0.4",
+      sell_taker_fee_pct: "0.6",
+      fee_impact_pct: "-1.006",
+      net_executable_spread_pct: "-0.3067",
+      insufficient_depth: false,
+    },
+  ],
   close_spread_pct: null,
   close_reason: null,
 };
