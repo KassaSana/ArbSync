@@ -30,7 +30,14 @@ def _display_signature(message: LiveMessage) -> tuple[object, ...]:
 @dataclass
 class _ClientConnection:
     queue: asyncio.Queue[dict[str, object]]
+    pending_baseline: int
     sender_task: asyncio.Task[None] | None = None
+
+
+@dataclass(frozen=True)
+class _PendingMessage:
+    generation: int
+    message: LiveMessage
 
 
 class LiveBroadcaster:
@@ -44,7 +51,8 @@ class LiveBroadcaster:
         self._lock = asyncio.Lock()
         self._stream_sequence = 0
         self._coalesce_interval = coalesce_interval
-        self._pending: dict[tuple[str, str, str], LiveMessage] = {}
+        self._pending: dict[tuple[str, str, str], _PendingMessage] = {}
+        self._pending_generation = 0
         self._last_sent: dict[tuple[str, str, str], tuple[object, ...]] = {}
         self._flush_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -56,7 +64,10 @@ class LiveBroadcaster:
     ) -> None:
         await websocket.accept()
         async with self._lock:
-            connection = _ClientConnection(asyncio.Queue(maxsize=self._queue_maxsize))
+            connection = _ClientConnection(
+                asyncio.Queue(maxsize=self._queue_maxsize),
+                pending_baseline=self._pending_generation,
+            )
             if initial_state is not None:
                 connection.queue.put_nowait(self._envelope(initial_state()))
             self._clients[websocket] = connection
@@ -93,7 +104,7 @@ class LiveBroadcaster:
         if self._coalesce_interval <= 0:
             await self.broadcast(message)
             return
-        self._pending[(message.type, exchange, pair)] = message
+        self._pending[(message.type, exchange, pair)] = self._pending_message(message)
         self._ensure_flush_loop()
 
     async def broadcast_status(self, status: BookEligibility, *, immediate: bool) -> None:
@@ -116,7 +127,7 @@ class LiveBroadcaster:
         if immediate or self._coalesce_interval <= 0:
             await self.broadcast(message)
             return
-        self._pending[key] = message
+        self._pending[key] = self._pending_message(message)
         self._ensure_flush_loop()
 
     async def broadcast_book_now(self, exchange: str, pair: str, message: LiveMessage) -> None:
@@ -157,7 +168,7 @@ class LiveBroadcaster:
         # Swap without awaiting so updates arriving during delivery are kept.
         pending = self._pending
         self._pending = {}
-        await self._deliver(list(pending.values()))
+        await self._deliver_pending(list(pending.values()))
 
     async def _flush_loop(self) -> None:
         while True:
@@ -208,6 +219,41 @@ class LiveBroadcaster:
             if connection.sender_task is not None:
                 connection.sender_task.cancel()
             asyncio.create_task(self._close_slow_client(client))
+
+    async def _deliver_pending(self, messages: list[_PendingMessage]) -> None:
+        """Deliver coalesced entries only to clients older than those entries.
+
+        A new client's snapshot is an authoritative baseline. Entries already
+        pending when that baseline was created are represented by the snapshot
+        and must not be replayed after it. Existing clients still need those
+        entries, while entries queued after connection go to every client.
+        """
+        dropped: list[tuple[WebSocket, _ClientConnection]] = []
+        async with self._lock:
+            if not self._clients:
+                return
+            payloads = [
+                (pending.generation, self._envelope(pending.message)) for pending in messages
+            ]
+            for client, connection in list(self._clients.items()):
+                try:
+                    for generation, payload in payloads:
+                        if generation > connection.pending_baseline:
+                            connection.queue.put_nowait(payload)
+                except asyncio.QueueFull:
+                    dropped.append((client, connection))
+                    del self._clients[client]
+                    ws_client_queue_overflows_total.inc()
+            if dropped:
+                ws_clients.set(len(self._clients))
+        for client, connection in dropped:
+            if connection.sender_task is not None:
+                connection.sender_task.cancel()
+            asyncio.create_task(self._close_slow_client(client))
+
+    def _pending_message(self, message: LiveMessage) -> _PendingMessage:
+        self._pending_generation += 1
+        return _PendingMessage(self._pending_generation, message)
 
     async def _send_messages(self, websocket: WebSocket, connection: _ClientConnection) -> None:
         message_type = "unknown"

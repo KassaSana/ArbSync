@@ -184,6 +184,19 @@ async def test_reconciler_invalidation_republishes_book_status(
     monkeypatch.setattr(main, "LiveBroadcaster", RecordingBroadcaster)
     pipeline = main.build_pipeline(make_config(tmp_path), adapter_types=(StubAdapter,))
     pipeline.book_manager.apply(snapshot("stub", "BTC-USD"))
+    pipeline.book_manager.apply(snapshot("gemini", "BTC-USD"))
+    wide = MarketEvent(
+        exchange="gemini",
+        pair="BTC-USD",
+        kind=EventKind.SNAPSHOT,
+        sequence=2,
+        timestamp_ns=2,
+        bids=(PriceLevel(Decimal("103"), Decimal("1")),),
+        asks=(PriceLevel(Decimal("104"), Decimal("1")),),
+    )
+    pipeline.book_manager.apply(wide)
+    books = pipeline.book_manager.eligible_books("BTC-USD", 0)
+    assert len(pipeline.detector.detect_for_pair("BTC-USD", books, 1)) == 1
 
     status = pipeline.book_manager.invalidate("stub", "BTC-USD")
     assert pipeline.reconciler._on_book_invalidated is not None
@@ -191,6 +204,84 @@ async def test_reconciler_invalidation_republishes_book_status(
 
     broadcaster: Any = pipeline.broadcaster
     assert [(s.pair, s.eligible) for s in broadcaster.statuses] == [("BTC-USD", False)]
+    assert pipeline.detector.open_episodes() == []
+    [closed] = [message for message in broadcaster.messages if message.type == "opportunity"]
+    assert closed.payload["close_reason"] == "book_ineligible"
+    assert pipeline.store.unflushed_count == 1
+
+
+@pytest.mark.asyncio
+async def test_age_expiry_without_market_event_propagates_only_affected_transition(
+    tmp_path: Path,
+) -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+
+        async def accept(self) -> None:
+            return None
+
+        async def send_json(self, payload: dict[str, object]) -> None:
+            self.sent.append(payload)
+
+        async def close(self, code: int = 1000, reason: str | None = None) -> None:
+            return None
+
+    pipeline = main.build_pipeline(make_config(tmp_path), adapter_types=(StubAdapter,))
+    client = Client()
+    await pipeline.broadcaster.connect(client)  # type: ignore[arg-type]
+    now = 0
+    pipeline.book_manager._clock = lambda: now
+    pipeline.book_manager.apply(snapshot("stub", "BTC-USD"), received_monotonic_ns=0)
+    pipeline.book_manager.apply(
+        MarketEvent(
+            exchange="gemini",
+            pair="BTC-USD",
+            kind=EventKind.SNAPSHOT,
+            sequence=1,
+            timestamp_ns=1,
+            bids=(PriceLevel(Decimal("103"), Decimal("1")),),
+            asks=(PriceLevel(Decimal("104"), Decimal("1")),),
+        ),
+        received_monotonic_ns=0,
+    )
+    now = 12_000_000_000
+    pipeline.book_manager.apply(
+        MarketEvent(
+            exchange="gemini",
+            pair="BTC-USD",
+            kind=EventKind.SNAPSHOT,
+            sequence=2,
+            timestamp_ns=2,
+            bids=(PriceLevel(Decimal("103"), Decimal("1")),),
+            asks=(PriceLevel(Decimal("104"), Decimal("1")),),
+        ),
+        received_monotonic_ns=now,
+    )
+    pipeline.book_manager.apply(snapshot("stub", "ETH-USD"), received_monotonic_ns=now)
+    books = pipeline.book_manager.eligible_books("BTC-USD", now)
+    [opened] = pipeline.detector.detect_for_pair("BTC-USD", books, 1, now)
+    assert opened.route == ("BTC-USD", "stub", "gemini")
+    await pipeline.eligibility_publisher.scan_once(now_monotonic_ns=now, detected_at_ns=1)
+    await asyncio.sleep(0)
+
+    client.sent.clear()
+    now = 13_000_000_000
+    await pipeline.eligibility_publisher.scan_once(now_monotonic_ns=now, detected_at_ns=2)
+    await asyncio.sleep(0)
+
+    assert pipeline.book_manager.eligibility("stub", "BTC-USD", now).eligible is False
+    assert pipeline.book_manager.eligibility("stub", "ETH-USD", now).eligible is True
+    [status] = [message for message in client.sent if message["type"] == "book_status"]
+    assert status["payload"]["pair"] == "BTC-USD"
+    assert status["payload"]["eligible"] is False
+    assert status["payload"]["reason"] == "too_old"
+    assert pipeline.detector.open_episodes() == []
+    [closed] = [message for message in client.sent if message["type"] == "opportunity"]
+    assert closed["payload"]["close_reason"] == "book_ineligible"
+    assert pipeline.store.unflushed_count == 1
+    await pipeline.broadcaster.disconnect(client)  # type: ignore[arg-type]
+    await pipeline.broadcaster.aclose()
 
 
 @pytest.mark.asyncio
@@ -238,6 +329,7 @@ async def test_shutdown_stops_producers_before_consumers_and_drains_persistence(
         adapters=[FakeAdapter()],  # type: ignore[list-item]
         expected_pairs=[],
         broadcaster=FakeBroadcaster(),  # type: ignore[arg-type]
+        eligibility_publisher=None,  # type: ignore[arg-type]
         supervisor=supervisor,
         reconciler=None,  # type: ignore[arg-type]
         depth_sampler=None,  # type: ignore[arg-type]
@@ -288,9 +380,22 @@ async def test_start_pipeline_initializes_store_before_any_task_runs(
     assert log[0] == "store.initialize"
     assert set(log[1:]) == {"consume:stub", "reconciler.run"}
     assert tasks.depth_sampler is not None
+    assert tasks.eligibility_monitor is not None
     assert [
         task.get_name()
-        for task in (tasks.persistence, tasks.reconciler, *tasks.adapters, tasks.depth_sampler)
-    ] == ["persistence", "snapshot_reconciler", "adapter:stub", "depth_sampler"]
+        for task in (
+            tasks.persistence,
+            tasks.reconciler,
+            *tasks.adapters,
+            tasks.depth_sampler,
+            tasks.eligibility_monitor,
+        )
+    ] == [
+        "persistence",
+        "snapshot_reconciler",
+        "adapter:stub",
+        "depth_sampler",
+        "eligibility_monitor",
+    ]
     await main.shutdown_pipeline(pipeline, tasks)
     assert pipeline.supervisor.failures() == []

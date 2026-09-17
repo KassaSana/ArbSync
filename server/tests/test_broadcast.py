@@ -197,6 +197,150 @@ async def test_initial_state_is_ordered_before_live_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pending_update_before_connect_is_cut_off_by_snapshot() -> None:
+    broadcaster = LiveBroadcaster(coalesce_interval=60)
+    await broadcaster.broadcast_book(
+        "gemini", "BTC-USD", LiveMessage("top_of_book", {"sequence": 1})
+    )
+    websocket = FakeWebSocket()
+
+    await broadcaster.connect(
+        websocket,  # type: ignore[arg-type]
+        lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 2}]}),
+    )
+    await broadcaster.flush()
+    await asyncio.sleep(0)
+
+    assert [(message["type"], message["payload"]) for message in websocket.sent] == [
+        ("state_snapshot", {"books": [{"sequence": 2}]})
+    ]
+    await broadcaster.disconnect(websocket)  # type: ignore[arg-type]
+    await broadcaster.aclose()
+
+
+@pytest.mark.asyncio
+async def test_update_queued_during_accept_is_cut_off_by_later_snapshot() -> None:
+    accepting = asyncio.Event()
+    continue_accept = asyncio.Event()
+
+    class PausedAcceptSocket(FakeWebSocket):
+        async def accept(self) -> None:
+            accepting.set()
+            await continue_accept.wait()
+            await super().accept()
+
+    broadcaster = LiveBroadcaster(coalesce_interval=60)
+    websocket = PausedAcceptSocket()
+    connecting = asyncio.create_task(
+        broadcaster.connect(
+            websocket,  # type: ignore[arg-type]
+            lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 2}]}),
+        )
+    )
+    await accepting.wait()
+    await broadcaster.broadcast_book(
+        "gemini", "BTC-USD", LiveMessage("top_of_book", {"sequence": 1})
+    )
+    continue_accept.set()
+    await connecting
+    await broadcaster.flush()
+    await asyncio.sleep(0)
+
+    assert [message["type"] for message in websocket.sent] == ["state_snapshot"]
+    await broadcaster.disconnect(websocket)  # type: ignore[arg-type]
+    await broadcaster.aclose()
+
+
+@pytest.mark.asyncio
+async def test_update_immediately_after_snapshot_is_delivered() -> None:
+    broadcaster = LiveBroadcaster(coalesce_interval=60)
+    websocket = FakeWebSocket()
+    await broadcaster.connect(
+        websocket,  # type: ignore[arg-type]
+        lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 1}]}),
+    )
+
+    await broadcaster.broadcast_book(
+        "gemini", "BTC-USD", LiveMessage("top_of_book", {"sequence": 2})
+    )
+    await broadcaster.flush()
+    await asyncio.sleep(0)
+
+    assert [message["type"] for message in websocket.sent] == [
+        "state_snapshot",
+        "top_of_book",
+    ]
+    assert [message["payload"].get("sequence") for message in websocket.sent] == [None, 2]
+    await broadcaster.disconnect(websocket)  # type: ignore[arg-type]
+    await broadcaster.aclose()
+
+
+@pytest.mark.asyncio
+async def test_slow_new_client_keeps_snapshot_cutoff_and_post_snapshot_update() -> None:
+    release_send = asyncio.Event()
+
+    class SlowSocket(FakeWebSocket):
+        async def send_json(self, payload: dict[str, object]) -> None:
+            await release_send.wait()
+            await super().send_json(payload)
+
+    broadcaster = LiveBroadcaster(queue_maxsize=2, coalesce_interval=60)
+    await broadcaster.broadcast_book(
+        "gemini", "BTC-USD", LiveMessage("top_of_book", {"sequence": 1})
+    )
+    websocket = SlowSocket()
+    await broadcaster.connect(
+        websocket,  # type: ignore[arg-type]
+        lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 2}]}),
+    )
+    await asyncio.sleep(0)
+    await broadcaster.broadcast_book(
+        "gemini", "BTC-USD", LiveMessage("top_of_book", {"sequence": 3})
+    )
+    await broadcaster.flush()
+    release_send.set()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert [message["type"] for message in websocket.sent] == [
+        "state_snapshot",
+        "top_of_book",
+    ]
+    assert websocket.sent[-1]["payload"]["sequence"] == 3
+    assert websocket.closed is False
+    await broadcaster.disconnect(websocket)  # type: ignore[arg-type]
+    await broadcaster.aclose()
+
+
+@pytest.mark.asyncio
+async def test_clients_connecting_at_different_times_get_distinct_pending_cutoffs() -> None:
+    broadcaster = LiveBroadcaster(coalesce_interval=60)
+    first, second = FakeWebSocket(), FakeWebSocket()
+    await broadcaster.connect(
+        first,  # type: ignore[arg-type]
+        lambda: LiveMessage("state_snapshot", {"books": []}),
+    )
+    await broadcaster.broadcast_book(
+        "gemini", "BTC-USD", LiveMessage("top_of_book", {"sequence": 1})
+    )
+    await broadcaster.connect(
+        second,  # type: ignore[arg-type]
+        lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 1}]}),
+    )
+    await broadcaster.flush()
+    await asyncio.sleep(0)
+
+    assert [message["type"] for message in first.sent] == [
+        "state_snapshot",
+        "top_of_book",
+    ]
+    assert [message["type"] for message in second.sent] == ["state_snapshot"]
+    await broadcaster.disconnect(first)  # type: ignore[arg-type]
+    await broadcaster.disconnect(second)  # type: ignore[arg-type]
+    await broadcaster.aclose()
+
+
+@pytest.mark.asyncio
 async def test_slow_client_queue_overflow_does_not_block_broadcast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

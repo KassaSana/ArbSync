@@ -75,6 +75,100 @@ class BackgroundTaskSupervisor:
         logger.error("background_task_failed", task=name, error=error)
 
 
+class BookEligibilityPublisher:
+    """Propagate canonical book-status changes and their detector effects."""
+
+    def __init__(
+        self,
+        book_manager: OrderBookManager,
+        detector: ArbitrageDetector,
+        store: OpportunityStore,
+        broadcaster: LiveBroadcaster,
+        tracked_pairs: Sequence[tuple[str, str]],
+        *,
+        interval_seconds: float = 1.0,
+    ) -> None:
+        self.book_manager = book_manager
+        self.detector = detector
+        self.store = store
+        self.broadcaster = broadcaster
+        self.tracked_pairs = tuple(tracked_pairs)
+        self.interval_seconds = interval_seconds
+        self._signatures: dict[tuple[str, str], tuple[object, ...]] = {}
+        self._lock = asyncio.Lock()
+
+    async def publish(
+        self,
+        status: BookEligibility,
+        *,
+        immediate: bool,
+        detected_at_ns: int | None = None,
+        now_monotonic_ns: int | None = None,
+    ) -> None:
+        async with self._lock:
+            await self._publish_locked(
+                status,
+                immediate=immediate,
+                detected_at_ns=detected_at_ns,
+                now_monotonic_ns=now_monotonic_ns,
+            )
+
+    async def scan_once(
+        self,
+        *,
+        detected_at_ns: int | None = None,
+        now_monotonic_ns: int | None = None,
+    ) -> None:
+        """Publish display-relevant transitions, including age-only expiry."""
+        async with self._lock:
+            checked_ns = time.monotonic_ns() if now_monotonic_ns is None else now_monotonic_ns
+            pairs = sorted(set(self.tracked_pairs) | set(self.book_manager.known_pairs()))
+            for exchange, pair in pairs:
+                status = self.book_manager.eligibility(exchange, pair, checked_ns)
+                key = (exchange, pair)
+                if self._signatures.get(key) == status.display_signature():
+                    continue
+                await self._publish_locked(
+                    status,
+                    immediate=True,
+                    detected_at_ns=detected_at_ns,
+                    now_monotonic_ns=checked_ns,
+                )
+
+    async def run(self) -> None:
+        while True:
+            await self.scan_once()
+            await asyncio.sleep(self.interval_seconds)
+
+    async def _publish_locked(
+        self,
+        status: BookEligibility,
+        *,
+        immediate: bool,
+        detected_at_ns: int | None,
+        now_monotonic_ns: int | None,
+    ) -> None:
+        self._signatures[(status.exchange, status.pair)] = status.display_signature()
+        metrics = book_metrics(status.exchange, status.pair)
+        metrics.eligible.set(1 if status.eligible else 0)
+        if status.age_ns is not None:
+            metrics.staleness.set(status.age_ns / 1_000_000_000)
+        await self.broadcaster.broadcast_status(status, immediate=immediate)
+        if status.eligible:
+            return
+        detected_ns = time.time_ns() if detected_at_ns is None else detected_at_ns
+        await deliver_episodes(
+            self.detector.close_for_book(
+                status.exchange,
+                status.pair,
+                detected_ns,
+                now_monotonic_ns,
+            ),
+            store=self.store,
+            broadcaster=self.broadcaster,
+        )
+
+
 def configure_logging() -> None:
     level_name = os.getenv("ARB_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -101,6 +195,7 @@ async def process_market_event(
     broadcaster: LiveBroadcaster,
     detected_at_ns: int | None = None,
     now_monotonic_ns: int | None = None,
+    eligibility_publisher: BookEligibilityPublisher | None = None,
 ) -> BookUpdateResult:
     """Apply one event, publish its book, then detect and deliver opportunities.
 
@@ -123,32 +218,25 @@ async def process_market_event(
     )
     status = book_manager.eligibility(event.exchange, event.pair, eligibility_checked_ns)
     detected_ns = detected_at_ns if detected_at_ns is not None else time.time_ns()
+    publisher = eligibility_publisher or BookEligibilityPublisher(
+        book_manager, detector, store, broadcaster, ()
+    )
     if not result.accepted or result.top_of_book is None:
-        metrics.eligible.set(0)
-        await broadcaster.broadcast_status(status, immediate=True)
-        # This leg just left the eligible set, and detection below is skipped,
-        # so any episode standing on it must be closed here.
-        await deliver_episodes(
-            detector.close_for_book(
-                event.exchange, event.pair, detected_ns, eligibility_checked_ns
-            ),
-            store=store,
-            broadcaster=broadcaster,
+        await publisher.publish(
+            status,
+            immediate=True,
+            detected_at_ns=detected_ns,
+            now_monotonic_ns=eligibility_checked_ns,
         )
         return result
 
     metrics.updates.inc()
-    if status.age_ns is not None:
-        metrics.staleness.set(status.age_ns / 1_000_000_000)
-    metrics.eligible.set(1 if status.eligible else 0)
     if not status.eligible:
-        await broadcaster.broadcast_status(status, immediate=True)
-        await deliver_episodes(
-            detector.close_for_book(
-                event.exchange, event.pair, detected_ns, eligibility_checked_ns
-            ),
-            store=store,
-            broadcaster=broadcaster,
+        await publisher.publish(
+            status,
+            immediate=True,
+            detected_at_ns=detected_ns,
+            now_monotonic_ns=eligibility_checked_ns,
         )
         return result
 
@@ -157,7 +245,12 @@ async def process_market_event(
         event.pair,
         LiveMessage(type="top_of_book", payload=result.top_of_book.as_payload()),
     )
-    await broadcaster.broadcast_status(status, immediate=False)
+    await publisher.publish(
+        status,
+        immediate=False,
+        detected_at_ns=detected_ns,
+        now_monotonic_ns=eligibility_checked_ns,
+    )
     pair_books = book_manager.eligible_books(
         event.pair, eligibility_checked_ns, known=result.top_of_book
     )
@@ -190,6 +283,7 @@ async def consume_adapter(
     detector: ArbitrageDetector,
     store: OpportunityStore,
     broadcaster: LiveBroadcaster,
+    eligibility_publisher: BookEligibilityPublisher | None = None,
     on_book_update: Callable[[str, str], None] | None = None,
 ) -> None:
     """Process each normalized event from an adapter in sequence."""
@@ -200,6 +294,7 @@ async def consume_adapter(
             detector=detector,
             store=store,
             broadcaster=broadcaster,
+            eligibility_publisher=eligibility_publisher,
         )
         if result.requires_resync:
             logger.warning(
@@ -226,6 +321,7 @@ class Pipeline:
     adapters: list[ExchangeAdapter]
     expected_pairs: list[tuple[str, str]]
     broadcaster: LiveBroadcaster
+    eligibility_publisher: BookEligibilityPublisher
     supervisor: BackgroundTaskSupervisor
     reconciler: SnapshotReconciler
     depth_sampler: DepthSampler
@@ -238,6 +334,7 @@ class PipelineTasks:
     reconciler: asyncio.Task[object]
     adapters: list[asyncio.Task[object]]
     depth_sampler: asyncio.Task[object] | None = None
+    eligibility_monitor: asyncio.Task[object] | None = None
 
 
 def build_pipeline(
@@ -261,37 +358,9 @@ def build_pipeline(
     broadcaster = LiveBroadcaster()
     supervisor = BackgroundTaskSupervisor()
 
-    async def publish_book_status(status: BookEligibility) -> None:
-        book_metrics(status.exchange, status.pair).eligible.set(1 if status.eligible else 0)
-        await broadcaster.broadcast_status(status, immediate=True)
-
-    async def report_connection_state(exchange: str, connected: bool) -> None:
-        for status in book_manager.set_exchange_connected(exchange, connected):
-            await publish_book_status(status)
-            if not connected:
-                # The venue's books were just cleared without any market event,
-                # so nothing else would close the episodes resting on them.
-                await deliver_episodes(
-                    detector.close_for_book(exchange, status.pair, time.time_ns()),
-                    store=store,
-                    broadcaster=broadcaster,
-                )
-
-    for adapter in adapters:
-        adapter.set_connection_state_callback(report_connection_state)
     expected_pairs = [
         (adapter.name, pair) for adapter in adapters for pair in adapter.expected_pairs()
     ]
-    reconciler = SnapshotReconciler(
-        adapters,
-        book_manager,
-        expected_pairs,
-        cycle_seconds=config.reconciliation.cycle_seconds,
-        confirmation_count=config.reconciliation.confirmation_count,
-        size_confirmation_count=config.reconciliation.size_confirmation_count,
-        cooldown_seconds=config.reconciliation.cooldown_seconds,
-        on_book_invalidated=publish_book_status,
-    )
     depth_sampler = DepthSampler(
         book_manager,
         config.pricing.notionals,
@@ -302,6 +371,33 @@ def build_pipeline(
     detector = ArbitrageDetector(
         threshold_pct=Decimal(str(config.detector.threshold_pct)),
         ledger_factory=depth_sampler.ledgers_for_route,
+    )
+    eligibility_publisher = BookEligibilityPublisher(
+        book_manager,
+        detector,
+        store,
+        broadcaster,
+        expected_pairs,
+    )
+
+    async def publish_book_status(status: BookEligibility) -> None:
+        await eligibility_publisher.publish(status, immediate=True)
+
+    async def report_connection_state(exchange: str, connected: bool) -> None:
+        for status in book_manager.set_exchange_connected(exchange, connected):
+            await publish_book_status(status)
+
+    for adapter in adapters:
+        adapter.set_connection_state_callback(report_connection_state)
+    reconciler = SnapshotReconciler(
+        adapters,
+        book_manager,
+        expected_pairs,
+        cycle_seconds=config.reconciliation.cycle_seconds,
+        confirmation_count=config.reconciliation.confirmation_count,
+        size_confirmation_count=config.reconciliation.size_confirmation_count,
+        cooldown_seconds=config.reconciliation.cooldown_seconds,
+        on_book_invalidated=publish_book_status,
     )
     app = create_app(
         store,
@@ -323,6 +419,7 @@ def build_pipeline(
         adapters=adapters,
         expected_pairs=expected_pairs,
         broadcaster=broadcaster,
+        eligibility_publisher=eligibility_publisher,
         supervisor=supervisor,
         reconciler=reconciler,
         depth_sampler=depth_sampler,
@@ -344,17 +441,22 @@ async def start_pipeline(pipeline: Pipeline) -> PipelineTasks:
                 detector=pipeline.detector,
                 store=pipeline.store,
                 broadcaster=pipeline.broadcaster,
+                eligibility_publisher=pipeline.eligibility_publisher,
                 on_book_update=pipeline.reconciler.observe_book,
             ),
         )
         for adapter in pipeline.adapters
     ]
     depth_task = pipeline.supervisor.create("depth_sampler", pipeline.depth_sampler.run())
+    eligibility_task = pipeline.supervisor.create(
+        "eligibility_monitor", pipeline.eligibility_publisher.run()
+    )
     return PipelineTasks(
         persistence=persistence_task,
         reconciler=reconcile_task,
         adapters=adapter_tasks,
         depth_sampler=depth_task,
+        eligibility_monitor=eligibility_task,
     )
 
 
@@ -375,6 +477,9 @@ async def shutdown_pipeline(pipeline: Pipeline, tasks: PipelineTasks) -> None:
     if tasks.depth_sampler is not None:
         tasks.depth_sampler.cancel()
         background.append(tasks.depth_sampler)
+    if tasks.eligibility_monitor is not None:
+        tasks.eligibility_monitor.cancel()
+        background.append(tasks.eligibility_monitor)
     await asyncio.gather(*tasks.adapters, *background, return_exceptions=True)
     # Nothing can open an episode once the adapters are gone; close the ones
     # still standing so storage never holds an episode with no end.
