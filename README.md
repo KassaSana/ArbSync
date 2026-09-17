@@ -234,9 +234,10 @@ with one on a full book. Fill rates come from periodic samples of every book, of
 path; an ineligible book is counted as an ineligible sample, not as a failed fill.
 
 Fee-aware route pricing keeps the tiers explicit. `spread_pct` and `theoretical_profit` remain
-top-of-book theoretical values. For each configured notional, the route ledger records both
-depth-walked VWAPs, gross executable spread, measured depth impact, the configured taker fee on
-each leg, fee impact, and net executable spread. Insufficient depth leaves executable and net
+top-of-book theoretical values. For each configured quote budget, the buy leg is walked to that
+notional and the sell leg is priced at exactly the acquired base quantity. The route ledger
+records both depth-walked VWAPs, gross executable spread, measured depth impact, the configured
+taker fee on each leg, fee impact, and net executable spread. Insufficient depth leaves executable and net
 values `null`. All ledger numbers are decimal strings on the wire and in the episode's SQLite
 `TEXT` document. There is no fee default: every configured venue must have a `taker_pct`, so a
 missing schedule stops startup instead of silently treating a route as free.

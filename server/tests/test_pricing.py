@@ -3,7 +3,15 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from arb.pricing import DepthQuote, FillRateTracker, price_book, pricing_ledger, walk_levels
+from arb.pricing import (
+    DepthQuote,
+    FillRateTracker,
+    matched_route_fills,
+    price_book,
+    pricing_ledger,
+    walk_levels,
+    walk_levels_for_base,
+)
 from arb.types import PriceLevel, TopOfBook
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -73,8 +81,11 @@ def test_pricing_ledger_keeps_theoretical_depth_fee_and_net_tiers_distinct() -> 
     sell_top = TopOfBook(
         "coinbase", "BTC-USD", Decimal("103"), Decimal("1"), Decimal("104"), Decimal("2"), 1, 1
     )
-    buy_fill = walk_levels(levels(("100", "1"), ("102", "2")), Decimal("200"))
-    sell_fill = walk_levels(levels(("103", "1"), ("101", "2")), Decimal("200"))
+    buy_fill, sell_fill = matched_route_fills(
+        levels(("100", "1"), ("102", "2")),
+        levels(("103", "1"), ("101", "2")),
+        Decimal("200"),
+    )
 
     ledger = pricing_ledger(
         notional=Decimal("200"),
@@ -118,6 +129,180 @@ def test_pricing_ledger_never_fabricates_executable_values_from_short_depth() ->
     assert ledger.insufficient_depth
     assert ledger.gross_executable_spread_pct is None
     assert ledger.net_executable_spread_pct is None
+
+
+def _route_tops() -> tuple[TopOfBook, TopOfBook]:
+    return (
+        TopOfBook(
+            "gemini", "BTC-USD", Decimal("99"), Decimal("1"), Decimal("100"), Decimal("1"), 1, 1
+        ),
+        TopOfBook(
+            "coinbase", "BTC-USD", Decimal("110"), Decimal("1"), Decimal("111"), Decimal("1"), 1, 1
+        ),
+    )
+
+
+def test_walk_for_base_takes_a_partial_last_level() -> None:
+    bids = levels(("150", "1"), ("90", "2"))
+    fill = walk_levels_for_base(bids, Decimal("2.5"))
+
+    assert fill.insufficient_depth is False
+    assert fill.filled_base == Decimal("2.5")
+    assert fill.filled_notional == Decimal("285")
+    assert fill.vwap == Decimal("114")
+    assert fill.levels_used == 2
+
+
+def test_matched_route_uses_asymmetric_prices_on_one_base_quantity() -> None:
+    buy_fill, sell_fill = matched_route_fills(
+        levels(("100", "10")), levels(("110", "10")), Decimal("200")
+    )
+
+    assert buy_fill.filled_base == Decimal("2")
+    assert sell_fill.filled_base == Decimal("2")
+    assert buy_fill.filled_notional == Decimal("200")
+    assert sell_fill.filled_notional == Decimal("220")
+    assert buy_fill.vwap == Decimal("100")
+    assert sell_fill.vwap == Decimal("110")
+
+    buy_top, sell_top = _route_tops()
+    ledger = pricing_ledger(
+        notional=Decimal("200"),
+        buy_top=buy_top,
+        sell_top=sell_top,
+        buy_fill=buy_fill,
+        sell_fill=sell_fill,
+        buy_taker_fee_pct=Decimal("0"),
+        sell_taker_fee_pct=Decimal("0"),
+    )
+    assert ledger.top_of_book_spread_pct == Decimal("10")
+    assert ledger.gross_executable_spread_pct == Decimal("10")
+    assert ledger.depth_impact_pct == Decimal("0")
+    assert ledger.net_executable_spread_pct == Decimal("10")
+    assert ledger.insufficient_depth is False
+
+
+def test_matched_route_walks_multi_level_books_and_partial_final_levels() -> None:
+    buy_fill, sell_fill = matched_route_fills(
+        levels(("100", "1"), ("120", "2")),
+        levels(("150", "1"), ("90", "2")),
+        Decimal("200"),
+    )
+
+    acquired = Decimal(11) / Decimal(6)
+    assert buy_fill.insufficient_depth is False
+    assert sell_fill.insufficient_depth is False
+    assert buy_fill.filled_base == acquired
+    assert sell_fill.filled_base == acquired
+    assert buy_fill.filled_notional == Decimal("200")
+    assert sell_fill.filled_notional == Decimal("225")
+    assert buy_fill.levels_used == 2
+    assert sell_fill.levels_used == 2
+    assert buy_fill.vwap == Decimal(1200) / Decimal(11)
+    assert sell_fill.vwap == Decimal(1350) / Decimal(11)
+
+    buy_top, sell_top = _route_tops()
+    ledger = pricing_ledger(
+        notional=Decimal("200"),
+        buy_top=buy_top,
+        sell_top=sell_top,
+        buy_fill=buy_fill,
+        sell_fill=sell_fill,
+        buy_taker_fee_pct=Decimal("0.4"),
+        sell_taker_fee_pct=Decimal("0.6"),
+    )
+    assert ledger.gross_executable_spread_pct == Decimal("12.5")
+    assert (
+        ledger.depth_impact_pct
+        == ledger.gross_executable_spread_pct - ledger.top_of_book_spread_pct
+    )
+    assert ledger.net_executable_spread_pct is not None
+    assert (
+        ledger.fee_impact_pct
+        == ledger.net_executable_spread_pct - ledger.gross_executable_spread_pct
+    )
+    assert ledger.net_executable_spread_pct < ledger.gross_executable_spread_pct
+
+
+def test_matched_route_reports_insufficient_sell_side_depth() -> None:
+    buy_fill, sell_fill = matched_route_fills(
+        levels(("100", "5")), levels(("110", "0.5")), Decimal("200")
+    )
+
+    assert buy_fill.insufficient_depth is False
+    assert buy_fill.filled_base == Decimal("2")
+    assert sell_fill.insufficient_depth is True
+    assert sell_fill.vwap is None
+    assert sell_fill.filled_base == Decimal("0.5")
+    assert sell_fill.filled_notional == Decimal("55")
+
+    buy_top, sell_top = _route_tops()
+    ledger = pricing_ledger(
+        notional=Decimal("200"),
+        buy_top=buy_top,
+        sell_top=sell_top,
+        buy_fill=buy_fill,
+        sell_fill=sell_fill,
+        buy_taker_fee_pct=Decimal("0"),
+        sell_taker_fee_pct=Decimal("0"),
+    )
+    assert ledger.insufficient_depth is True
+    assert ledger.buy_vwap == Decimal("100")
+    assert ledger.sell_vwap is None
+    assert ledger.gross_executable_spread_pct is None
+    assert ledger.net_executable_spread_pct is None
+
+
+def test_matched_route_sell_depth_is_the_acquired_base_not_the_quote_budget() -> None:
+    # Quote-notional sell walk cannot spend 100; the acquired 0.5 base still fits.
+    cheap_sell_buy, cheap_sell_sell = matched_route_fills(
+        levels(("200", "10")), levels(("50", "1")), Decimal("100")
+    )
+    assert cheap_sell_buy.filled_base == Decimal("0.5")
+    assert cheap_sell_sell.filled_base == Decimal("0.5")
+    assert cheap_sell_sell.insufficient_depth is False
+    assert cheap_sell_sell.filled_notional == Decimal("25")
+
+    # Quote-notional sell walk can raise 200; that only sells 1 of the 4 acquired.
+    short_sell_buy, short_sell_sell = matched_route_fills(
+        levels(("50", "10")), levels(("200", "2")), Decimal("200")
+    )
+    assert short_sell_buy.filled_base == Decimal("4")
+    assert short_sell_sell.insufficient_depth is True
+    assert short_sell_sell.filled_base == Decimal("2")
+
+
+def test_sampler_route_prices_conserves_acquired_base_across_legs() -> None:
+    from arb.orderbook import OrderBookManager
+    from arb.pricing import DepthSampler
+
+    manager = OrderBookManager(max_age_seconds=1.0, clock=lambda: 0)
+    manager.apply(snapshot("gemini", [("1", "1")], [("100", "1"), ("120", "2")]))
+    manager.apply(snapshot("coinbase", [("150", "1"), ("90", "2")], [("999", "1")]))
+    sampler = DepthSampler(
+        manager,
+        [Decimal("200")],
+        {"gemini": None, "coinbase": None},
+        {"gemini": Decimal("0"), "coinbase": Decimal("0")},
+        interval_seconds=5.0,
+    )
+
+    route = next(
+        item
+        for item in sampler.route_prices("BTC-USD", 0)
+        if item.buy_exchange == "gemini" and item.sell_exchange == "coinbase"
+    )
+    ledger = route.ledger
+    buy_fill, sell_fill = matched_route_fills(
+        levels(("100", "1"), ("120", "2")),
+        levels(("150", "1"), ("90", "2")),
+        Decimal("200"),
+    )
+    assert buy_fill.filled_base == sell_fill.filled_base
+    assert ledger.buy_vwap == buy_fill.vwap
+    assert ledger.sell_vwap == sell_fill.vwap
+    assert ledger.gross_executable_spread_pct == Decimal("12.5")
+    assert ledger.notional == Decimal("200")
 
 
 # --- Properties (ARB-032) ---
@@ -172,6 +357,26 @@ def test_insufficient_depth_exactly_when_summed_depth_is_short(
     else:
         assert fill.filled_notional == wanted
         assert fill.vwap is not None
+
+
+@settings(max_examples=300)
+@given(asks=book_side, bids=book_side, wanted=notional)
+def test_matched_route_conserves_base_quantity_across_legs(
+    asks: list[PriceLevel], bids: list[PriceLevel], wanted: Decimal
+) -> None:
+    buy_fill, sell_fill = matched_route_fills(asks, list(reversed(bids)), wanted)
+    if buy_fill.insufficient_depth:
+        assert sell_fill.insufficient_depth is True
+        assert sell_fill.vwap is None
+        assert sell_fill.filled_base == Decimal(0)
+        return
+    if sell_fill.insufficient_depth:
+        assert sell_fill.vwap is None
+        assert sell_fill.filled_base < buy_fill.filled_base
+        return
+    assert buy_fill.filled_base == sell_fill.filled_base
+    assert buy_fill.filled_notional == wanted
+    assert buy_fill.vwap is not None and sell_fill.vwap is not None
 
 
 # --- Fill-rate tracker ---

@@ -75,11 +75,13 @@ EpisodeCloseReason = Literal["spread_closed", "book_ineligible", "shutdown", "or
 
 @dataclass(frozen=True)
 class PricingLedger:
-    """One route priced at a quote notional, from top of book through fees.
+    """One route priced at a quote budget, from top of book through fees.
 
-    Nullable executable fields mean one or both subscribed books could not fill
-    the requested notional. Fees remain present in that case: the schedule is a
-    configured assumption, while a price must never be fabricated from short depth.
+    The quote budget is spent on the buy venue; executable sell values are for
+    exactly the acquired base. Nullable executable fields mean the buy book
+    could not spend the budget or the sell book could not absorb that base.
+    Fees remain present in that case: the schedule is a configured assumption,
+    while a price must never be fabricated from short depth.
     """
 
     notional: Decimal

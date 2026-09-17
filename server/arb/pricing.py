@@ -9,6 +9,10 @@ Every result carries the venue's subscribed depth ceiling because fill rates
 are only comparable between books with the same cap: Binance.US snapshots are
 limited to a fixed number of levels while Coinbase and Gemini stream full
 books, so "could not fill" means different things on each.
+
+Per-side quotes still walk each book independently by quote notional. An
+executable route spends the configured quote budget on the buy venue and
+sells exactly the acquired base on the sell venue.
 """
 
 from __future__ import annotations
@@ -28,11 +32,13 @@ Side = Literal["buy", "sell"]
 
 @dataclass(frozen=True)
 class DepthFill:
-    """Outcome of walking one side of a book for one quote notional.
+    """Outcome of walking one side of a book.
 
     `vwap` is None exactly when `insufficient_depth` is True. `filled_notional`
-    and `filled_base` then describe what the book could supply; otherwise
-    `filled_notional` equals the requested notional. All arithmetic is decimal.
+    and `filled_base` then describe what the book could supply. A complete quote
+    walk spends exactly the requested quote `notional`. A complete base walk
+    fills exactly the requested base; `filled_notional` is then the quote
+    spent or received. All arithmetic is decimal.
     """
 
     notional: Decimal
@@ -43,9 +49,53 @@ class DepthFill:
     insufficient_depth: bool
 
 
+@dataclass(frozen=True)
+class _RawFill:
+    filled_notional: Fraction
+    filled_base: Fraction
+    levels_used: int
+    insufficient_depth: bool
+
+
 def _to_decimal(value: Fraction) -> Decimal:
     """One correctly rounded division; exact whenever the rational terminates."""
     return Decimal(value.numerator) / Decimal(value.denominator)
+
+
+def _walk_quote(levels: Iterable[PriceLevel], notional: Fraction) -> _RawFill:
+    remaining = notional
+    filled_base = Fraction(0)
+    levels_used = 0
+    for level in levels:
+        if level.size <= 0:
+            continue
+        price = Fraction(level.price)
+        level_notional = price * Fraction(level.size)
+        levels_used += 1
+        if level_notional >= remaining:
+            filled_base += remaining / price
+            return _RawFill(notional, filled_base, levels_used, False)
+        remaining -= level_notional
+        filled_base += Fraction(level.size)
+    return _RawFill(notional - remaining, filled_base, levels_used, True)
+
+
+def _walk_base(levels: Iterable[PriceLevel], base_qty: Fraction) -> _RawFill:
+    remaining = base_qty
+    filled_notional = Fraction(0)
+    levels_used = 0
+    for level in levels:
+        if level.size <= 0:
+            continue
+        price = Fraction(level.price)
+        size = Fraction(level.size)
+        levels_used += 1
+        if size >= remaining:
+            filled_notional += remaining * price
+            return _RawFill(filled_notional, base_qty, levels_used, False)
+        remaining -= size
+        filled_notional += price * size
+    return _RawFill(filled_notional, base_qty - remaining, levels_used, True)
 
 
 def walk_levels(levels: Iterable[PriceLevel], notional: Decimal) -> DepthFill:
@@ -59,34 +109,120 @@ def walk_levels(levels: Iterable[PriceLevel], notional: Decimal) -> DepthFill:
     """
     if notional <= 0:
         raise ValueError("notional must be positive")
-    remaining = Fraction(notional)
-    filled_base = Fraction(0)
-    levels_used = 0
-    for level in levels:
-        if level.size <= 0:
-            continue
-        price = Fraction(level.price)
-        level_notional = price * Fraction(level.size)
-        levels_used += 1
-        if level_notional >= remaining:
-            filled_base += remaining / price
-            return DepthFill(
-                notional=notional,
-                vwap=_to_decimal(Fraction(notional) / filled_base),
-                filled_notional=notional,
-                filled_base=_to_decimal(filled_base),
-                levels_used=levels_used,
-                insufficient_depth=False,
-            )
-        remaining -= level_notional
-        filled_base += Fraction(level.size)
+    raw = _walk_quote(levels, Fraction(notional))
+    if raw.insufficient_depth:
+        return DepthFill(
+            notional=notional,
+            vwap=None,
+            filled_notional=_to_decimal(raw.filled_notional),
+            filled_base=_to_decimal(raw.filled_base),
+            levels_used=raw.levels_used,
+            insufficient_depth=True,
+        )
     return DepthFill(
         notional=notional,
-        vwap=None,
-        filled_notional=_to_decimal(Fraction(notional) - remaining),
-        filled_base=_to_decimal(filled_base),
-        levels_used=levels_used,
-        insufficient_depth=True,
+        vwap=_to_decimal(raw.filled_notional / raw.filled_base),
+        filled_notional=notional,
+        filled_base=_to_decimal(raw.filled_base),
+        levels_used=raw.levels_used,
+        insufficient_depth=False,
+    )
+
+
+def walk_levels_for_base(levels: Iterable[PriceLevel], base_qty: Decimal) -> DepthFill:
+    """Consume `levels` in the order given until `base_qty` of base is filled.
+
+    Callers pass bids descending for a sell. The last level is taken partially
+    so the fill sells exactly `base_qty`. Quote proceeds are `filled_notional`.
+    """
+    if base_qty <= 0:
+        raise ValueError("base quantity must be positive")
+    raw = _walk_base(levels, Fraction(base_qty))
+    filled_notional = _to_decimal(raw.filled_notional)
+    if raw.insufficient_depth:
+        return DepthFill(
+            notional=filled_notional,
+            vwap=None,
+            filled_notional=filled_notional,
+            filled_base=_to_decimal(raw.filled_base),
+            levels_used=raw.levels_used,
+            insufficient_depth=True,
+        )
+    return DepthFill(
+        notional=filled_notional,
+        vwap=_to_decimal(raw.filled_notional / raw.filled_base),
+        filled_notional=filled_notional,
+        filled_base=_to_decimal(raw.filled_base),
+        levels_used=raw.levels_used,
+        insufficient_depth=False,
+    )
+
+
+def matched_route_fills(
+    asks: Iterable[PriceLevel],
+    bids: Iterable[PriceLevel],
+    quote_budget: Decimal,
+) -> tuple[DepthFill, DepthFill]:
+    """Buy `quote_budget` of quote on `asks`, then sell exactly that acquired base on `bids`.
+
+    One executable route is one matched quantity. If the buy leg cannot spend
+    the budget, the sell leg is not priced. If the buy leg fills, sell-side
+    depth is sufficient only when it can absorb that same base quantity.
+    """
+    if quote_budget <= 0:
+        raise ValueError("notional must be positive")
+    buy_raw = _walk_quote(asks, Fraction(quote_budget))
+    if buy_raw.insufficient_depth:
+        return (
+            DepthFill(
+                notional=quote_budget,
+                vwap=None,
+                filled_notional=_to_decimal(buy_raw.filled_notional),
+                filled_base=_to_decimal(buy_raw.filled_base),
+                levels_used=buy_raw.levels_used,
+                insufficient_depth=True,
+            ),
+            DepthFill(
+                notional=quote_budget,
+                vwap=None,
+                filled_notional=Decimal(0),
+                filled_base=Decimal(0),
+                levels_used=0,
+                insufficient_depth=True,
+            ),
+        )
+    sell_raw = _walk_base(bids, buy_raw.filled_base)
+    filled_base = _to_decimal(buy_raw.filled_base)
+    buy_fill = DepthFill(
+        notional=quote_budget,
+        vwap=_to_decimal(buy_raw.filled_notional / buy_raw.filled_base),
+        filled_notional=quote_budget,
+        filled_base=filled_base,
+        levels_used=buy_raw.levels_used,
+        insufficient_depth=False,
+    )
+    if sell_raw.insufficient_depth:
+        return (
+            buy_fill,
+            DepthFill(
+                notional=quote_budget,
+                vwap=None,
+                filled_notional=_to_decimal(sell_raw.filled_notional),
+                filled_base=_to_decimal(sell_raw.filled_base),
+                levels_used=sell_raw.levels_used,
+                insufficient_depth=True,
+            ),
+        )
+    return (
+        buy_fill,
+        DepthFill(
+            notional=quote_budget,
+            vwap=_to_decimal(sell_raw.filled_notional / buy_raw.filled_base),
+            filled_notional=_to_decimal(sell_raw.filled_notional),
+            filled_base=filled_base,
+            levels_used=sell_raw.levels_used,
+            insufficient_depth=False,
+        ),
     )
 
 
@@ -142,7 +278,12 @@ def pricing_ledger(
     buy_taker_fee_pct: Decimal,
     sell_taker_fee_pct: Decimal,
 ) -> PricingLedger:
-    """Build the explicit top-of-book -> depth -> fees -> net ledger."""
+    """Build the explicit top-of-book -> depth -> fees -> net ledger.
+
+    Gross and net executable spreads are computed from matched-route proceeds
+    and cost (the quote budget spent and the quote received for the same base).
+    Buy and sell VWAPs remain the depth-executable prices for that quantity.
+    """
     top_spread = (sell_top.best_bid_price - buy_top.best_ask_price) / buy_top.best_ask_price * 100
     if buy_fill.vwap is None or sell_fill.vwap is None:
         return PricingLedger(
@@ -158,13 +299,15 @@ def pricing_ledger(
             net_executable_spread_pct=None,
             insufficient_depth=True,
         )
-    gross = (sell_fill.vwap - buy_fill.vwap) / buy_fill.vwap * 100
+    cost = buy_fill.filled_notional
+    proceeds = sell_fill.filled_notional
+    gross = (proceeds - cost) / cost * 100
     net = (
         (
-            sell_fill.vwap * (Decimal(1) - sell_taker_fee_pct / 100)
-            - buy_fill.vwap * (Decimal(1) + buy_taker_fee_pct / 100)
+            proceeds * (Decimal(1) - sell_taker_fee_pct / 100)
+            - cost * (Decimal(1) + buy_taker_fee_pct / 100)
         )
-        / buy_fill.vwap
+        / cost
         * 100
     )
     return PricingLedger(
@@ -309,20 +452,26 @@ class DepthSampler:
     def route_prices(
         self, pair: str, now_monotonic_ns: int | None = None
     ) -> list[ExecutableRoutePrice]:
-        """Price every directed eligible route at each configured notional."""
-        by_exchange: dict[str, dict[tuple[Decimal, Side], DepthQuote]] = {}
+        """Price every directed eligible route at each configured quote budget.
+
+        Per-side quotes still walk each book by quote notional independently.
+        A route spends that budget on the buy venue and sells exactly the
+        acquired base on the sell venue, so proceeds, spreads, fees, and depth
+        sufficiency describe one matched quantity.
+        """
+        books: dict[str, tuple[list[PriceLevel], list[PriceLevel]]] = {}
         tops: dict[str, TopOfBook] = {}
         for exchange, known_pair in self.book_manager.known_pairs():
             if known_pair != pair:
                 continue
-            quotes = self.quote(exchange, pair, now_monotonic_ns)
+            sides = self.book_manager.depth_levels(exchange, pair, now_monotonic_ns)
             top = self.book_manager.top_of_book(exchange, pair)
-            if quotes and top is not None:
-                by_exchange[exchange] = {(q.fill.notional, q.side): q for q in quotes}
+            if sides is not None and top is not None:
+                books[exchange] = sides
                 tops[exchange] = top
         results: list[ExecutableRoutePrice] = []
-        for buy_exchange in sorted(by_exchange):
-            for sell_exchange in sorted(by_exchange):
+        for buy_exchange in sorted(books):
+            for sell_exchange in sorted(books):
                 if buy_exchange == sell_exchange:
                     continue
                 if (
@@ -331,8 +480,9 @@ class DepthSampler:
                 ):
                     continue
                 for notional in self.notionals:
-                    buy = by_exchange[buy_exchange][(notional, "buy")]
-                    sell = by_exchange[sell_exchange][(notional, "sell")]
+                    buy_fill, sell_fill = matched_route_fills(
+                        books[buy_exchange][1], books[sell_exchange][0], notional
+                    )
                     results.append(
                         ExecutableRoutePrice(
                             pair=pair,
@@ -342,8 +492,8 @@ class DepthSampler:
                                 notional=notional,
                                 buy_top=tops[buy_exchange],
                                 sell_top=tops[sell_exchange],
-                                buy_fill=buy.fill,
-                                sell_fill=sell.fill,
+                                buy_fill=buy_fill,
+                                sell_fill=sell_fill,
                                 buy_taker_fee_pct=self.taker_fees_pct[buy_exchange],
                                 sell_taker_fee_pct=self.taker_fees_pct[sell_exchange],
                             ),
