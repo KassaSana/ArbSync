@@ -1,38 +1,48 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import type { Opportunity } from "../api/client";
 import { OpportunityFeed } from "./OpportunityFeed";
 
+function episode(overrides: Partial<Opportunity>): Opportunity {
+  return {
+    start_ns: "1",
+    end_ns: null,
+    duration_ns: null,
+    pair: "BTC-USD",
+    quote_asset: "USD",
+    buy_exchange: "gemini",
+    sell_exchange: "coinbase",
+    buy_price: "100",
+    sell_price: "101",
+    spread_pct: "1",
+    max_size: "1",
+    theoretical_profit: "2.5",
+    peak_spread_pct: "1",
+    peak_size: "1",
+    peak_profit: "2.5",
+    close_spread_pct: null,
+    close_reason: null,
+    ...overrides,
+  };
+}
+
 describe("opportunity feed", () => {
-  it("shows each opportunity in its own quote asset", () => {
+  it("shows each episode's peak profit in its own quote asset", () => {
     render(
       <OpportunityFeed
         opportunities={{
           state: "ready",
           data: [
-            {
-              timestamp_ns: "1",
-              pair: "BTC-USD",
-              quote_asset: "USD",
-              buy_exchange: "gemini",
-              sell_exchange: "coinbase",
-              buy_price: "100",
-              sell_price: "101",
-              spread_pct: "1",
-              max_size: "1",
-              theoretical_profit: "2.5",
-            },
-            {
-              timestamp_ns: "2",
+            episode({ theoretical_profit: "1", peak_profit: "2.5" }),
+            episode({
+              start_ns: "2",
               pair: "BTC-USDT",
               quote_asset: "USDT",
               buy_exchange: "binance",
               sell_exchange: "other",
-              buy_price: "100",
-              sell_price: "101",
-              spread_pct: "1",
-              max_size: "1",
               theoretical_profit: "3.5",
-            },
+              peak_profit: "3.5",
+            }),
           ],
         }}
         onRetry={() => undefined}
@@ -40,8 +50,34 @@ describe("opportunity feed", () => {
     );
 
     // USD and USDT are distinct quote assets; neither total may be rendered in
-    // the other's units.
+    // the other's units, and the peak is what is shown, not the open value.
     expect(screen.getByText("$2.50")).toBeInTheDocument();
+    expect(screen.queryByText("$1.00")).not.toBeInTheDocument();
     expect(screen.getByText("3.50 USDT")).toBeInTheDocument();
+    expect(screen.getByText("2 episodes")).toBeInTheDocument();
+  });
+
+  it("shows an open episode as open and a closed one by its lifetime", () => {
+    render(
+      <OpportunityFeed
+        opportunities={{
+          state: "ready",
+          data: [
+            episode({ start_ns: "2" }),
+            episode({
+              start_ns: "1",
+              end_ns: "4500000001",
+              duration_ns: "4500000000",
+              close_spread_pct: "0",
+              close_reason: "book_ineligible",
+            }),
+          ],
+        }}
+        onRetry={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("open")).toBeInTheDocument();
+    expect(screen.getByText("4.5s")).toHaveAttribute("title", "book dropped");
   });
 });

@@ -19,6 +19,8 @@ const overview: SystemOverview = {
   all_time_count: 12_345,
   all_time_max_spread_pct: "1.25",
   all_time_peak_minute: { minute_start_ns: "1700000000000000000", count: 42 },
+  open_count: 1,
+  all_time_lifetime: null,
 };
 
 const windowStats: WindowStats = {
@@ -29,6 +31,7 @@ const windowStats: WindowStats = {
   theoretical_profit_by_quote: { USD: "5" },
   top_pair: "ETH-USD",
   peak_minute: null,
+  lifetime: { closed_count: 12, p50_seconds: 2.5, p90_seconds: 75, max_seconds: 3_700 },
 };
 
 const timeseries: Timeseries = { window: "1h", bucket_seconds: 60, points: [] };
@@ -52,6 +55,9 @@ describe("statistics page", () => {
     expect(screen.getByText("1.250%")).toBeInTheDocument();
     expect(screen.getByText("ETH-USD")).toBeInTheDocument();
     expect(screen.getByText("17")).toBeInTheDocument();
+    // Lifetime p50 / p90 from the window stats, with max and closed count beneath.
+    expect(screen.getByText("2.5s / 1m")).toBeInTheDocument();
+    expect(screen.getByText("max 1h over 12 closed")).toBeInTheDocument();
     expect(screen.getByText("No opportunities recorded in this window")).toBeInTheDocument();
     expect(api.fetchSystemStats).toHaveBeenCalledWith("1h");
     expect(api.fetchSystemTimeseries).toHaveBeenCalledWith("1h", 60);

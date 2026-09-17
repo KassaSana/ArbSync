@@ -1,5 +1,16 @@
+export type EpisodeCloseReason = "spread_closed" | "book_ineligible" | "shutdown";
+
+/**
+ * One dislocation from appearance to disappearance on a (pair, buy, sell)
+ * route. `start_ns` identifies it; a close for the same episode arrives as a
+ * second message with the same `start_ns` and `end_ns` filled in. The plain
+ * price, spread, size and profit fields are the values at open; `peak_*` are
+ * the widest spread seen and the size and profit at that moment.
+ */
 export type Opportunity = {
-  timestamp_ns: string;
+  start_ns: string;
+  end_ns: string | null;
+  duration_ns: string | null;
   pair: string;
   quote_asset: string;
   buy_exchange: string;
@@ -9,6 +20,18 @@ export type Opportunity = {
   spread_pct: string;
   max_size: string;
   theoretical_profit: string;
+  peak_spread_pct: string;
+  peak_size: string;
+  peak_profit: string;
+  close_spread_pct: string | null;
+  close_reason: EpisodeCloseReason | null;
+};
+
+export type Lifetime = {
+  closed_count: number;
+  p50_seconds: number;
+  p90_seconds: number;
+  max_seconds: number;
 };
 
 export type PairRecord = { exchange: string; pair: string };
@@ -61,6 +84,8 @@ export type SystemOverview = {
   all_time_count: number;
   all_time_max_spread_pct: string;
   all_time_peak_minute: PeakMinute | null;
+  open_count: number;
+  all_time_lifetime: Lifetime | null;
 };
 
 export type WindowStats = {
@@ -71,6 +96,7 @@ export type WindowStats = {
   theoretical_profit_by_quote: Record<string, string>;
   top_pair: string | null;
   peak_minute: PeakMinute | null;
+  lifetime: Lifetime | null;
 };
 
 export type TimeseriesPoint = {
@@ -196,10 +222,40 @@ function decimalRecord(value: unknown, location: string): Record<string, string>
   );
 }
 
+const CLOSE_REASONS: readonly EpisodeCloseReason[] = [
+  "spread_closed",
+  "book_ineligible",
+  "shutdown",
+];
+
+function closeReason(value: unknown, location: string): EpisodeCloseReason {
+  const result = text(value, location);
+  if (!(CLOSE_REASONS as readonly string[]).includes(result)) {
+    throw new PayloadValidationError(location, `one of ${CLOSE_REASONS.join(", ")}`);
+  }
+  return result as EpisodeCloseReason;
+}
+
+/** A signed decimal: the spread at close may be negative. */
+function signedDecimal(value: unknown, location: string): string {
+  return decimal(value, location);
+}
+
 export function decodeOpportunity(value: unknown, location = "opportunity"): Opportunity {
   const source = object(value, location);
+  const endNs = nullable(field(source, "end_ns", location), `${location}.end_ns`, nanoseconds);
+  const durationNs = nullable(
+    field(source, "duration_ns", location),
+    `${location}.duration_ns`,
+    nanoseconds,
+  );
+  if ((endNs === null) !== (durationNs === null)) {
+    throw new PayloadValidationError(location, "closed with both end_ns and duration_ns or open");
+  }
   return {
-    timestamp_ns: nanoseconds(field(source, "timestamp_ns", location), `${location}.timestamp_ns`),
+    start_ns: nanoseconds(field(source, "start_ns", location), `${location}.start_ns`),
+    end_ns: endNs,
+    duration_ns: durationNs,
     pair: text(field(source, "pair", location), `${location}.pair`),
     quote_asset: text(field(source, "quote_asset", location), `${location}.quote_asset`),
     buy_exchange: text(field(source, "buy_exchange", location), `${location}.buy_exchange`),
@@ -211,6 +267,44 @@ export function decodeOpportunity(value: unknown, location = "opportunity"): Opp
     theoretical_profit: decimal(
       field(source, "theoretical_profit", location),
       `${location}.theoretical_profit`,
+    ),
+    peak_spread_pct: decimal(
+      field(source, "peak_spread_pct", location),
+      `${location}.peak_spread_pct`,
+    ),
+    peak_size: decimal(field(source, "peak_size", location), `${location}.peak_size`),
+    peak_profit: decimal(field(source, "peak_profit", location), `${location}.peak_profit`),
+    close_spread_pct: nullable(
+      field(source, "close_spread_pct", location),
+      `${location}.close_spread_pct`,
+      signedDecimal,
+    ),
+    close_reason: nullable(
+      field(source, "close_reason", location),
+      `${location}.close_reason`,
+      closeReason,
+    ),
+  };
+}
+
+export function decodeLifetime(value: unknown, location = "lifetime"): Lifetime {
+  const source = object(value, location);
+  return {
+    closed_count: positiveInteger(
+      field(source, "closed_count", location),
+      `${location}.closed_count`,
+    ),
+    p50_seconds: nonnegativeNumber(
+      field(source, "p50_seconds", location),
+      `${location}.p50_seconds`,
+    ),
+    p90_seconds: nonnegativeNumber(
+      field(source, "p90_seconds", location),
+      `${location}.p90_seconds`,
+    ),
+    max_seconds: nonnegativeNumber(
+      field(source, "max_seconds", location),
+      `${location}.max_seconds`,
     ),
   };
 }
@@ -336,6 +430,15 @@ export function decodeSystemOverview(
       `${location}.all_time_peak_minute`,
       decodePeakMinute,
     ),
+    open_count: nonnegativeInteger(
+      field(source, "open_count", location),
+      `${location}.open_count`,
+    ),
+    all_time_lifetime: nullable(
+      field(source, "all_time_lifetime", location),
+      `${location}.all_time_lifetime`,
+      decodeLifetime,
+    ),
   };
 }
 
@@ -362,6 +465,7 @@ export function decodeWindowStats(value: unknown, location = "window_stats"): Wi
       `${location}.peak_minute`,
       decodePeakMinute,
     ),
+    lifetime: nullable(field(source, "lifetime", location), `${location}.lifetime`, decodeLifetime),
   };
 }
 

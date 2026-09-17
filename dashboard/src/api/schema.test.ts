@@ -13,7 +13,9 @@ import {
 } from "./schema";
 
 const opportunity = {
-  timestamp_ns: "1720000000000000000",
+  start_ns: "1720000000000000000",
+  end_ns: null,
+  duration_ns: null,
   pair: "BTC-USD",
   quote_asset: "USD",
   buy_exchange: "gemini",
@@ -23,7 +25,22 @@ const opportunity = {
   spread_pct: ".001",
   max_size: "1",
   theoretical_profit: "+7.50",
+  peak_spread_pct: ".002",
+  peak_size: "0.5",
+  peak_profit: "7.50",
+  close_spread_pct: null,
+  close_reason: null,
 };
+
+const closedOpportunity = {
+  ...opportunity,
+  end_ns: "1720000003000000000",
+  duration_ns: "3000000000",
+  close_spread_pct: "-0.4",
+  close_reason: "spread_closed",
+};
+
+const lifetime = { closed_count: 3, p50_seconds: 4, p90_seconds: 30.5, max_seconds: 30.5 };
 
 const book = {
   exchange: "gemini",
@@ -50,7 +67,7 @@ const status = {
 
 describe("network payload schemas", () => {
   it.each([
-    ["opportunities", decodeOpportunities, [opportunity]],
+    ["opportunities", decodeOpportunities, [opportunity, closedOpportunity]],
     ["pairs", decodePairs, [{ exchange: "gemini", pair: "BTC-USD" }]],
     [
       "statistics",
@@ -81,6 +98,8 @@ describe("network payload schemas", () => {
         all_time_count: 1,
         all_time_max_spread_pct: "0.1",
         all_time_peak_minute: { minute_start_ns: "1720000000000000000", count: 1 },
+        open_count: 2,
+        all_time_lifetime: lifetime,
       },
     ],
     [
@@ -94,6 +113,7 @@ describe("network payload schemas", () => {
         theoretical_profit_by_quote: { USD: "2.5" },
         top_pair: "BTC-USD",
         peak_minute: null,
+        lifetime: null,
       },
     ],
     [
@@ -139,7 +159,23 @@ describe("network payload schemas", () => {
     ],
     [
       "invalid nanosecond timestamps",
-      { type: "opportunity", stream_sequence: 1, payload: { ...opportunity, timestamp_ns: "1.5" } },
+      { type: "opportunity", stream_sequence: 1, payload: { ...opportunity, start_ns: "1.5" } },
+    ],
+    [
+      "an episode with an end but no duration",
+      {
+        type: "opportunity",
+        stream_sequence: 1,
+        payload: { ...closedOpportunity, duration_ns: null },
+      },
+    ],
+    [
+      "an unknown close reason",
+      {
+        type: "opportunity",
+        stream_sequence: 1,
+        payload: { ...closedOpportunity, close_reason: "evaporated" },
+      },
     ],
     ["unknown message types", { type: "unknown", stream_sequence: 1, payload: {} }],
   ])("rejects %s", (_name, frame) => {

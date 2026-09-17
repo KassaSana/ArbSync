@@ -45,6 +45,28 @@ function book(exchange: string, price: string, sequence: number) {
   };
 }
 
+function episode(startNs: string, closed = false) {
+  return {
+    start_ns: startNs,
+    end_ns: closed ? String(BigInt(startNs) + 2_000_000_000n) : null,
+    duration_ns: closed ? "2000000000" : null,
+    pair: "BTC-USD",
+    quote_asset: "USD",
+    buy_exchange: "gemini",
+    sell_exchange: "coinbase",
+    buy_price: "100",
+    sell_price: "101",
+    spread_pct: "1",
+    max_size: "1",
+    theoretical_profit: "1",
+    peak_spread_pct: "1",
+    peak_size: "1",
+    peak_profit: "1",
+    close_spread_pct: closed ? "0" : null,
+    close_reason: closed ? "spread_closed" : null,
+  };
+}
+
 function status(exchange: string, eligible: boolean) {
   return {
     exchange,
@@ -71,6 +93,13 @@ function Probe() {
         {Object.keys(live.bookStatuses).sort().join(",") || "(none)"}
       </span>
       <span data-testid="connection">{live.status}</span>
+      <span data-testid="episodes">
+        {live.opportunities.state === "ready"
+          ? live.opportunities.data
+              .map((o) => `${o.start_ns}:${o.close_reason ?? "open"}`)
+              .join(",") || "(empty)"
+          : live.opportunities.state}
+      </span>
       <span data-testid="invalid-frames">{live.invalidFrameCount}</span>
       <span data-testid="pairs">
         {live.pairs.state === "ready"
@@ -153,6 +182,34 @@ describe("live state", () => {
     // Statuses are a complete account of tracked books, so coinbase stays
     // listed - as ineligible.
     expect(screen.getByTestId("statuses").textContent).toBe("coinbase:BTC-USD,gemini:BTC-USD");
+  });
+
+  it("replaces an open episode with its close instead of adding a row", async () => {
+    render(
+      <LiveProvider>
+        <Probe />
+      </LiveProvider>,
+    );
+    const socket = await socketCount(1);
+    socket.onopen?.();
+    socket.emit({
+      type: "state_snapshot",
+      stream_sequence: 1,
+      payload: { books: [], statuses: [] },
+    });
+
+    socket.emit({ type: "opportunity", stream_sequence: 2, payload: episode("1000") });
+    socket.emit({ type: "opportunity", stream_sequence: 3, payload: episode("2000") });
+    await waitFor(() =>
+      expect(screen.getByTestId("episodes").textContent).toBe("2000:open,1000:open"),
+    );
+
+    // The close carries the same identity, so it takes the open row's place;
+    // the feed stays newest-first by start time, not by arrival.
+    socket.emit({ type: "opportunity", stream_sequence: 4, payload: episode("1000", true) });
+    await waitFor(() =>
+      expect(screen.getByTestId("episodes").textContent).toBe("2000:open,1000:spread_closed"),
+    );
   });
 
   it("still merges ordinary incremental updates", async () => {

@@ -72,9 +72,11 @@ function bookKey(entry: { exchange: string; pair: string }): string {
   return `${entry.exchange}:${entry.pair}`;
 }
 
+// An episode's close arrives as a second message with the same identity, so
+// keying on it makes the close replace the open row instead of adding one.
 function opportunityKey(opportunity: Opportunity): string {
   return [
-    opportunity.timestamp_ns,
+    opportunity.start_ns,
     opportunity.pair,
     opportunity.buy_exchange,
     opportunity.sell_exchange,
@@ -88,8 +90,8 @@ function mergeOpportunities(current: Opportunity[], incoming: Opportunity[]): Op
   }
   return [...unique.values()]
     .sort((left, right) => {
-      const leftTimestamp = BigInt(left.timestamp_ns);
-      const rightTimestamp = BigInt(right.timestamp_ns);
+      const leftTimestamp = BigInt(left.start_ns);
+      const rightTimestamp = BigInt(right.start_ns);
       if (leftTimestamp === rightTimestamp) {
         return 0;
       }

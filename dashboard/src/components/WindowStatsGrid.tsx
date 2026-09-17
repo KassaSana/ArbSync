@@ -1,6 +1,6 @@
 import { WindowStats } from "../api/client";
 import { Async } from "../lib/async";
-import { count, DASH, dateTime, quoteAmount, spreadPct } from "../lib/format";
+import { age, count, DASH, dateTime, quoteAmount, spreadPct } from "../lib/format";
 import { Panel } from "./Panel";
 import { Placeholder } from "./Placeholder";
 import { Stat } from "./Stat";
@@ -44,11 +44,12 @@ export function WindowStatsGrid({ stats, windowLabel, onRetry }: Props) {
   }
 
   const peak = data.peak_minute;
+  const lifetime = data.lifetime;
 
   return (
     <Panel className="overflow-hidden">
       <div className="grid gap-px bg-line-soft sm:grid-cols-2 lg:grid-cols-3">
-        <Stat label="Opportunities" value={count(data.count)} />
+        <Stat label="Episodes" value={count(data.count)} />
         <Stat label="Top pair" value={data.top_pair ?? DASH} />
         <Stat label="Max spread" value={spreadPct(data.max_spread_pct)} />
         <Stat label="Mean spread" value={spreadPct(data.mean_spread_pct)} />
@@ -63,6 +64,19 @@ export function WindowStatsGrid({ stats, windowLabel, onRetry }: Props) {
           label="Peak minute"
           value={peak === null ? DASH : count(peak.count)}
           sub={peak === null ? "Not enough history yet" : dateTime(peak.minute_start_ns)}
+        />
+        <Stat
+          label="Lifetime p50 / p90"
+          value={
+            lifetime === null
+              ? DASH
+              : `${age(lifetime.p50_seconds * 1000)} / ${age(lifetime.p90_seconds * 1000)}`
+          }
+          sub={
+            lifetime === null
+              ? "No episode has closed yet"
+              : `max ${age(lifetime.max_seconds * 1000)} over ${count(lifetime.closed_count)} closed`
+          }
         />
       </div>
     </Panel>

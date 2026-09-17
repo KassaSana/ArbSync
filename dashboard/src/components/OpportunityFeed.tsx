@@ -1,6 +1,6 @@
 import { Opportunity } from "../api/client";
 import { Async } from "../lib/async";
-import { eventTime, quoteAmount, spreadPct } from "../lib/format";
+import { age, eventTime, nsToMs, quoteAmount, spreadPct } from "../lib/format";
 import { Panel } from "./Panel";
 import { Placeholder } from "./Placeholder";
 
@@ -23,6 +23,19 @@ function spreadTone(value: string): string {
   return "text-ink-2";
 }
 
+function lifetime(row: Opportunity): string {
+  if (row.duration_ns === null) {
+    return "open";
+  }
+  return age(nsToMs(row.duration_ns));
+}
+
+const CLOSE_LABEL: Record<NonNullable<Opportunity["close_reason"]>, string> = {
+  spread_closed: "spread closed",
+  book_ineligible: "book dropped",
+  shutdown: "shutdown",
+};
+
 export function OpportunityFeed({ opportunities, onRetry }: Props) {
   if (opportunities.state === "failed") {
     return (
@@ -40,14 +53,15 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
   return (
     <Panel
       title="Recent opportunities"
-      meta={opportunities.state === "loading" ? "Loading" : `${rows.length} detected`}
+      meta={opportunities.state === "loading" ? "Loading" : `${rows.length} episodes`}
       className="overflow-hidden"
     >
       <div className="max-h-[28rem] overflow-y-auto">
         <table className="min-w-full border-collapse text-xs">
           <caption className="sr-only">
-            Most recent theoretical arbitrage opportunities, newest first, with the venue
-            to buy on, the venue to sell on, the spread and the theoretical profit.
+            Most recent theoretical arbitrage episodes, newest first, with the venue to
+            buy on, the venue to sell on, the widest spread seen, the theoretical profit at
+            that moment and how long the spread lasted.
           </caption>
           <thead className="sticky top-0 bg-panel">
             <tr className="border-b border-line-soft text-left text-micro text-ink-3">
@@ -61,24 +75,27 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
                 Route
               </th>
               <th scope="col" className="px-4 py-2 text-right font-normal">
-                Spread
+                Peak spread
               </th>
               <th scope="col" className="px-4 py-2 text-right font-normal">
-                Profit
+                Peak profit
+              </th>
+              <th scope="col" className="px-4 py-2 text-right font-normal">
+                Lifetime
               </th>
             </tr>
           </thead>
           <tbody>
             {opportunities.state === "loading" ? (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-ink-3">
+                <td colSpan={6} className="px-4 py-6 text-ink-3">
                   Loading recent opportunities.
                 </td>
               </tr>
             ) : null}
             {opportunities.state === "ready" && rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-ink-3">
+                <td colSpan={6} className="px-4 py-6 text-ink-3">
                   No opportunities detected yet. Spreads this tight are the normal state
                   for liquid pairs.
                 </td>
@@ -86,10 +103,10 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
             ) : null}
             {rows.map((row) => (
               <tr
-                key={`${row.timestamp_ns}-${row.buy_exchange}-${row.sell_exchange}-${row.pair}`}
+                key={`${row.start_ns}-${row.buy_exchange}-${row.sell_exchange}-${row.pair}`}
                 className="border-b border-line-soft/60 last:border-0"
               >
-                <td className="num px-4 py-1.5 text-ink-3">{eventTime(row.timestamp_ns)}</td>
+                <td className="num px-4 py-1.5 text-ink-3">{eventTime(row.start_ns)}</td>
                 <th scope="row" className="px-4 py-1.5 text-left font-medium text-ink">
                   {row.pair}
                 </th>
@@ -97,11 +114,19 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
                   {row.buy_exchange} <span className="text-ink-3">&rarr;</span>{" "}
                   {row.sell_exchange}
                 </td>
-                <td className={`num px-4 py-1.5 text-right ${spreadTone(row.spread_pct)}`}>
-                  {spreadPct(row.spread_pct)}
+                <td className={`num px-4 py-1.5 text-right ${spreadTone(row.peak_spread_pct)}`}>
+                  {spreadPct(row.peak_spread_pct)}
                 </td>
                 <td className="num px-4 py-1.5 text-right text-ink-2">
-                  {quoteAmount(row.theoretical_profit, row.quote_asset)}
+                  {quoteAmount(row.peak_profit, row.quote_asset)}
+                </td>
+                <td
+                  className={`num px-4 py-1.5 text-right ${
+                    row.close_reason === null ? "text-signal" : "text-ink-3"
+                  }`}
+                  title={row.close_reason === null ? "Still open" : CLOSE_LABEL[row.close_reason]}
+                >
+                  {lifetime(row)}
                 </td>
               </tr>
             ))}
