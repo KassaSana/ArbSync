@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Independent read-only review of a finished diff against ArbSync's architectural invariants. Use after substantial changes, before commit. Returns findings, not fixes.
+description: Independent read-only review of a finished diff against ArbSync's architectural invariants. Use after substantial changes, on an uncommitted diff or a just-created commit. Returns findings, not fixes.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -10,7 +10,7 @@ Treat every design choice as unjustified until the code justifies it. Do not mod
 
 Start by reading `AGENTS.md` (architectural invariants) and, if the diff touches
 `server/arb/adapters/` or sequence handling, `docs/RESYNC.md`. Then read the diff
-(`git diff`, `git diff --cached`, or the range you were given) and every file it touches
+(`git diff`, `git diff --cached`, `git show <sha>`, or the range you were given) and every file it touches
 in full, not just the hunks.
 
 ## Checklist
