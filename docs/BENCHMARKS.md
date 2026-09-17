@@ -14,7 +14,7 @@ Command:
 uv run python tools/benchmark.py
 ```
 
-Current output:
+Committed September 8 baseline output (before episode tracking and depth/fee ledgers):
 
 ```text
 iterations=100000
@@ -35,7 +35,7 @@ Command:
 uv run python tools/bench_e2e.py --iterations 10000
 ```
 
-Current output:
+Committed September 8 baseline output (before episode tracking and depth/fee ledgers):
 
 ```text
 iterations=10000
@@ -52,6 +52,7 @@ Notes:
 - these numbers are measured under synthetic local load, not against the live internet
 - the end-to-end benchmark uses an in-process synthetic websocket server
 - the detector microbenchmark is not a valid claim for full pipeline throughput
+- these committed figures do not measure the current episode-ledger computation path
 
 Raw persisted results live in
 [`../artifacts/benchmarks/results.json`](../artifacts/benchmarks/results.json).

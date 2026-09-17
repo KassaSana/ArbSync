@@ -15,9 +15,11 @@ observed storage rates were approximately 23, 189, and 862 rows/s respectively.
 These short, deliberately opportunity-heavy synthetic runs are planning examples;
 their old harness predates the quote-currency correction and is not current live evidence.
 
-Those runs predate episodes (schema version 3), which store one row per dislocation
+Those runs predate episodes (introduced in schema version 3), which store one row per dislocation
 rather than one per book update while it persists; the four-hour soak's 246 rows would
 have been 108 episodes, and the per-row size grew by the peak and close columns.
+Schema version 4 additionally stores one JSON pricing-ledger document per episode, so
+current row sizes can be larger than these pre-ledger estimates.
 The files used roughly 139–167 bytes per canonical row including indexes and the
 short-run rollups. At a sustained 189 rows/s, 150 bytes/row suggests about 2.28 GiB/day;
 at 862 rows/s, about 10.40 GiB/day. Decimal string lengths, pair distribution, free
@@ -77,8 +79,9 @@ time and acquire locks, so do not run it automatically on the market-data path.
 
 ## Migration and restore
 
-The pruner requires schema version 3 and never migrates a database. Application startup
-owns migrations. The episode migration (version 3) discards per-update opportunity rows,
+The pruner requires the current schema version 4 and never migrates a database. Application
+startup owns migrations. Version 4 adds the exact-string depth/fee pricing-ledger document
+to version 3 episode rows. The episode migration (version 3) discards per-update opportunity rows,
 and the earlier quote-currency migration discarded conflated USD/USDT history; back up
 before upgrading if that historical data must be retained for investigation. Startup also
 marks episodes a previous process left open as `orphaned`: they keep their count but

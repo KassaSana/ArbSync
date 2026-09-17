@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1500" height="780" viewBox="0 0 1500 780" role="img" aria-labelledby="title description">
   <title id="title">ArbSync architecture</title>
-  <desc id="description">Public exchange feeds pass through exchange adapters, the canonical order-book eligibility gate, and theoretical arbitrage detection. Bounded persistence and API delivery feed SQLite and the React dashboard.</desc>
+  <desc id="description">Public exchange feeds pass through exchange adapters, the canonical order-book eligibility gate, theoretical arbitrage detection, and explicit depth and fee pricing. Bounded persistence and API delivery feed SQLite and the React dashboard.</desc>
 
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
@@ -25,7 +25,7 @@
   <rect width="1500" height="780" fill="#ffffff"/>
 
   <text x="48" y="58" class="title">ArbSync data flow</text>
-  <text x="48" y="86" class="small">trusted books in memory · theoretical opportunities only</text>
+  <text x="48" y="86" class="small">trusted books in memory · theoretical detection · depth and fee ledgers</text>
 
   <!-- Public exchange feeds -->
   <path class="box" d="M48 145 C103 142 226 147 280 144 L282 426 C224 430 105 425 50 429 Z"/>
@@ -67,7 +67,7 @@
   <line x1="1120" y1="249" x2="1354" y2="249" stroke="#a1a1aa" stroke-width="1.5" stroke-linecap="round"/>
   <text x="1118" y="285" class="label">matching base / quote</text>
   <text x="1118" y="323" class="label">Decimal spread math</text>
-  <text x="1118" y="361" class="label">theoretical only</text>
+  <text x="1118" y="361" class="label">top-of-book episode trigger</text>
 
   <!-- Main path -->
   <path class="flow" d="M283 286 C310 284 327 287 352 285"/>
@@ -89,14 +89,14 @@
   <path class="box" d="M95 565 C154 561 387 568 444 564 L446 698 C385 702 157 696 97 701 Z"/>
   <path class="rough" d="M99 569 C161 565 381 572 440 568 L442 694 C381 698 161 692 101 697 Z"/>
   <text x="270" y="614" text-anchor="middle" class="heading">React dashboard</text>
-  <text x="270" y="648" text-anchor="middle" class="label">books · spreads · stats</text>
+  <text x="270" y="648" text-anchor="middle" class="label">books · spreads · net · stats</text>
   <text x="270" y="677" text-anchor="middle" class="small">last-known state on reconnect</text>
 
   <path class="branch" d="M780 415 C759 468 710 515 674 561"/>
   <text x="704" y="500" text-anchor="middle" class="small">book + status</text>
 
   <path class="branch" d="M1115 397 C1044 469 900 541 795 606"/>
-  <text x="938" y="518" text-anchor="middle" class="small">opportunities</text>
+  <text x="938" y="518" text-anchor="middle" class="small">episodes + ledgers</text>
 
   <path class="flow" d="M517 633 C493 630 471 634 449 632"/>
   <text x="483" y="617" text-anchor="middle" class="small">live state</text>
@@ -111,11 +111,11 @@
   <path class="box" d="M1280 565 C1316 562 1418 568 1453 564 L1455 698 C1417 702 1318 696 1282 701 Z"/>
   <path class="rough" d="M1284 569 C1322 566 1413 572 1449 568 L1451 694 C1413 698 1322 692 1286 697 Z"/>
   <text x="1367" y="614" text-anchor="middle" class="heading">SQLite</text>
-  <text x="1367" y="648" text-anchor="middle" class="label">opportunities</text>
+  <text x="1367" y="648" text-anchor="middle" class="label">episodes + ledgers</text>
   <text x="1367" y="677" text-anchor="middle" class="small">not order books</text>
 
   <path class="branch" d="M1238 397 C1229 464 1149 512 1090 561"/>
-  <text x="1189" y="489" text-anchor="middle" class="small">opportunities</text>
+  <text x="1189" y="489" text-anchor="middle" class="small">episodes + ledgers</text>
 
   <path class="flow" d="M1197 633 C1226 630 1249 634 1277 632"/>
   <text x="1237" y="617" text-anchor="middle" class="small">batch</text>

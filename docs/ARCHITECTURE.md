@@ -152,8 +152,25 @@ An opportunity is emitted when the spread meets the configured threshold. Prices
 sizes, spreads, and theoretical profits use Python `Decimal`; API and WebSocket payloads
 serialize them as decimal strings.
 
-These calculations exclude fees, slippage, latency, inventory, partial fills, transfer
-constraints, and execution risk. They are observations, not executable trade quotes.
+These detector calculations exclude fees and depth beyond the best level. They are the
+theoretical tier that opens and updates episodes, not executable trade quotes.
+
+## Depth-executable and fee-adjusted pricing
+
+For every configured quote notional, `DepthSampler` walks each eligible venue book in exact
+decimal arithmetic. A buy consumes the quote budget and produces a base quantity; the sell
+leg is then priced for exactly that acquired base quantity. A route with insufficient depth
+reports that outcome explicitly and leaves executable and net values null.
+
+`ArbitrageDetector` snapshots the resulting route ledger when an episode opens or reaches a
+new peak. The ledger keeps these tiers separate:
+
+1. top-of-book theoretical spread;
+2. gross depth-executable spread and measured depth impact; and
+3. configured taker fees and net executable spread.
+
+These values estimate the visible-book route at one observation. They do not place orders
+or model latency, inventory, transfer costs, later market movement, or execution risk.
 
 ## Confirmed reconciliation recovery
 
@@ -246,6 +263,11 @@ canonical `age_ms` plus locally elapsed time, not from the exchange timestamp on
 so the dashboard and the backend judge freshness by the same clock. When the browser
 socket itself is interrupted, the dashboard labels the remaining values as last-known
 state while reconnecting.
+
+The current opportunity table displays episode peak spread and theoretical peak profit,
+the first configured notional's stored net executable spread, and episode lifetime. The
+separate venue-comparison view described by ARB-034 is not implemented; complete depth
+quotes and all configured notionals are available through `/api/pricing/depth`.
 
 ## Observability and failure behavior
 

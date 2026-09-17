@@ -2,7 +2,9 @@
 
 ArbSync welcomes focused fixes, protocol evidence, tests, and documentation. It uses
 public market data to detect theoretical opportunities; it does not execute trades.
-Fees, slippage, inventory management, and execution are outside the current scope.
+ArbSync models visible-book depth impact and configured taker fees for research pricing.
+Latency, inventory management, transfers, order placement, and execution remain outside
+the current scope.
 Discuss substantial features in an issue before investing in an implementation.
 
 ## Set up and verify

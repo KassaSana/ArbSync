@@ -1,8 +1,10 @@
 # Release process
 
-ArbSync is an alpha observability project. A package version is not evidence that a
-release was published. The current `0.1.0` metadata identifies development toward the
-first alpha; only a reviewed tag and its release notes identify a published release.
+ArbSync is an alpha observability project. Version `0.1.0` was published from the reviewed
+`v0.1.0` tag on 2026-09-17. The default branch has additional unreleased capture/replay,
+episode, depth-pricing, and fee-ledger work while package metadata remains `0.1.0`; package
+metadata alone never identifies which commit or changes were published. Only a reviewed
+tag and its release notes identify a release.
 
 ## Versioning and notes
 

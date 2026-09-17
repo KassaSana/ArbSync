@@ -7,6 +7,13 @@
 - Accept crash-recovered episodes with `close_reason="orphaned"` on the API and
   dashboard. They were still open when the previous process died, so their
   lifetime stays unknown and they must not appear as currently open.
+- Price each executable route by spending the quote notional on the buy venue and
+  selling exactly the acquired base quantity, rather than independently spending the
+  same quote amount on both legs.
+- Broadcast book ineligibility before later snapshots and preserve snapshot ordering,
+  so clients cannot retain or revive a quote the backend has rejected.
+- Reconcile minute rollups from canonical episode rows after updates, and prevent an
+  older statistics response from replacing a newer dashboard request.
 
 ### Added
 
@@ -18,6 +25,22 @@
   A 150-second three-venue sample is committed under
   `server/tests/fixtures/captured/`. Capture files use plain JSONL or gzip;
   zstd stays a future option.
+- Store one opportunity episode per route dislocation, including peak and close state,
+  lifetime, and crash-recovered `orphaned` closure (SQLite schema version 3).
+- Walk eligible L2 books for configured quote notionals, expose venue VWAP/fill-rate
+  results and explicit insufficient depth, and price sells using matched base quantity.
+- Persist exact-string schema-v4 pricing ledgers that separate top-of-book theoretical,
+  gross depth-executable, fee impact, and net executable spread. The dashboard opportunity
+  feed shows peak theoretical values, the first notional's stored net spread, and lifetime.
+
+### Upgrade notes
+
+- Schema version 3 replaces legacy per-update opportunities with episodes and cannot fold
+  old rows into episode lifetimes; startup drops that legacy history. Schema version 4
+  migrates version 3 in place by adding stored pricing ledgers. Back up first if history
+  matters.
+- Every configured exchange now requires a `fees.<exchange>.taker_pct` entry. There is no
+  implicit zero-fee default.
 
 ## 0.1.0 — 2026-09-17
 

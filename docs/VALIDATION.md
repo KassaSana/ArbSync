@@ -44,6 +44,9 @@ The suite covers:
   missing-configuration errors, and safe example generation
 - explicit history pruning: exact boundaries, partial-minute rollup repair, active writes,
   restart/statistics, lock contention, query-budget expiry, and atomic failure rollback
+- deterministic capture/replay, episode boundaries and orphan recovery, decimal-exact
+  depth walking, matched-route quantity, explicit insufficient depth, fee-aware ledgers,
+  schema-v4 persistence, and dashboard rendering of peak, net, and lifetime tiers
 
 CI also runs strict mypy, Ruff, frontend type checking, ESLint, the production
 dashboard build, and coverage gates: 85% over the whole backend package and 75%
@@ -265,9 +268,9 @@ Two events during the run deserve explicit review rather than a summary line:
    disconnect, exclusion, and recovery path under real conditions.
 2. **Whole-exchange resync on Binance.US, 13:18:27–13:18:41Z.** One confirmed `DOT-USDT`
    price drift caused all nine Binance.US books to report `disconnected` for one sample,
-   because that adapter carries every pair on a single combined stream and resyncs the
-   whole socket. Detection excluded them correctly and recovery took 13.9 s, but a
-   single thin pair should not blink the whole venue; see ARB-028.
+   because the version under test carried every pair on one recovery path and resynchronized
+   the whole socket. Detection excluded them correctly and recovery took 13.9 s. ARB-028
+   has since added scoped pair resynchronization; this soak predates that change.
 
 The carry-forward observation from the September 13–14 attempt is resolved: `gemini:DOT-USD`
 never went stale in this run. Its p95 age was 6.2 s and maximum 32.8 s, both under the
@@ -326,15 +329,15 @@ against the venue fee difference, which is larger; see the scope section of the 
 
 ## Remaining validation gap
 
-The four-hour requirement is met. The following would strengthen the evidence but are not
-prerequisites for the first alpha release:
+The four-hour requirement used for the published 0.1.0 alpha is met. The following would
+strengthen the current evidence:
 
 - A 24-hour run on a dedicated machine. Four hours establishes recovery behavior and the
   absence of short-horizon leaks; it cannot rule out slower growth or daily-cycle effects.
 - A run with independently connected dashboard clients under real browser load, in addition
   to the observer's lightweight consumer. Rendering evidence remains the connected-dashboard
   benchmark above.
-- Host-connectivity attribution in the observer (ARB-029), so an outage like the one above
-  is recorded as such rather than inferred afterwards from correlated failures.
-- Per-pair resynchronization on Binance.US (ARB-028), so one confirmed drift on a thin
-  pair no longer removes the whole venue from detection for the recovery interval.
+- A qualifying live soak on the current code. The committed four-hour run predates the
+  schema-v4 depth/fee ledgers, Binance.US per-pair resynchronization (ARB-028), and direct
+  host-connectivity probes (ARB-029); those behaviors are covered by automated tests and
+  short diagnostics, but not by the published four-hour evidence.

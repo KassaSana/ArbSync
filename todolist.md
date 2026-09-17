@@ -34,8 +34,9 @@ Accepted with a different implementation:
 
 Not open-source release blockers:
 
-- Fees, slippage, inventory, and multi-level VWAP are product-scope expansions. ArbSync
-  already describes itself as a detection-only, top-of-book observability project.
+- Fees, inventory, and multi-level VWAP were not blockers for 0.1.0. Depth walking and
+  fee-aware ledgers have since landed as ARB-032/033; execution, latency, inventory, and
+  transfer modeling remain out of scope.
 - The single event loop and Python GIL are constraints, not demonstrated defects at the
   configured workload.
 - The five curated benchmark summaries are useful supporting evidence; only raw artifacts
@@ -587,13 +588,13 @@ Acceptance criteria:
 - Estimate: 3 hours
 - Dependencies: all P0 tickets, ARB-016, ARB-017, ARB-018
 
-Problem: The README is technically strong, but the repository has no release tag,
-changelog/release notes, support policy, or concise verified-release checklist.
+Original problem: the README was technically strong, but the repository had no release
+tag, changelog/release notes, support policy, or concise verified-release checklist.
 
-Progress: added an Unreleased changelog with migration and limitation notes, alpha
+Initial progress: added an Unreleased changelog with migration and limitation notes, alpha
 versioning rules, and a candidate checklist covering both operating systems, packages,
-licenses, scans, and artifact provenance. Publication remains gated on verified runner
-evidence and owner review; no release tag has been created.
+licenses, scans, and artifact provenance. Publication was gated on verified runner
+evidence and owner review.
 The content/artifact checker now validates filesystem links, package/lock versions,
 archive contents and SHA-256 hashes. The expanded matrix has now run on hosted runners:
 [run 34796528741](https://github.com/KassaSana/ArbSync/actions/runs/34796528741) passed all
@@ -711,6 +712,12 @@ socket, every REST snapshot, and the observer's own loopback requests failed tog
 That is a host outage, but the report can only show correlated failures; the attribution
 was made afterwards from the Windows event log.
 
+Resolution: each sample now performs bounded TCP probes independently of backend API
+sampling, records probe results without shortening the run, and summarizes intervals where
+the backend and host were unreachable together. The committed four-hour soak predates this
+instrumentation, so it remains historical evidence rather than a retroactively attributed
+probe result.
+
 Acceptance criteria:
 
 - Each sample records a lightweight host-connectivity probe (for example a DNS lookup or
@@ -731,9 +738,10 @@ because every later feature needs deterministic tests against real exchange traf
 the consumer interface between the books and their readers is allowed to stay a plain
 callback list until replay shows what shape it needs; a plugin framework is out of scope.
 
-Release grouping: 0.2.0 = ARB-030 and ARB-031; 0.3.0 = ARB-032, ARB-033, ARB-034;
-0.4.0+ = ARB-035 and further research modules (Kraken with book checksums, latency
-analysis) as separate tickets once these land.
+Release status: ARB-030 through ARB-033 are complete on the default branch after the
+published `v0.1.0` tag and remain under `Unreleased`; package metadata is still `0.1.0`.
+The next reviewed minor candidate can include those changes. ARB-034 and ARB-035 remain
+open and should not be described as shipped.
 
 ### [x] ARB-030 — Capture and replay real exchange traffic
 
@@ -871,7 +879,9 @@ Acceptance criteria:
   measurement floor from network geography and clock skew; results are labelled as
   research, not product metrics.
 
-Roadmap total: **45 engineer-hours** to the end of ARB-034, plus open-ended research.
+Original executability estimate: **39 engineer-hours** through ARB-034. Completed
+ARB-030 through ARB-033 account for 31 hours of that estimate; ARB-034 remains estimated
+at 8 hours. ARB-035 is a separate 6-hour first research module plus open-ended follow-ons.
 
 ## Planning summary
 

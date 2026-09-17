@@ -19,6 +19,11 @@ batch_size = 500
 flush_interval_seconds = 1.0
 queue_maxsize = 10000
 
+[capture]
+# Bounded frames waiting for disk; a full queue drops capture frames and
+# counts them instead of blocking ingestion.
+queue_maxsize = 10000
+
 [order_books]
 # Books older than this stop contributing to detection, readiness, metrics, and
 # dashboard spreads. Omitting this section falls back to the stricter 30.0s

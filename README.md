@@ -5,8 +5,9 @@
 
 ArbSync is a real-time, detection-only crypto arbitrage system. It consumes public
 level-2 order books from Gemini, Coinbase, and Binance.US, normalizes each feed,
-maintains trusted in-memory books, detects spreads only across matching base/quote markets, stores theoretical
-opportunities in SQLite, and streams live state to a React dashboard.
+maintains trusted in-memory books, detects spreads only across matching base/quote markets,
+stores opportunity episodes with explicit theoretical, depth-executable, and fee-adjusted
+pricing tiers in SQLite, and streams live state to a React dashboard.
 
 No API keys are required. ArbSync does not place trades.
 
@@ -14,8 +15,6 @@ No API keys are required. ArbSync does not place trades.
 dashboard is static, but its backend runs on a free tier that sleeps when idle, so the
 first load can take up to a minute to connect. Everything below runs locally in a few
 minutes without an account.
-
-![ArbSync dashboard: exchange connectivity, live cross-venue spreads for nine USD pairs, and the opportunity feed](docs/dashboard.png)
 
 ![ArbSync architecture](docs/architecture.svg)
 
@@ -293,8 +292,9 @@ three-venue sample lives under
 [`server/tests/fixtures/captured/`](server/tests/fixtures/captured/README.md)
 and is replayed deterministically by the backend suite.
 
-The committed synthetic results are hardware-specific and do not represent live
-exchange or network performance.
+The committed synthetic results are a September 8 baseline from before episode tracking
+and depth/fee ledgers. They are hardware-specific, do not represent the cost of the current
+full opportunity path, and do not represent live exchange or network performance.
 
 | Path | p50 | p95 | Throughput |
 | --- | ---: | ---: | ---: |
@@ -339,10 +339,12 @@ var/                  Ignored local database, logs, and temporary files
 
 ## Scope and limitations
 
-Every reported opportunity and profit value is theoretical. Calculations exclude
-trading and withdrawal fees, slippage, transfer latency, inventory constraints,
-partial fills, rate limits, and execution risk. The detector uses only top-of-book
-liquidity and is an observability project, not an execution engine or trading system.
+Top-of-book `spread_pct` and `theoretical_profit` remain theoretical. Separately, each new
+episode snapshots depth-walked executable prices and net spread after the configured taker
+fees for each configured notional; those ledgers model measured book depth, not order
+placement. They still exclude latency, inventory constraints, transfer and withdrawal
+costs, rate limits, market movement after observation, and execution risk. ArbSync is an
+observability project, not an execution engine or trading system.
 Measured against the four-hour soak (run while Binance.US was configured for USDT, so its
 books were a separate market), none of the 246 recorded Coinbase–Gemini opportunities
 survives a retail taker fee on both legs; the observed venue price differences (p50 0.12%)
