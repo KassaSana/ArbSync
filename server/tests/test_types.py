@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from arb.types import ArbitrageOpportunity, TopOfBook
+from arb.types import TopOfBook
+from episodes import make_episode
 
 
 def test_top_of_book_payload_stringifies_decimals() -> None:
@@ -28,8 +29,8 @@ def test_top_of_book_payload_stringifies_decimals() -> None:
 
 
 def test_arbitrage_opportunity_payload_round_trips_decimal_strings() -> None:
-    opp = ArbitrageOpportunity(
-        timestamp_ns=1,
+    opp = make_episode(
+        start_ns=1,
         pair="ETH-USD",
         quote_asset="USD",
         buy_exchange="gemini",
@@ -42,7 +43,8 @@ def test_arbitrage_opportunity_payload_round_trips_decimal_strings() -> None:
     )
     payload = opp.as_payload()
     assert payload["pair"] == "ETH-USD"
-    assert payload["timestamp_ns"] == "1"
+    assert payload["start_ns"] == "1"
+    assert payload["end_ns"] is None
     assert payload["buy_price"] == "2000.123"
     assert payload["quote_asset"] == "USD"
     assert payload["theoretical_profit"] == "2.583250"

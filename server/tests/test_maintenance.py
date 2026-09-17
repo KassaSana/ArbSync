@@ -9,13 +9,14 @@ import pytest
 from arb import maintenance
 from arb.maintenance import parse_cutoff, prune_batch
 from arb.persistence import MINUTE_NS, OpportunityStore
+from episodes import close_episode
 from test_persistence import make_opp
 
 
 def counts(path: Path) -> tuple[int, int]:
     with sqlite3.connect(path) as db:
         return (
-            db.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0],
+            db.execute("SELECT COUNT(*) FROM opportunity_episodes").fetchone()[0],
             db.execute("SELECT COALESCE(SUM(count), 0) FROM opportunity_minutes").fetchone()[0],
         )
 
@@ -42,7 +43,7 @@ async def test_partial_minute_boundary_batches_restart_and_statistics(tmp_path: 
     await restarted.initialize()
     assert counts(path) == (2, 2)
     rows = await restarted.recent()
-    assert {row["timestamp_ns"] for row in rows} == {cutoff, cutoff + 1}
+    assert {row["start_ns"] for row in rows} == {cutoff, cutoff + 1}
     assert (
         next(row for row in rows if row["pair"] == "BTC-USD")["theoretical_profit"] == "0.123456789"
     )
@@ -59,6 +60,53 @@ async def test_partial_minute_boundary_batches_restart_and_statistics(tmp_path: 
         total, maximum, spread, profits = await restarted._windowed_totals(db, cutoff)
     assert (total, maximum, spread) == (2, 3, 5)
     assert profits == pytest.approx({"USD": 0.123456789, "USDT": 0.5})
+
+
+@pytest.mark.asyncio
+async def test_rebuilt_minute_uses_peak_values_of_closed_episodes(tmp_path: Path) -> None:
+    # ARB-031: the rollup carries each episode at its peak, so a rebuild after
+    # pruning must read the peak columns, not the open-time ones.
+    from decimal import Decimal
+
+    path = tmp_path / "peaks.sqlite3"
+    store = OpportunityStore(str(path))
+    await store.initialize()
+    survivor = make_opp(MINUTE_NS + 1, spread="1", profit="0.5")
+    pruned = make_opp(MINUTE_NS - 1, spread="1", profit="0.5")
+    await store._flush(
+        [
+            pruned,
+            survivor,
+            close_episode(
+                survivor,
+                duration_ns=5,
+                peak_spread_pct=Decimal("7"),
+                peak_profit=Decimal("3.5"),
+            ),
+        ]
+    )
+    with sqlite3.connect(path) as db:
+        row = db.execute(
+            "SELECT count, max_spread_pct, sum_spread_pct, sum_profit "
+            "FROM opportunity_minutes WHERE minute_ns = ?",
+            (MINUTE_NS,),
+        ).fetchone()
+    assert row == (1, 7.0, 7.0, 3.5)
+
+    # Prune the older minute; the surviving minute's rebuild is not triggered,
+    # and pruning inside the surviving minute rebuilds it from peak columns.
+    assert prune_batch(path, MINUTE_NS) == 1
+    await store._flush([make_opp(MINUTE_NS + 2, spread="2", profit="1")])
+    assert prune_batch(path, MINUTE_NS + 2) == 1
+    with sqlite3.connect(path) as db:
+        row = db.execute(
+            "SELECT count, max_spread_pct, sum_spread_pct, sum_profit "
+            "FROM opportunity_minutes WHERE minute_ns = ?",
+            (MINUTE_NS,),
+        ).fetchone()
+    assert row == (1, 2.0, 2.0, 1.0)
+    assert counts(path) == (1, 1)
+    await store._close_db()
 
 
 @pytest.mark.asyncio

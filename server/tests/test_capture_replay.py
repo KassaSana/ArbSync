@@ -262,7 +262,9 @@ async def test_process_market_event_honors_recorded_timestamps(monkeypatch) -> N
         now_monotonic_ns=1_000,
     )
 
-    detector.detect_for_pair.assert_called_once_with("BTC-USD", [], 999)
+    # Both the wall-clock identity and the recorded monotonic instant reach
+    # the detector, which is what makes replayed lifetimes deterministic.
+    detector.detect_for_pair.assert_called_once_with("BTC-USD", [], 999, 1_000)
     assert manager.eligibility("gemini", "BTC-USD", 2_000).age_ns == 1_000
 
 
@@ -310,3 +312,77 @@ async def test_feed_replay_into_pipeline_persists_and_publishes(tmp_path: Path) 
     rows = await pipeline.store.recent()
     assert any(row["pair"] == "BTC-USD" for row in rows)
     assert pipeline.book_manager.top_of_book("gemini", "BTC-USD") is not None
+
+
+def test_replay_reproduces_episode_boundaries_deterministically() -> None:
+    """ARB-031: episode open, peak, close and end-of-capture shutdown on a replay.
+
+    A Coinbase bid steps above Gemini's ask, widens, narrows, disappears and
+    then reappears. Five updates touch the route while the spread rests, but
+    the report holds exactly two episodes, each with the boundaries the frame
+    stamps dictate: wall-clock start from `wall_ns`, lifetime from `mono_ns`.
+    """
+    from arb.capture import CaptureFrame, CaptureHeader
+
+    second = 1_000_000_000
+    base_wall = 1_700_000_000 * second
+    base_mono = 5_000 * second
+
+    def ws(index: int, exchange: str, raw: str) -> CaptureFrame:
+        return CaptureFrame(
+            exchange=exchange,
+            kind="ws",
+            wall_ns=base_wall + index * second,
+            mono_ns=base_mono + index * second,
+            raw=raw,
+            payload=None,
+            url=None,
+            events=(),
+        )
+
+    def coinbase(seq: int, side: str, price: str, size: str) -> str:
+        return (
+            f'{{"type":"update","product_id":"BTC-USD","sequence_num":{seq},"updates":['
+            f'{{"side":"{side}","price_level":"{price}","new_quantity":"{size}"}}]}}'
+        )
+
+    header = CaptureHeader(
+        exchanges={"gemini": ["btcusd"], "coinbase": ["BTC-USD"]}, started_wall_ns=base_wall
+    )
+    frames = [
+        ws(0, "gemini", _gemini_snapshot()),  # gemini bid 100 / ask 102
+        ws(1, "coinbase", _coinbase_snapshot()),  # coinbase bid 99 / ask 104: no spread
+        ws(2, "coinbase", coinbase(11, "bid", "103", "2")),  # open: (103-102)/102
+        ws(3, "coinbase", coinbase(12, "bid", "103.5", "0.5")),  # peak: (103.5-102)/102
+        ws(4, "coinbase", coinbase(13, "bid", "103.5", "0")),  # back to 103: still open
+        ws(5, "coinbase", coinbase(14, "bid", "103", "0")),  # bid 99 again: close
+        ws(6, "coinbase", coinbase(15, "bid", "103", "1")),  # reopen at the last frame
+    ]
+
+    first = asyncio.run(replay_frames(header, frames, threshold_pct=Decimal("0.1")))
+    second_run = asyncio.run(replay_frames(header, frames, threshold_pct=Decimal("0.1")))
+    assert first.digest == second_run.digest
+
+    events = first.opportunities
+    assert [(e.is_open, e.close_reason) for e in events] == [
+        (True, None),
+        (False, "spread_closed"),
+        (True, None),
+        (False, "shutdown"),
+    ]
+    opened, closed, reopened, shutdown = events
+    assert (opened.buy_exchange, opened.sell_exchange) == ("gemini", "coinbase")
+    assert opened.start_ns == base_wall + 2 * second
+    assert closed.start_ns == opened.start_ns
+    assert closed.end_ns == base_wall + 5 * second
+    assert closed.duration_ns == 3 * second
+    assert closed.spread_pct == Decimal(1) / Decimal(102) * 100  # at open
+    assert closed.peak_spread_pct == Decimal("1.5") / Decimal(102) * 100
+    assert closed.peak_size == Decimal("0.5")
+    assert closed.peak_profit == Decimal("0.5") * Decimal("1.5")
+    assert closed.close_spread_pct == Decimal(99 - 102) / Decimal(102) * 100
+    # The capture ends with a spread standing: it closes at the last recorded
+    # instant with zero lifetime rather than dangling.
+    assert reopened.start_ns == base_wall + 6 * second
+    assert shutdown.end_ns == reopened.start_ns
+    assert shutdown.duration_ns == 0

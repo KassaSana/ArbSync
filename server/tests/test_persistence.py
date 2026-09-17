@@ -12,19 +12,18 @@ import aiosqlite
 import pytest
 from aiosqlite.core import _connection_worker_thread
 from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
-from arb.persistence import OpportunityStore
-from arb.types import ArbitrageOpportunity
+from arb.persistence import SCHEMA_VERSION, OpportunityStore, lifetime_summary
+from arb.types import OpportunityEpisode
+from episodes import close_episode, make_episode
 
 
 def make_opp(
     timestamp_ns: int, spread: str = "1", profit: str = "0.5", pair: str = "BTC-USD"
-) -> ArbitrageOpportunity:
-    return ArbitrageOpportunity(
-        timestamp_ns=timestamp_ns,
+) -> OpportunityEpisode:
+    """An open episode that started at `timestamp_ns`."""
+    return make_episode(
+        start_ns=timestamp_ns,
         pair=pair,
-        quote_asset=pair.rsplit("-", maxsplit=1)[1],
-        buy_exchange="gemini",
-        sell_exchange="coinbase",
         buy_price=Decimal("100.123456789"),
         sell_price=Decimal("101.987654321"),
         spread_pct=Decimal(spread),
@@ -126,7 +125,7 @@ async def test_close_drains_every_accepted_opportunity(tmp_path: Path) -> None:
     assert store.failure is None
     assert store.unflushed_count == 0
     rows = await store.recent(limit=10)
-    assert [row["timestamp_ns"] for row in rows] == [5, 4, 3, 2, 1]
+    assert [row["start_ns"] for row in rows] == [5, 4, 3, 2, 1]
 
 
 @pytest.mark.asyncio
@@ -324,7 +323,7 @@ async def test_recent_orders_descending_by_timestamp(tmp_path: Path) -> None:
     await store.close()
     await asyncio.wait_for(runner, timeout=1.0)
     rows = await store.recent(limit=10)
-    assert [row["timestamp_ns"] for row in rows] == [30, 20, 10]
+    assert [row["start_ns"] for row in rows] == [30, 20, 10]
 
 
 @pytest.mark.asyncio
@@ -722,3 +721,140 @@ async def test_cancelled_worker_releases_its_writer_thread(tmp_path: Path) -> No
 
     assert store._db is None
     await wait_for_no_new_sqlite_workers(before)
+
+
+# --- Episodes (ARB-031) ---
+
+
+@pytest.mark.asyncio
+async def test_close_event_updates_the_open_row_and_adjusts_the_rollup(tmp_path: Path) -> None:
+    store = OpportunityStore(str(tmp_path / "episodes.sqlite3"))
+    await store.initialize()
+    opened = make_opp(1, spread="1", profit="0.5")
+    await store._flush([opened])
+    [row] = await store.recent()
+    assert row["end_ns"] is None and row["close_reason"] is None
+    assert row["peak_spread_pct"] == "1"
+    assert await store.open_count() == 1
+    assert await store.lifetimes(window_ns=None) is None
+
+    closed = close_episode(
+        opened,
+        duration_ns=3_000_000_000,
+        peak_spread_pct=Decimal("4"),
+        peak_size=Decimal("0.25"),
+        peak_profit=Decimal("2"),
+        close_spread_pct=Decimal("-0.5"),
+    )
+    await store._flush([closed])
+    rows = await store.recent()
+    assert len(rows) == 1, "a close must update the open row, not add one"
+    [row] = rows
+    assert row["end_ns"] == 1 + 3_000_000_000
+    assert row["duration_ns"] == 3_000_000_000
+    assert row["close_reason"] == "spread_closed"
+    assert row["close_spread_pct"] == "-0.5"
+    assert (row["peak_spread_pct"], row["peak_size"], row["peak_profit"]) == ("4", "0.25", "2")
+    # Open-time values survive the close.
+    assert (row["spread_pct"], row["max_size"], row["theoretical_profit"]) == ("1", "0.5", "0.5")
+    assert await store.open_count() == 0
+    assert await store.lifetimes(window_ns=None) == {
+        "closed_count": 1,
+        "p50_seconds": 3.0,
+        "p90_seconds": 3.0,
+        "max_seconds": 3.0,
+    }
+
+    # The rollup still counts one episode, now at its peak.
+    stats = await store.extended_stats(window_ns=None)
+    assert stats["count"] == 1
+    assert stats["max_spread_pct"] == "4.0"
+    assert stats["mean_spread_pct"] == "4.0"
+    assert stats["theoretical_profit_by_quote"] == {"USD": "2.0"}
+    await store._close_db()
+
+
+@pytest.mark.asyncio
+async def test_open_and_close_in_one_batch_and_a_close_without_its_open(tmp_path: Path) -> None:
+    store = OpportunityStore(str(tmp_path / "batch.sqlite3"))
+    await store.initialize()
+    first = make_opp(1, spread="2", profit="1")
+    orphan_close = close_episode(make_opp(2, spread="3", profit="1.5"), duration_ns=10)
+    await store._flush([first, close_episode(first, duration_ns=5), orphan_close])
+    rows = await store.recent()
+    assert [(row["start_ns"], row["end_ns"]) for row in rows] == [(2, 12), (1, 6)]
+    # The dropped open contributed no count, so the close's count stands alone
+    # in the row table; the rollup only ever saw the first episode's open.
+    stats = await store.extended_stats(window_ns=None)
+    assert stats["count"] == 1 + 0
+    assert await store.open_count() == 0
+    await store._close_db()
+
+
+@pytest.mark.asyncio
+async def test_restart_marks_open_episodes_orphaned(tmp_path: Path) -> None:
+    path = str(tmp_path / "orphans.sqlite3")
+    store = OpportunityStore(path)
+    await store.initialize()
+    await store._flush([make_opp(1), make_opp(2)])
+    assert await store.open_count() == 2
+    await store._close_db()
+
+    restarted = OpportunityStore(path)
+    await restarted.initialize()
+    rows = await restarted.recent()
+    assert {row["close_reason"] for row in rows} == {"orphaned"}
+    assert all(row["end_ns"] is None for row in rows)
+    assert await restarted.open_count() == 0
+    # Orphans keep their count but contribute no lifetime.
+    assert (await restarted.extended_stats(window_ns=None))["count"] == 2
+    assert await restarted.lifetimes(window_ns=None) is None
+
+
+@pytest.mark.asyncio
+async def test_schema_v2_rows_are_dropped_on_upgrade(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = str(tmp_path / "v2.sqlite3")
+    with sqlite3.connect(path) as legacy:
+        legacy.executescript(
+            """
+            CREATE TABLE opportunities (
+                id INTEGER PRIMARY KEY, timestamp_ns INTEGER NOT NULL, pair TEXT NOT NULL,
+                buy_exchange TEXT NOT NULL, sell_exchange TEXT NOT NULL, buy_price TEXT NOT NULL,
+                sell_price TEXT NOT NULL, spread_pct TEXT NOT NULL, max_size TEXT NOT NULL,
+                quote_asset TEXT NOT NULL, theoretical_profit TEXT NOT NULL
+            );
+            CREATE TABLE opportunity_minutes (
+                minute_ns INTEGER NOT NULL, pair TEXT NOT NULL, count INTEGER NOT NULL,
+                max_spread_pct REAL NOT NULL, sum_spread_pct REAL NOT NULL,
+                quote_asset TEXT NOT NULL, sum_profit REAL NOT NULL, PRIMARY KEY (minute_ns, pair)
+            );
+            INSERT INTO opportunities VALUES
+                (1, 5, 'BTC-USD', 'gemini', 'coinbase', '100', '101', '1', '1', 'USD', '1');
+            INSERT INTO opportunity_minutes VALUES (0, 'BTC-USD', 1, 1.0, 1.0, 'USD', 1.0);
+            PRAGMA user_version = 2;
+            """
+        )
+
+    store = OpportunityStore(path)
+    await store.initialize()
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "opportunities" not in tables
+    assert "opportunity_episodes" in tables
+    assert (await store.extended_stats(window_ns=None))["count"] == 0
+    assert await store.recent() == []
+
+
+def test_lifetime_summary_uses_nearest_rank_percentiles() -> None:
+    assert lifetime_summary([]) is None
+    seconds = 1_000_000_000
+    summary = lifetime_summary([3 * seconds, 1 * seconds, 2 * seconds, 10 * seconds])
+    assert summary == {
+        "closed_count": 4,
+        "p50_seconds": 3.0,
+        "p90_seconds": 10.0,
+        "max_seconds": 10.0,
+    }

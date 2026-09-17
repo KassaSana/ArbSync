@@ -64,7 +64,15 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ) -> list[dict[str, object]]:
         rows = await store.recent(limit=limit)
-        return [{**row, "timestamp_ns": str(row["timestamp_ns"])} for row in rows]
+        return [
+            {
+                **row,
+                "start_ns": str(row["start_ns"]),
+                "end_ns": None if row["end_ns"] is None else str(row["end_ns"]),
+                "duration_ns": None if row["duration_ns"] is None else str(row["duration_ns"]),
+            }
+            for row in rows
+        ]
 
     @app.get("/api/stats")
     async def stats(window: Window = "1h") -> dict[str, object]:
@@ -79,6 +87,8 @@ def create_app(
             "all_time_count": all_time["count"],
             "all_time_max_spread_pct": all_time["max_spread_pct"],
             "all_time_peak_minute": serialize_peak(await store.peak_minute(window_ns=None)),
+            "open_count": await store.open_count(),
+            "all_time_lifetime": await store.lifetimes(window_ns=None),
         }
 
     @app.get("/api/system/stats")
@@ -86,7 +96,13 @@ def create_app(
         window_ns = window_to_ns(window)
         extended = await store.extended_stats(window_ns=window_ns)
         peak = await store.peak_minute(window_ns=window_ns)
-        return {"window": window, **extended, "peak_minute": serialize_peak(peak)}
+        lifetime = await store.lifetimes(window_ns=window_ns)
+        return {
+            "window": window,
+            **extended,
+            "peak_minute": serialize_peak(peak),
+            "lifetime": lifetime,
+        }
 
     @app.get("/api/system/timeseries")
     async def system_timeseries(

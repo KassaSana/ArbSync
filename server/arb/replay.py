@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections import deque
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
@@ -33,7 +34,7 @@ from arb.detector import ArbitrageDetector
 from arb.main import process_market_event
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
-from arb.types import ArbitrageOpportunity
+from arb.types import OpportunityEpisode
 
 
 class ReplayError(ValueError):
@@ -56,7 +57,7 @@ class ReplayTransition:
 @dataclass
 class ReplayReport:
     transitions: list[ReplayTransition] = field(default_factory=list)
-    opportunities: list[ArbitrageOpportunity] = field(default_factory=list)
+    opportunities: list[OpportunityEpisode] = field(default_factory=list)
     snapshots_consumed: int = 0
     digest: str = ""
 
@@ -102,26 +103,30 @@ class _SnapshotStub:
 
 
 class _CollectingStore:
-    """Stand-in persistence that keeps opportunities in memory for hashing."""
+    """Stand-in persistence that keeps episode events in memory for hashing."""
 
     def __init__(self) -> None:
-        self.opportunities: list[ArbitrageOpportunity] = []
+        self.opportunities: list[OpportunityEpisode] = []
 
-    async def enqueue(self, opportunity: ArbitrageOpportunity) -> bool:
-        self.opportunities.append(opportunity)
+    async def enqueue(self, episode: OpportunityEpisode) -> bool:
+        self.opportunities.append(episode)
         return True
 
 
 class _FanoutStore(_CollectingStore):
+    async def enqueue_all(self, episodes: list[OpportunityEpisode]) -> None:
+        for episode in episodes:
+            await self.enqueue(episode)
+
     """Collect opportunities for the report while also persisting them."""
 
     def __init__(self, stores: list[OpportunityStore]) -> None:
         super().__init__()
         self._stores = stores
 
-    async def enqueue(self, opportunity: ArbitrageOpportunity) -> bool:
-        await super().enqueue(opportunity)
-        results = [await store.enqueue(opportunity) for store in self._stores]
+    async def enqueue(self, episode: OpportunityEpisode) -> bool:
+        await super().enqueue(episode)
+        results = [await store.enqueue(episode) for store in self._stores]
         return all(results)
 
 
@@ -283,6 +288,17 @@ async def replay_frames(
                         resync_requested=resync_requested,
                     )
                 )
+        # The capture ended with these spreads still standing. Closing them
+        # as `shutdown` at the last recorded instant keeps the report a full
+        # accounting and the digest deterministic.
+        if frames and detector is None:
+            last_wall_ns = max(frame.wall_ns for frame in frames)
+            await active_store.enqueue_all(
+                active_detector.close_all(
+                    last_wall_ns if recorded else time.time_ns(),
+                    clock.now_ns if recorded else None,
+                )
+            )
         report.opportunities.extend(active_store.opportunities)
         report.snapshots_consumed = stub.consumed
         report.digest = _digest(report)

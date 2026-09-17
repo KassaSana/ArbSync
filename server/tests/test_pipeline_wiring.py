@@ -19,6 +19,7 @@ from arb.config import (
     ReconciliationConfig,
     ServerConfig,
 )
+from arb.detector import ArbitrageDetector
 from arb.types import BookEligibility, EventKind, MarketEvent, PriceLevel
 
 
@@ -181,7 +182,7 @@ async def test_shutdown_stops_producers_before_consumers_and_drains_persistence(
         config=None,  # type: ignore[arg-type]
         started_at_ns=0,
         book_manager=None,  # type: ignore[arg-type]
-        detector=None,  # type: ignore[arg-type]
+        detector=ArbitrageDetector(Decimal("0.1")),
         store=FakeStore(),  # type: ignore[arg-type]
         adapters=[FakeAdapter()],  # type: ignore[list-item]
         expected_pairs=[],

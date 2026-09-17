@@ -11,41 +11,79 @@ import aiosqlite
 import structlog
 
 from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
-from arb.types import ArbitrageOpportunity
+from arb.types import OpportunityEpisode
 
 logger = structlog.get_logger(__name__)
 
 PersistenceFailureReason = Literal["initialize_failed", "worker_failed"]
 PersistenceState = Literal["open", "failed", "closed"]
 
+SCHEMA_VERSION = 3
+
+# One row per episode: a (pair, buy venue, sell venue) route from the moment
+# its spread crossed the threshold to the moment it stopped. The `*_price`,
+# `spread_pct`, `max_size` and `theoretical_profit` columns are the values at
+# open; `peak_*` are the widest spread seen and the size and profit at that
+# moment, and equal the open values until a close event carries the real peak.
+# `end_ns`, `close_spread_pct` and `close_reason` are NULL while the episode is
+# open. The natural key is the episode's identity across the open and close
+# events that write it.
 CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS opportunities (
+CREATE TABLE IF NOT EXISTS opportunity_episodes (
     id INTEGER PRIMARY KEY,
-    timestamp_ns INTEGER NOT NULL,
+    start_ns INTEGER NOT NULL,
+    end_ns INTEGER,
     pair TEXT NOT NULL,
+    quote_asset TEXT NOT NULL,
     buy_exchange TEXT NOT NULL,
     sell_exchange TEXT NOT NULL,
     buy_price TEXT NOT NULL,
     sell_price TEXT NOT NULL,
     spread_pct TEXT NOT NULL,
     max_size TEXT NOT NULL,
-    quote_asset TEXT NOT NULL,
-    theoretical_profit TEXT NOT NULL
+    theoretical_profit TEXT NOT NULL,
+    peak_spread_pct TEXT NOT NULL,
+    peak_size TEXT NOT NULL,
+    peak_profit TEXT NOT NULL,
+    close_spread_pct TEXT,
+    close_reason TEXT,
+    UNIQUE (start_ns, pair, buy_exchange, sell_exchange)
 );
 """
 
 CREATE_INDEX_SQL = """
-CREATE INDEX IF NOT EXISTS idx_opps_timestamp ON opportunities(timestamp_ns);
-CREATE INDEX IF NOT EXISTS idx_opps_pair_ts ON opportunities(pair, timestamp_ns);
+CREATE INDEX IF NOT EXISTS idx_episodes_start ON opportunity_episodes(start_ns);
+CREATE INDEX IF NOT EXISTS idx_episodes_pair_start ON opportunity_episodes(pair, start_ns);
+"""
+
+# Open and close events share one statement. An open inserts the row; a close
+# finds it by natural key and fills in the end and peak. Should the open have
+# been dropped from the bounded queue, the close still inserts a complete row.
+UPSERT_EPISODE_SQL = """
+INSERT INTO opportunity_episodes (
+    start_ns, end_ns, pair, quote_asset, buy_exchange, sell_exchange,
+    buy_price, sell_price, spread_pct, max_size, theoretical_profit,
+    peak_spread_pct, peak_size, peak_profit, close_spread_pct, close_reason
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(start_ns, pair, buy_exchange, sell_exchange) DO UPDATE SET
+    end_ns = excluded.end_ns,
+    peak_spread_pct = excluded.peak_spread_pct,
+    peak_size = excluded.peak_size,
+    peak_profit = excluded.peak_profit,
+    close_spread_pct = excluded.close_spread_pct,
+    close_reason = excluded.close_reason
 """
 
 MINUTE_NS = 60_000_000_000
 
-# Per-minute, per-pair totals maintained as opportunities are written, so the
-# statistics endpoints read one row per minute and pair instead of every stored
-# opportunity. Aggregates are REAL because the queries they replace already
+# Per-minute, per-pair totals keyed by episode start, maintained as episodes
+# are written, so the statistics endpoints read one row per minute and pair
+# instead of every stored episode. An open event counts the episode with its
+# open-time spread and profit; its close event adds the difference to the
+# peak, which only ever grows, so MAX and the sums stay exact without a
+# rebuild. Aggregates are REAL because the queries they replace already
 # computed MAX/AVG/SUM through CAST(... AS REAL); exact decimal values stay in
-# `opportunities`, which is unchanged and remains the source of truth.
+# `opportunity_episodes`, which remains the source of truth.
 CREATE_ROLLUP_SQL = """
 CREATE TABLE IF NOT EXISTS opportunity_minutes (
     minute_ns INTEGER NOT NULL,
@@ -71,25 +109,65 @@ ON CONFLICT(minute_ns, pair) DO UPDATE SET
     sum_profit = sum_profit + excluded.sum_profit
 """
 
+# Column list the readers and the pruner's rebuild share with the writer.
+ROLLUP_REBUILD_SELECT = (
+    "SELECT ?, pair, COUNT(*), MAX(CAST(peak_spread_pct AS REAL)), "
+    "SUM(CAST(peak_spread_pct AS REAL)), quote_asset, SUM(CAST(peak_profit AS REAL)) "
+    "FROM opportunity_episodes WHERE pair = ? AND start_ns >= ? AND start_ns < ? "
+    "GROUP BY pair, quote_asset"
+)
 
-def _rollup_rows(batch: Iterable[ArbitrageOpportunity]) -> list[tuple[object, ...]]:
-    """Fold a write batch into one row per minute and pair."""
+
+def _episode_row(episode: OpportunityEpisode) -> tuple[object, ...]:
+    return (
+        episode.start_ns,
+        episode.end_ns,
+        episode.pair,
+        episode.quote_asset,
+        episode.buy_exchange,
+        episode.sell_exchange,
+        str(episode.buy_price),
+        str(episode.sell_price),
+        str(episode.spread_pct),
+        str(episode.max_size),
+        str(episode.theoretical_profit),
+        str(episode.peak_spread_pct),
+        str(episode.peak_size),
+        str(episode.peak_profit),
+        None if episode.close_spread_pct is None else str(episode.close_spread_pct),
+        episode.close_reason,
+    )
+
+
+def _rollup_rows(batch: Iterable[OpportunityEpisode]) -> list[tuple[object, ...]]:
+    """Fold a write batch into one rollup delta per minute and pair.
+
+    An open event contributes the episode's count and open-time values; a
+    close event contributes no count and only the growth from open to peak.
+    """
     totals: dict[tuple[int, str], tuple[int, float, float, str, float]] = {}
-    for opp in batch:
-        key = ((opp.timestamp_ns // MINUTE_NS) * MINUTE_NS, opp.pair)
-        spread = float(opp.spread_pct)
-        profit = float(opp.theoretical_profit)
+    for episode in batch:
+        key = ((episode.start_ns // MINUTE_NS) * MINUTE_NS, episode.pair)
+        peak_spread = float(episode.peak_spread_pct)
+        if episode.is_open:
+            count = 1
+            spread_delta = peak_spread
+            profit_delta = float(episode.peak_profit)
+        else:
+            count = 0
+            spread_delta = peak_spread - float(episode.spread_pct)
+            profit_delta = float(episode.peak_profit) - float(episode.theoretical_profit)
         entry = totals.get(key)
         if entry is None:
-            totals[key] = (1, spread, spread, opp.quote_asset, profit)
+            totals[key] = (count, peak_spread, spread_delta, episode.quote_asset, profit_delta)
         else:
-            count, max_spread, sum_spread, quote_asset, sum_profit = entry
+            existing_count, max_spread, sum_spread, quote_asset, sum_profit = entry
             totals[key] = (
-                count + 1,
-                max(max_spread, spread),
-                sum_spread + spread,
+                existing_count + count,
+                max(max_spread, peak_spread),
+                sum_spread + spread_delta,
                 quote_asset,
-                sum_profit + profit,
+                sum_profit + profit_delta,
             )
     return [
         (minute_ns, pair, int(count), max_spread, sum_spread, quote_asset, sum_profit)
@@ -101,6 +179,24 @@ def _rollup_rows(batch: Iterable[ArbitrageOpportunity]) -> list[tuple[object, ..
             sum_profit,
         ) in totals.items()
     ]
+
+
+def lifetime_summary(durations_ns: list[int]) -> dict[str, object] | None:
+    """Nearest-rank p50/p90 and max of closed-episode lifetimes, in seconds."""
+    if not durations_ns:
+        return None
+    ordered = sorted(durations_ns)
+
+    def rank(fraction: float) -> float:
+        index = min(len(ordered) - 1, int(fraction * len(ordered)))
+        return ordered[index] / 1_000_000_000
+
+    return {
+        "closed_count": len(ordered),
+        "p50_seconds": rank(0.5),
+        "p90_seconds": rank(0.9),
+        "max_seconds": ordered[-1] / 1_000_000_000,
+    }
 
 
 def _minute_boundary(cutoff_ns: int) -> int:
@@ -128,9 +224,7 @@ class OpportunityStore:
         self.db_path = db_path
         self.batch_size = batch_size
         self.flush_interval_seconds = flush_interval_seconds
-        self._queue: asyncio.Queue[ArbitrageOpportunity | None] = asyncio.Queue(
-            maxsize=queue_maxsize
-        )
+        self._queue: asyncio.Queue[OpportunityEpisode | None] = asyncio.Queue(maxsize=queue_maxsize)
         self._closed = False
         self._failure: Exception | None = None
         self._failure_reason: PersistenceFailureReason | None = None
@@ -172,29 +266,40 @@ class OpportunityStore:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute("PRAGMA journal_mode=WAL;")
-                cursor = await db.execute("PRAGMA table_info(opportunities)")
-                columns = {str(row[1]) for row in await cursor.fetchall()}
-                if columns and {"quote_asset", "theoretical_profit"} - columns:
-                    # Earlier releases recorded Binance.US USDT amounts as USD. Their
-                    # historical opportunities and rollups cannot be relabelled safely.
+                cursor = await db.execute("PRAGMA user_version")
+                version = int((await cursor.fetchone() or (0,))[0])
+                if version < SCHEMA_VERSION:
+                    # Schema 2 and earlier stored one row per book update while a
+                    # spread persisted. Those samples cannot be folded into
+                    # episodes after the fact (the book stream between them is
+                    # gone), so they and their rollup are dropped, as the
+                    # quote-currency migration dropped mislabelled amounts.
                     await db.executescript(
-                        "DROP TABLE IF EXISTS opportunity_minutes; DROP TABLE opportunities;"
+                        "DROP TABLE IF EXISTS opportunity_minutes; "
+                        "DROP TABLE IF EXISTS opportunities;"
                     )
                 await db.executescript(CREATE_TABLE_SQL + CREATE_INDEX_SQL + CREATE_ROLLUP_SQL)
-                await db.execute("PRAGMA user_version = 2")
+                # Episodes a previous process left open never got a close event.
+                # They keep their count but no lifetime; the marker keeps them
+                # out of the open set.
+                await db.execute(
+                    "UPDATE opportunity_episodes SET close_reason = 'orphaned' "
+                    "WHERE end_ns IS NULL AND close_reason IS NULL"
+                )
+                await db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 await db.commit()
         except Exception as exc:
             self._mark_failed("initialize_failed", exc)
             raise
 
-    async def enqueue(self, opportunity: ArbitrageOpportunity) -> bool:
+    async def enqueue(self, episode: OpportunityEpisode) -> bool:
         if self._closed:
             persistence_queue_drops_total.labels(
                 reason=self._failure_reason or "store_closed"
             ).inc()
             return False
         try:
-            self._queue.put_nowait(opportunity)
+            self._queue.put_nowait(episode)
         except asyncio.QueueFull:
             persistence_queue_drops_total.labels(reason="queue_full").inc()
             return False
@@ -203,7 +308,7 @@ class OpportunityStore:
         return True
 
     async def run(self) -> None:
-        batch: list[ArbitrageOpportunity] = []
+        batch: list[OpportunityEpisode] = []
         self._worker_started = True
         try:
             while True:
@@ -293,30 +398,38 @@ class OpportunityStore:
 
     async def recent(self, limit: int = 100) -> list[dict[str, Any]]:
         query = """
-        SELECT timestamp_ns, pair, quote_asset, buy_exchange, sell_exchange, buy_price, sell_price,
-               spread_pct, max_size, theoretical_profit
-        FROM opportunities
-        ORDER BY timestamp_ns DESC
+        SELECT start_ns, end_ns, pair, quote_asset, buy_exchange, sell_exchange, buy_price,
+               sell_price, spread_pct, max_size, theoretical_profit, peak_spread_pct, peak_size,
+               peak_profit, close_spread_pct, close_reason
+        FROM opportunity_episodes
+        ORDER BY start_ns DESC, id DESC
         LIMIT ?
         """
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(query, (limit,))
             rows = await cursor.fetchall()
-        return [
-            {
-                "timestamp_ns": row[0],
-                "pair": row[1],
-                "quote_asset": row[2],
-                "buy_exchange": row[3],
-                "sell_exchange": row[4],
-                "buy_price": row[5],
-                "sell_price": row[6],
-                "spread_pct": row[7],
-                "max_size": row[8],
-                "theoretical_profit": row[9],
-            }
-            for row in rows
-        ]
+        return [_episode_payload(row) for row in rows]
+
+    async def open_count(self) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM opportunity_episodes "
+                "WHERE end_ns IS NULL AND close_reason IS NULL"
+            )
+            row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def lifetimes(self, window_ns: int | None) -> dict[str, object] | None:
+        """Lifetime distribution of episodes that started in the window and have closed."""
+        cutoff_ns = 0 if window_ns is None else time.time_ns() - window_ns
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT end_ns - start_ns FROM opportunity_episodes "
+                "WHERE start_ns >= ? AND end_ns IS NOT NULL",
+                (cutoff_ns,),
+            )
+            rows = await cursor.fetchall()
+        return lifetime_summary([int(row[0]) for row in rows])
 
     async def _windowed_totals(
         self, db: aiosqlite.Connection, cutoff_ns: int
@@ -331,9 +444,9 @@ class OpportunityStore:
         )
         rolled = await cursor.fetchone() or (0, None, 0.0)
         cursor = await db.execute(
-            "SELECT COUNT(*), MAX(CAST(spread_pct AS REAL)), "
-            "COALESCE(SUM(CAST(spread_pct AS REAL)), 0) "
-            "FROM opportunities WHERE timestamp_ns >= ? AND timestamp_ns < ?",
+            "SELECT COUNT(*), MAX(CAST(peak_spread_pct AS REAL)), "
+            "COALESCE(SUM(CAST(peak_spread_pct AS REAL)), 0) "
+            "FROM opportunity_episodes WHERE start_ns >= ? AND start_ns < ?",
             (cutoff_ns, boundary_ns),
         )
         partial = await cursor.fetchone() or (0, None, 0.0)
@@ -345,8 +458,8 @@ class OpportunityStore:
                 (boundary_ns,),
             ),
             (
-                "SELECT quote_asset, SUM(CAST(theoretical_profit AS REAL)) FROM opportunities "
-                "WHERE timestamp_ns >= ? AND timestamp_ns < ? GROUP BY quote_asset",
+                "SELECT quote_asset, SUM(CAST(peak_profit AS REAL)) FROM opportunity_episodes "
+                "WHERE start_ns >= ? AND start_ns < ? GROUP BY quote_asset",
                 (cutoff_ns, boundary_ns),
             ),
         ):
@@ -373,8 +486,8 @@ class OpportunityStore:
         for pair, count in await cursor.fetchall():
             counts[pair] = counts.get(pair, 0) + int(count)
         cursor = await db.execute(
-            "SELECT pair, COUNT(*) FROM opportunities "
-            "WHERE timestamp_ns >= ? AND timestamp_ns < ? GROUP BY pair",
+            "SELECT pair, COUNT(*) FROM opportunity_episodes "
+            "WHERE start_ns >= ? AND start_ns < ? GROUP BY pair",
             (cutoff_ns, boundary_ns),
         )
         for pair, count in await cursor.fetchall():
@@ -427,7 +540,7 @@ class OpportunityStore:
             # The cutoff can fall inside a minute the rollup only holds whole, so
             # that minute is counted from the rows actually inside the window.
             cursor = await db.execute(
-                "SELECT COUNT(*) FROM opportunities WHERE timestamp_ns >= ? AND timestamp_ns < ?",
+                "SELECT COUNT(*) FROM opportunity_episodes WHERE start_ns >= ? AND start_ns < ?",
                 (cutoff_ns, boundary_ns),
             )
             partial = await cursor.fetchone()
@@ -456,13 +569,13 @@ class OpportunityStore:
                 buckets[bucket] = (existing[0] + count, max(existing[1], max_spread))
 
         raw_query = (
-            "SELECT timestamp_ns / ?, COUNT(*), MAX(CAST(spread_pct AS REAL)) "
-            "FROM opportunities WHERE timestamp_ns >= ?"
+            "SELECT start_ns / ?, COUNT(*), MAX(CAST(peak_spread_pct AS REAL)) "
+            "FROM opportunity_episodes WHERE start_ns >= ?"
         )
         async with aiosqlite.connect(self.db_path) as db:
             if bucket_ns % MINUTE_NS == 0:
                 # Whole-minute buckets align with the rollup, so read it rather
-                # than every stored opportunity in the window.
+                # than every stored episode in the window.
                 boundary_ns = _minute_boundary(cutoff_ns)
                 cursor = await db.execute(
                     "SELECT minute_ns / ?, SUM(count), MAX(max_spread_pct) "
@@ -472,7 +585,7 @@ class OpportunityStore:
                 for bucket, count, max_spread in await cursor.fetchall():
                     add(int(bucket), int(count), float(max_spread))
                 cursor = await db.execute(
-                    raw_query + " AND timestamp_ns < ? GROUP BY 1",
+                    raw_query + " AND start_ns < ? GROUP BY 1",
                     (bucket_ns, cutoff_ns, boundary_ns),
                 )
             else:
@@ -488,39 +601,41 @@ class OpportunityStore:
             for bucket in sorted(buckets)
         ]
 
-    async def _flush(self, batch: Iterable[ArbitrageOpportunity]) -> None:
+    async def _flush(self, batch: Iterable[OpportunityEpisode]) -> None:
         batch = list(batch)
-        rows = [
-            (
-                opp.timestamp_ns,
-                opp.pair,
-                opp.buy_exchange,
-                opp.sell_exchange,
-                str(opp.buy_price),
-                str(opp.sell_price),
-                str(opp.spread_pct),
-                str(opp.max_size),
-                opp.quote_asset,
-                str(opp.theoretical_profit),
-            )
-            for opp in batch
-        ]
         db = self._db
         if db is None:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
             db = self._db = await aiosqlite.connect(self.db_path)
-        await db.executemany(
-            """
-            INSERT INTO opportunities (
-                timestamp_ns, pair, buy_exchange, sell_exchange, buy_price, sell_price,
-                spread_pct, max_size, quote_asset, theoretical_profit
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            rows,
-        )
+        # Events are applied in arrival order, so an open and its close in
+        # the same batch insert and then update the same row.
+        await db.executemany(UPSERT_EPISODE_SQL, [_episode_row(episode) for episode in batch])
         await db.executemany(UPSERT_ROLLUP_SQL, _rollup_rows(batch))
-        # One transaction, so the rollup can never record opportunities the
-        # table does not hold, or miss ones it does.
+        # One transaction, so the rollup can never record episodes the table
+        # does not hold, or miss ones it does.
         await db.commit()
         self._flushed_count += len(batch)
         persistence_unflushed_rows.set(self.unflushed_count)
+
+
+def _episode_payload(row: Any) -> dict[str, Any]:
+    start_ns, end_ns = int(row[0]), row[1]
+    return {
+        "start_ns": start_ns,
+        "end_ns": None if end_ns is None else int(end_ns),
+        "duration_ns": None if end_ns is None else int(end_ns) - start_ns,
+        "pair": row[2],
+        "quote_asset": row[3],
+        "buy_exchange": row[4],
+        "sell_exchange": row[5],
+        "buy_price": row[6],
+        "sell_price": row[7],
+        "spread_pct": row[8],
+        "max_size": row[9],
+        "theoretical_profit": row[10],
+        "peak_spread_pct": row[11],
+        "peak_size": row[12],
+        "peak_profit": row[13],
+        "close_spread_pct": row[14],
+        "close_reason": row[15],
+    }

@@ -64,9 +64,26 @@ class TopOfBook:
         }
 
 
+# Why an episode closed. `spread_closed`: the route fell below threshold while
+# both books stayed eligible. `book_ineligible`: a leg's book left the eligible
+# set, so the spread's existence became unknown rather than gone. `shutdown`:
+# the process stopped with the spread still standing.
+EpisodeCloseReason = Literal["spread_closed", "book_ineligible", "shutdown"]
+
+
 @dataclass(frozen=True)
-class ArbitrageOpportunity:
-    timestamp_ns: int
+class OpportunityEpisode:
+    """One dislocation from appearance to disappearance on a (pair, buy, sell) route.
+
+    `start_ns` is wall-clock and identifies the episode; `end_ns` is derived
+    from a monotonic duration so a system-clock step cannot produce a negative
+    or inflated lifetime. The `*_price`, `spread_pct`, `max_size` and
+    `theoretical_profit` fields are the values at open; `peak_*` track the
+    widest spread seen and the size and profit at that moment. An open episode
+    has `end_ns`, `close_spread_pct` and `close_reason` unset.
+    """
+
+    start_ns: int
     pair: str
     quote_asset: str
     buy_exchange: str
@@ -76,10 +93,30 @@ class ArbitrageOpportunity:
     spread_pct: Decimal
     max_size: Decimal
     theoretical_profit: Decimal
+    peak_spread_pct: Decimal
+    peak_size: Decimal
+    peak_profit: Decimal
+    end_ns: int | None = None
+    close_spread_pct: Decimal | None = None
+    close_reason: EpisodeCloseReason | None = None
+
+    @property
+    def route(self) -> tuple[str, str, str]:
+        return (self.pair, self.buy_exchange, self.sell_exchange)
+
+    @property
+    def is_open(self) -> bool:
+        return self.end_ns is None
+
+    @property
+    def duration_ns(self) -> int | None:
+        return None if self.end_ns is None else self.end_ns - self.start_ns
 
     def as_payload(self) -> dict[str, object]:
         return {
-            "timestamp_ns": str(self.timestamp_ns),
+            "start_ns": str(self.start_ns),
+            "end_ns": None if self.end_ns is None else str(self.end_ns),
+            "duration_ns": None if self.duration_ns is None else str(self.duration_ns),
             "pair": self.pair,
             "quote_asset": self.quote_asset,
             "buy_exchange": self.buy_exchange,
@@ -89,6 +126,13 @@ class ArbitrageOpportunity:
             "spread_pct": str(self.spread_pct),
             "max_size": str(self.max_size),
             "theoretical_profit": str(self.theoretical_profit),
+            "peak_spread_pct": str(self.peak_spread_pct),
+            "peak_size": str(self.peak_size),
+            "peak_profit": str(self.peak_profit),
+            "close_spread_pct": (
+                None if self.close_spread_pct is None else str(self.close_spread_pct)
+            ),
+            "close_reason": self.close_reason,
         }
 
 

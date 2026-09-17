@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from arb.persistence import MINUTE_NS
+from arb.persistence import MINUTE_NS, ROLLUP_REBUILD_SELECT, SCHEMA_VERSION
 
 
 def prune_batch(
@@ -39,16 +39,20 @@ def prune_batch(
     deadline = time.monotonic() + timeout_seconds
     db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 100)
     try:
-        if db.execute("PRAGMA user_version").fetchone()[0] != 2:
-            raise ValueError("Expected schema version 2; start the current application first")
+        if db.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+            raise ValueError(
+                f"Expected schema version {SCHEMA_VERSION}; start the current application first"
+            )
         db.execute("BEGIN IMMEDIATE")
+        # Episodes are pruned by start time, open or not: an open episode older
+        # than the cutoff is one a previous process never closed.
         rows = db.execute(
-            "SELECT id, timestamp_ns, pair FROM opportunities "
-            "WHERE timestamp_ns < ? ORDER BY timestamp_ns, id LIMIT ?",
+            "SELECT id, start_ns, pair FROM opportunity_episodes "
+            "WHERE start_ns < ? ORDER BY start_ns, id LIMIT ?",
             (cutoff_ns, batch_size),
         ).fetchall()
-        affected = {(timestamp // MINUTE_NS * MINUTE_NS, pair) for _, timestamp, pair in rows}
-        db.executemany("DELETE FROM opportunities WHERE id = ?", [(row[0],) for row in rows])
+        affected = {(start // MINUTE_NS * MINUTE_NS, pair) for _, start, pair in rows}
+        db.executemany("DELETE FROM opportunity_episodes WHERE id = ?", [(row[0],) for row in rows])
         for minute, pair in affected:
             db.execute(
                 "DELETE FROM opportunity_minutes WHERE minute_ns = ? AND pair = ?",
@@ -58,10 +62,7 @@ def prune_batch(
             db.execute(
                 "INSERT INTO opportunity_minutes "
                 "(minute_ns, pair, count, max_spread_pct, sum_spread_pct, quote_asset, sum_profit) "
-                "SELECT ?, pair, COUNT(*), MAX(CAST(spread_pct AS REAL)), "
-                "SUM(CAST(spread_pct AS REAL)), quote_asset, SUM(CAST(theoretical_profit AS REAL)) "
-                "FROM opportunities WHERE pair = ? AND timestamp_ns >= ? AND timestamp_ns < ? "
-                "GROUP BY pair, quote_asset",
+                + ROLLUP_REBUILD_SELECT,
                 (minute, pair, minute, minute + MINUTE_NS),
             )
         if time.monotonic() >= deadline:

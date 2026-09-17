@@ -10,7 +10,8 @@ from arb.api import create_app
 from arb.broadcast import LiveBroadcaster
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
-from arb.types import ArbitrageOpportunity, EventKind, MarketEvent, PriceLevel
+from arb.types import EventKind, MarketEvent, OpportunityEpisode, PriceLevel
+from episodes import close_episode, make_episode
 from fastapi.testclient import TestClient
 
 
@@ -47,8 +48,8 @@ async def test_recent_endpoint_returns_saved_rows(tmp_path: Path) -> None:
     store = OpportunityStore(str(db_path), batch_size=1, flush_interval_seconds=0.01)
     await store.initialize()
     await store.enqueue(
-        ArbitrageOpportunity(
-            timestamp_ns=1,
+        make_episode(
+            start_ns=1,
             pair="BTC-USD",
             quote_asset="USD",
             buy_exchange="gemini",
@@ -68,7 +69,8 @@ async def test_recent_endpoint_returns_saved_rows(tmp_path: Path) -> None:
     response = client.get("/api/opportunities/recent?limit=10")
     assert response.status_code == 200
     assert response.json()[0]["pair"] == "BTC-USD"
-    assert response.json()[0]["timestamp_ns"] == "1"
+    assert response.json()[0]["start_ns"] == "1"
+    assert response.json()[0]["end_ns"] is None
     assert response.json()[0]["quote_asset"] == "USD"
     assert response.json()[0]["theoretical_profit"] == "0.5"
 
@@ -450,8 +452,8 @@ async def test_stats_endpoint_returns_aggregates(tmp_path: Path) -> None:
     await store.initialize()
     now_ns = time.time_ns()
     await store.enqueue(
-        ArbitrageOpportunity(
-            timestamp_ns=now_ns,
+        make_episode(
+            start_ns=now_ns,
             pair="BTC-USD",
             quote_asset="USD",
             buy_exchange="gemini",
@@ -528,21 +530,9 @@ def test_websocket_connection_restores_only_current_eligible_books() -> None:
     assert [status["eligible"] for status in snapshot["payload"]["statuses"]] == [True, False]
 
 
-def _seed_opp(store: OpportunityStore, **kwargs: Any) -> ArbitrageOpportunity:
-    defaults: dict[str, Any] = dict(
-        timestamp_ns=time.time_ns(),
-        pair="BTC-USD",
-        quote_asset="USD",
-        buy_exchange="gemini",
-        sell_exchange="coinbase",
-        buy_price=Decimal("100"),
-        sell_price=Decimal("103"),
-        spread_pct=Decimal("3"),
-        max_size=Decimal("1"),
-        theoretical_profit=Decimal("3"),
-    )
-    defaults.update(kwargs)
-    return ArbitrageOpportunity(**defaults)
+def _seed_opp(store: OpportunityStore, **kwargs: Any) -> OpportunityEpisode:
+    kwargs.setdefault("start_ns", time.time_ns())
+    return make_episode(**kwargs)
 
 
 @pytest.mark.asyncio
@@ -560,6 +550,8 @@ async def test_system_overview_reports_uptime_and_started_at(tmp_path: Path) -> 
     assert body["uptime_seconds"] >= 5
     assert body["all_time_count"] == 0
     assert body["all_time_peak_minute"] is None
+    assert body["open_count"] == 0
+    assert body["all_time_lifetime"] is None
 
 
 @pytest.mark.asyncio
@@ -570,13 +562,9 @@ async def test_system_stats_endpoint_returns_extended_aggregates(tmp_path: Path)
     await store.initialize()
     runner = asyncio.create_task(store.run())
     now = time.time_ns()
-    await store.enqueue(_seed_opp(store, timestamp_ns=now, spread_pct=Decimal("2"), pair="BTC-USD"))
-    await store.enqueue(
-        _seed_opp(store, timestamp_ns=now - 1, spread_pct=Decimal("4"), pair="BTC-USD")
-    )
-    await store.enqueue(
-        _seed_opp(store, timestamp_ns=now - 2, spread_pct=Decimal("1"), pair="ETH-USD")
-    )
+    await store.enqueue(_seed_opp(store, start_ns=now, spread_pct=Decimal("2"), pair="BTC-USD"))
+    await store.enqueue(_seed_opp(store, start_ns=now - 1, spread_pct=Decimal("4"), pair="BTC-USD"))
+    await store.enqueue(_seed_opp(store, start_ns=now - 2, spread_pct=Decimal("1"), pair="ETH-USD"))
     await store.close()
     await asyncio.wait_for(runner, timeout=1.0)
 
@@ -589,6 +577,47 @@ async def test_system_stats_endpoint_returns_extended_aggregates(tmp_path: Path)
     assert Decimal(body["max_spread_pct"]) == Decimal("4")
     assert body["top_pair"] == "BTC-USD"
     assert body["peak_minute"] is not None
+    assert body["lifetime"] is None, "no episode has closed yet"
+
+
+@pytest.mark.asyncio
+async def test_stats_and_overview_report_episode_lifetimes(tmp_path: Path) -> None:
+    # ARB-031: lifetime distribution covers episodes that started in the
+    # window and have closed; open ones are counted separately.
+    store = OpportunityStore(
+        str(tmp_path / "life.sqlite3"), batch_size=10, flush_interval_seconds=0.05
+    )
+    await store.initialize()
+    runner = asyncio.create_task(store.run())
+    now = time.time_ns()
+    second = 1_000_000_000
+    still_open = _seed_opp(store, start_ns=now, pair="ETH-USD")
+    for offset, duration in ((1, 2 * second), (2, 4 * second), (3, 30 * second)):
+        opened = _seed_opp(store, start_ns=now - offset)
+        await store.enqueue(opened)
+        await store.enqueue(close_episode(opened, duration_ns=duration))
+    await store.enqueue(still_open)
+    await store.close()
+    await asyncio.wait_for(runner, timeout=1.0)
+
+    client = TestClient(create_app(store, OrderBookManager(), LiveBroadcaster()))
+    stats = client.get("/api/system/stats?window=1h").json()
+    assert stats["count"] == 4
+    assert stats["lifetime"] == {
+        "closed_count": 3,
+        "p50_seconds": 4.0,
+        "p90_seconds": 30.0,
+        "max_seconds": 30.0,
+    }
+    overview = client.get("/api/system/overview").json()
+    assert overview["open_count"] == 1
+    assert overview["all_time_lifetime"]["closed_count"] == 3
+
+    recent = client.get("/api/opportunities/recent?limit=10").json()
+    assert recent[0]["pair"] == "ETH-USD" and recent[0]["end_ns"] is None
+    assert recent[1]["end_ns"] == str(now - 1 + 2 * second)
+    assert recent[1]["duration_ns"] == str(2 * second)
+    assert recent[1]["close_reason"] == "spread_closed"
 
 
 @pytest.mark.asyncio
@@ -600,8 +629,8 @@ async def test_system_timeseries_endpoint_returns_buckets(tmp_path: Path) -> Non
     runner = asyncio.create_task(store.run())
     bucket_ns = 60 * 1_000_000_000
     base = (time.time_ns() // bucket_ns) * bucket_ns
-    await store.enqueue(_seed_opp(store, timestamp_ns=base))
-    await store.enqueue(_seed_opp(store, timestamp_ns=base + bucket_ns))
+    await store.enqueue(_seed_opp(store, start_ns=base))
+    await store.enqueue(_seed_opp(store, start_ns=base + bucket_ns))
     await store.close()
     await asyncio.wait_for(runner, timeout=1.0)
 

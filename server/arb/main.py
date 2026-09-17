@@ -34,7 +34,13 @@ from arb.metrics import (
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
 from arb.reconcile import SnapshotReconciler
-from arb.types import BookEligibility, BookUpdateResult, LiveMessage, MarketEvent
+from arb.types import (
+    BookEligibility,
+    BookUpdateResult,
+    LiveMessage,
+    MarketEvent,
+    OpportunityEpisode,
+)
 
 if TYPE_CHECKING:
     from arb.replay import ReplayReport
@@ -115,9 +121,19 @@ async def process_market_event(
         now_monotonic_ns if now_monotonic_ns is not None else time.monotonic_ns()
     )
     status = book_manager.eligibility(event.exchange, event.pair, eligibility_checked_ns)
+    detected_ns = detected_at_ns if detected_at_ns is not None else time.time_ns()
     if not result.accepted or result.top_of_book is None:
         metrics.eligible.set(0)
         await broadcaster.broadcast_status(status, immediate=True)
+        # This leg just left the eligible set, and detection below is skipped,
+        # so any episode standing on it must be closed here.
+        await deliver_episodes(
+            detector.close_for_book(
+                event.exchange, event.pair, detected_ns, eligibility_checked_ns
+            ),
+            store=store,
+            broadcaster=broadcaster,
+        )
         return result
 
     metrics.updates.inc()
@@ -126,6 +142,13 @@ async def process_market_event(
     metrics.eligible.set(1 if status.eligible else 0)
     if not status.eligible:
         await broadcaster.broadcast_status(status, immediate=True)
+        await deliver_episodes(
+            detector.close_for_book(
+                event.exchange, event.pair, detected_ns, eligibility_checked_ns
+            ),
+            store=store,
+            broadcaster=broadcaster,
+        )
         return result
 
     await broadcaster.broadcast_book(
@@ -138,20 +161,25 @@ async def process_market_event(
         event.pair, eligibility_checked_ns, known=result.top_of_book
     )
     detect_started = time.perf_counter()
-    detected_ns = detected_at_ns if detected_at_ns is not None else time.time_ns()
-    opportunities = detector.detect_for_pair(event.pair, pair_books, detected_ns)
+    episodes = detector.detect_for_pair(event.pair, pair_books, detected_ns, eligibility_checked_ns)
     detection_latency_seconds.observe(time.perf_counter() - detect_started)
-    for opportunity in opportunities:
-        opportunity_counter(opportunity.pair).inc()
-        await store.enqueue(opportunity)
-        await broadcaster.broadcast(
-            LiveMessage(type="opportunity", payload=opportunity.as_payload())
-        )
+    await deliver_episodes(episodes, store=store, broadcaster=broadcaster)
     # Buffered socket reads and put_nowait-based delivery may otherwise run a
     # whole burst without yielding. Let senders and persistence drain their
     # bounded queues before consuming another update.
     await asyncio.sleep(0)
     return result
+
+
+async def deliver_episodes(
+    episodes: list[OpportunityEpisode], *, store: OpportunityStore, broadcaster: LiveBroadcaster
+) -> None:
+    """Persist and publish episode open and close events in order."""
+    for episode in episodes:
+        if episode.is_open:
+            opportunity_counter(episode.pair).inc()
+        await store.enqueue(episode)
+        await broadcaster.broadcast(LiveMessage(type="opportunity", payload=episode.as_payload()))
 
 
 async def consume_adapter(
@@ -317,6 +345,13 @@ async def shutdown_pipeline(pipeline: Pipeline, tasks: PipelineTasks) -> None:
         task.cancel()
     tasks.reconciler.cancel()
     await asyncio.gather(*tasks.adapters, tasks.reconciler, return_exceptions=True)
+    # Nothing can open an episode once the adapters are gone; close the ones
+    # still standing so storage never holds an episode with no end.
+    await deliver_episodes(
+        pipeline.detector.close_all(time.time_ns()),
+        store=pipeline.store,
+        broadcaster=pipeline.broadcaster,
+    )
     await pipeline.broadcaster.aclose()
     # Adapters hold a reused REST pool; close it only once nothing can fetch.
     await asyncio.gather(
@@ -422,6 +457,11 @@ async def run_replay_serve(
         pipeline.supervisor.stop()
         replay_task.cancel()
         await asyncio.gather(replay_task, return_exceptions=True)
+        await deliver_episodes(
+            pipeline.detector.close_all(time.time_ns()),
+            store=pipeline.store,
+            broadcaster=pipeline.broadcaster,
+        )
         await pipeline.broadcaster.aclose()
         await asyncio.gather(
             *(adapter.aclose() for adapter in pipeline.adapters), return_exceptions=True
