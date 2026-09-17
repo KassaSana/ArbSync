@@ -694,8 +694,8 @@ def parse_duration(value: str) -> float:
         seconds = float(text) * multiplier
     except ValueError as exc:
         raise ConfigError(f"invalid duration {value!r}; expected like 90s, 10m, or 1h") from exc
-    if seconds <= 0:
-        raise ConfigError(f"duration must be greater than zero; got {value!r}")
+    if not isfinite(seconds) or seconds <= 0:
+        raise ConfigError(f"duration must be finite and greater than zero; got {value!r}")
     return seconds
 
 

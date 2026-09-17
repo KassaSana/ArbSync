@@ -205,13 +205,22 @@ def test_capture_config_rejects_non_table(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("value", "expected"),
-    [("90s", 90.0), ("10m", 600.0), ("1h", 3600.0), ("1.5m", 90.0), ("60", 60.0)],
+    [
+        ("90s", 90.0),
+        ("10m", 600.0),
+        ("1h", 3600.0),
+        ("1.5m", 90.0),
+        ("60", 60.0),
+    ],
 )
 def test_parse_duration_accepts_suffixes(value: str, expected: float) -> None:
     assert main_module.parse_duration(value) == expected
 
 
-@pytest.mark.parametrize("value", ["0", "-5s", "0m", "soon", "10x", ""])
+@pytest.mark.parametrize(
+    "value",
+    ["nan", "inf", "-inf", "0", "0m", "-5s", "soon", "10x", ""],
+)
 def test_parse_duration_rejects_bad_values(value: str) -> None:
     with pytest.raises(ConfigError, match="duration|invalid duration"):
         main_module.parse_duration(value)
