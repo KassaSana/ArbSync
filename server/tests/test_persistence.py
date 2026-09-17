@@ -826,18 +826,52 @@ async def test_close_event_updates_the_open_row_and_adjusts_the_rollup(tmp_path:
 
 
 @pytest.mark.asyncio
-async def test_open_and_close_in_one_batch_and_a_close_without_its_open(tmp_path: Path) -> None:
+async def test_close_without_accepted_open_reconciles_every_reader_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
     store = OpportunityStore(str(tmp_path / "batch.sqlite3"))
     await store.initialize()
-    first = make_opp(1, spread="2", profit="1")
-    orphan_close = close_episode(make_opp(2, spread="3", profit="1.5"), duration_ns=10)
+    minute_ns = 60_000_000_000
+    base = (time.time_ns() // minute_ns) * minute_ns
+    first = make_opp(base + 1, spread="2", profit="1")
+    dropped_open = make_opp(base + 2, spread="3", profit="1.5")
+    orphan_close = close_episode(
+        dropped_open,
+        duration_ns=10_000_000_000,
+        peak_spread_pct=Decimal("4"),
+        peak_profit=Decimal("2"),
+    )
     await store._flush([first, close_episode(first, duration_ns=5), orphan_close])
+
+    # Retrying either lifecycle event, in either order, must not duplicate the
+    # episode, reopen it, or increment its derived aggregates again.
+    await store._flush([orphan_close, dropped_open, orphan_close])
+
     rows = await store.recent()
-    assert [(row["start_ns"], row["end_ns"]) for row in rows] == [(2, 12), (1, 6)]
-    # The dropped open contributed no count, so the close's count stands alone
-    # in the row table; the rollup only ever saw the first episode's open.
+    assert [(row["start_ns"], row["end_ns"]) for row in rows] == [
+        (base + 2, base + 2 + 10_000_000_000),
+        (base + 1, base + 6),
+    ]
+    assert rows[0]["peak_spread_pct"] == "4"
+    assert rows[0]["close_reason"] == "spread_closed"
+
+    assert await store.lifetimes(window_ns=None) == {
+        "closed_count": 2,
+        "p50_seconds": 10.0,
+        "p90_seconds": 10.0,
+        "max_seconds": 10.0,
+    }
     stats = await store.extended_stats(window_ns=None)
-    assert stats["count"] == 1 + 0
+    assert stats == {
+        "count": 2,
+        "max_spread_pct": "4.0",
+        "mean_spread_pct": "3.0",
+        "theoretical_profit_by_quote": {"USD": "3.0"},
+        "top_pair": "BTC-USD",
+    }
+    assert await store.timeseries(window_ns=3_600_000_000_000, bucket_seconds=60) == [
+        {"bucket_start_ns": base, "count": 2, "max_spread_pct": "4.0"}
+    ]
     assert await store.open_count() == 0
     await store._close_db()
 

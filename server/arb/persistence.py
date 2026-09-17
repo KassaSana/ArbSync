@@ -69,24 +69,29 @@ INSERT INTO opportunity_episodes (
     peak_spread_pct, peak_size, peak_profit, pricing_ledgers, close_spread_pct, close_reason
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(start_ns, pair, buy_exchange, sell_exchange) DO UPDATE SET
-    end_ns = excluded.end_ns,
-    peak_spread_pct = excluded.peak_spread_pct,
-    peak_size = excluded.peak_size,
-    peak_profit = excluded.peak_profit,
-    pricing_ledgers = excluded.pricing_ledgers,
-    close_spread_pct = excluded.close_spread_pct,
-    close_reason = excluded.close_reason
+    end_ns = CASE WHEN opportunity_episodes.end_ns IS NOT NULL
+        THEN opportunity_episodes.end_ns ELSE excluded.end_ns END,
+    peak_spread_pct = CASE WHEN opportunity_episodes.end_ns IS NOT NULL
+        THEN opportunity_episodes.peak_spread_pct ELSE excluded.peak_spread_pct END,
+    peak_size = CASE WHEN opportunity_episodes.end_ns IS NOT NULL
+        THEN opportunity_episodes.peak_size ELSE excluded.peak_size END,
+    peak_profit = CASE WHEN opportunity_episodes.end_ns IS NOT NULL
+        THEN opportunity_episodes.peak_profit ELSE excluded.peak_profit END,
+    pricing_ledgers = CASE WHEN opportunity_episodes.end_ns IS NOT NULL
+        THEN opportunity_episodes.pricing_ledgers ELSE excluded.pricing_ledgers END,
+    close_spread_pct = CASE WHEN opportunity_episodes.end_ns IS NOT NULL
+        THEN opportunity_episodes.close_spread_pct ELSE excluded.close_spread_pct END,
+    close_reason = CASE WHEN opportunity_episodes.end_ns IS NOT NULL
+        THEN opportunity_episodes.close_reason ELSE excluded.close_reason END
 """
 
 MINUTE_NS = 60_000_000_000
 
-# Per-minute, per-pair totals keyed by episode start, maintained as episodes
-# are written, so the statistics endpoints read one row per minute and pair
-# instead of every stored episode. An open event counts the episode with its
-# open-time spread and profit; its close event adds the difference to the
-# peak, which only ever grows, so MAX and the sums stay exact without a
-# rebuild. Aggregates are REAL because the queries they replace already
-# computed MAX/AVG/SUM through CAST(... AS REAL); exact decimal values stay in
+# Per-minute, per-pair totals keyed by episode start, rebuilt for each affected
+# minute as canonical episodes are written. This makes retries and a close
+# whose bounded-queue open was dropped idempotent without blocking ingestion.
+# Aggregates are REAL because the queries they replace already computed
+# MAX/AVG/SUM through CAST(... AS REAL); exact decimal values stay in
 # `opportunity_episodes`, which remains the source of truth.
 CREATE_ROLLUP_SQL = """
 CREATE TABLE IF NOT EXISTS opportunity_minutes (
@@ -100,17 +105,6 @@ CREATE TABLE IF NOT EXISTS opportunity_minutes (
     PRIMARY KEY (minute_ns, pair)
 );
 CREATE INDEX IF NOT EXISTS idx_minutes_ns ON opportunity_minutes(minute_ns);
-"""
-
-UPSERT_ROLLUP_SQL = """
-INSERT INTO opportunity_minutes (
-    minute_ns, pair, count, max_spread_pct, sum_spread_pct, quote_asset, sum_profit
-) VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(minute_ns, pair) DO UPDATE SET
-    count = count + excluded.count,
-    max_spread_pct = MAX(max_spread_pct, excluded.max_spread_pct),
-    sum_spread_pct = sum_spread_pct + excluded.sum_spread_pct,
-    sum_profit = sum_profit + excluded.sum_profit
 """
 
 # Column list the readers and the pruner's rebuild share with the writer.
@@ -144,48 +138,6 @@ def _episode_row(episode: OpportunityEpisode) -> tuple[object, ...]:
         None if episode.close_spread_pct is None else str(episode.close_spread_pct),
         episode.close_reason,
     )
-
-
-def _rollup_rows(batch: Iterable[OpportunityEpisode]) -> list[tuple[object, ...]]:
-    """Fold a write batch into one rollup delta per minute and pair.
-
-    An open event contributes the episode's count and open-time values; a
-    close event contributes no count and only the growth from open to peak.
-    """
-    totals: dict[tuple[int, str], tuple[int, float, float, str, float]] = {}
-    for episode in batch:
-        key = ((episode.start_ns // MINUTE_NS) * MINUTE_NS, episode.pair)
-        peak_spread = float(episode.peak_spread_pct)
-        if episode.is_open:
-            count = 1
-            spread_delta = peak_spread
-            profit_delta = float(episode.peak_profit)
-        else:
-            count = 0
-            spread_delta = peak_spread - float(episode.spread_pct)
-            profit_delta = float(episode.peak_profit) - float(episode.theoretical_profit)
-        entry = totals.get(key)
-        if entry is None:
-            totals[key] = (count, peak_spread, spread_delta, episode.quote_asset, profit_delta)
-        else:
-            existing_count, max_spread, sum_spread, quote_asset, sum_profit = entry
-            totals[key] = (
-                existing_count + count,
-                max(max_spread, peak_spread),
-                sum_spread + spread_delta,
-                quote_asset,
-                sum_profit + profit_delta,
-            )
-    return [
-        (minute_ns, pair, int(count), max_spread, sum_spread, quote_asset, sum_profit)
-        for (minute_ns, pair), (
-            count,
-            max_spread,
-            sum_spread,
-            quote_asset,
-            sum_profit,
-        ) in totals.items()
-    ]
 
 
 def lifetime_summary(durations_ns: list[int]) -> dict[str, object] | None:
@@ -615,6 +567,9 @@ class OpportunityStore:
 
     async def _flush(self, batch: Iterable[OpportunityEpisode]) -> None:
         batch = list(batch)
+        affected = sorted(
+            {((episode.start_ns // MINUTE_NS) * MINUTE_NS, episode.pair) for episode in batch}
+        )
         db = self._db
         if db is None:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -622,9 +577,20 @@ class OpportunityStore:
         # Events are applied in arrival order, so an open and its close in
         # the same batch insert and then update the same row.
         await db.executemany(UPSERT_EPISODE_SQL, [_episode_row(episode) for episode in batch])
-        await db.executemany(UPSERT_ROLLUP_SQL, _rollup_rows(batch))
-        # One transaction, so the rollup can never record episodes the table
-        # does not hold, or miss ones it does.
+        for minute_ns, pair in affected:
+            await db.execute(
+                "DELETE FROM opportunity_minutes WHERE minute_ns = ? AND pair = ?",
+                (minute_ns, pair),
+            )
+            await db.execute(
+                "INSERT INTO opportunity_minutes "
+                "(minute_ns, pair, count, max_spread_pct, sum_spread_pct, "
+                "quote_asset, sum_profit) " + ROLLUP_REBUILD_SELECT,
+                (minute_ns, pair, minute_ns, minute_ns + MINUTE_NS),
+            )
+        # Canonical rows and their rebuilt derived minutes commit together.
+        # Replaying an open or close therefore cannot increment a rollup twice,
+        # and a close whose bounded-queue open was dropped still contributes.
         await db.commit()
         self._flushed_count += len(batch)
         persistence_unflushed_rows.set(self.unflushed_count)

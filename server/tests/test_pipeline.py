@@ -21,6 +21,17 @@ def snapshot(exchange: str, bid: str = "100", ask: str = "101") -> MarketEvent:
     )
 
 
+def delta(exchange: str, sequence: int, bid: str = "100") -> MarketEvent:
+    return MarketEvent(
+        exchange=exchange,
+        pair="BTC-USD",
+        kind=EventKind.DELTA,
+        sequence=sequence,
+        timestamp_ns=sequence,
+        bids=(PriceLevel(Decimal(bid), Decimal("1")),),
+    )
+
+
 class RecordingBroadcaster:
     """Records deliveries in order across the immediate and coalesced paths.
 
@@ -512,6 +523,82 @@ async def test_leg_turning_ineligible_closes_its_episodes(monkeypatch) -> None:
     assert store.enqueue.await_count == 2
     # Only the open counted as a new opportunity.
     assert main.opportunity_counter.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sequence", [1, 0], ids=["duplicate", "older"])
+async def test_rejected_old_delta_keeps_healthy_episode_open(monkeypatch, sequence: int) -> None:
+    for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter"):
+        monkeypatch.setattr(main, name, Mock())
+    manager = OrderBookManager()
+    detector = ArbitrageDetector(Decimal("0.1"))
+    store = Mock(enqueue=AsyncMock(return_value=True))
+    broadcaster = RecordingBroadcaster()
+    publisher = main.BookEligibilityPublisher(manager, detector, store, broadcaster, ())
+    kwargs = dict(
+        book_manager=manager,
+        detector=detector,
+        store=store,
+        broadcaster=broadcaster,
+        eligibility_publisher=publisher,
+    )
+
+    await main.process_market_event(snapshot("coinbase", "103", "104"), **kwargs)
+    await main.process_market_event(snapshot("gemini", "100", "101"), **kwargs)
+    [opened] = detector.open_episodes()
+
+    result = await main.process_market_event(delta("gemini", sequence), **kwargs)
+
+    assert result.accepted is False
+    assert result.reason == "out_of_order"
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
+    assert detector.open_episodes() == [opened]
+    assert [
+        message.payload["end_ns"]
+        for message in broadcaster.messages
+        if message.type == "opportunity"
+    ] == [None]
+    assert main.book_metrics.return_value.eligible.set.call_args.args == (1,)
+
+
+@pytest.mark.asyncio
+async def test_sequence_gap_closes_episode_and_snapshot_recovery_reopens_it(monkeypatch) -> None:
+    for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter"):
+        monkeypatch.setattr(main, name, Mock())
+    manager = OrderBookManager()
+    detector = ArbitrageDetector(Decimal("0.1"))
+    store = Mock(enqueue=AsyncMock(return_value=True))
+    broadcaster = RecordingBroadcaster()
+    publisher = main.BookEligibilityPublisher(manager, detector, store, broadcaster, ())
+    kwargs = dict(
+        book_manager=manager,
+        detector=detector,
+        store=store,
+        broadcaster=broadcaster,
+        eligibility_publisher=publisher,
+    )
+
+    await main.process_market_event(snapshot("coinbase", "103", "104"), **kwargs)
+    await main.process_market_event(snapshot("gemini", "100", "101"), **kwargs)
+
+    gap = await main.process_market_event(delta("gemini", 3), **kwargs)
+
+    assert gap.accepted is False
+    assert gap.reason == "sequence_gap"
+    assert manager.eligibility("gemini", "BTC-USD").eligible is False
+    assert detector.open_episodes() == []
+    closed = [message for message in broadcaster.messages if message.type == "opportunity"][-1]
+    assert closed.payload["close_reason"] == "book_ineligible"
+    assert main.book_metrics.return_value.eligible.set.call_args.args == (0,)
+
+    recovered = await main.process_market_event(snapshot("gemini", "100", "101"), **kwargs)
+
+    assert recovered.accepted is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
+    assert len(detector.open_episodes()) == 1
+    reopened = [message for message in broadcaster.messages if message.type == "opportunity"][-1]
+    assert reopened.payload["end_ns"] is None
+    assert main.book_metrics.return_value.eligible.set.call_args.args == (1,)
 
 
 @pytest.mark.asyncio
