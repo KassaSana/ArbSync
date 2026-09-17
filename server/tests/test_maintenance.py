@@ -35,6 +35,7 @@ async def test_partial_minute_boundary_batches_restart_and_statistics(tmp_path: 
             make_opp(cutoff + 1, spread="3", pair="BTC-USDT"),
         ]
     )
+    await store._close_db()
     assert prune_batch(path, cutoff, batch_size=1) == 1
     assert counts(path) == (3, 3)
     assert prune_batch(path, cutoff, batch_size=1) == 1
@@ -138,6 +139,7 @@ async def test_expired_budget_rolls_back_and_lock_contention_fails(
     store = OpportunityStore(str(path))
     await store.initialize()
     await store._flush([make_opp(index) for index in range(20)])
+    await store._close_db()
     with sqlite3.connect(path) as blocker:
         blocker.execute("BEGIN IMMEDIATE")
         with pytest.raises(sqlite3.OperationalError, match="locked"):
@@ -157,6 +159,7 @@ async def test_rollup_rebuild_failure_rolls_back_deleted_rows(tmp_path: Path) ->
     store = OpportunityStore(str(path))
     await store.initialize()
     await store._flush([make_opp(1), make_opp(2)])
+    await store._close_db()
     with sqlite3.connect(path) as db:
         db.execute(
             "CREATE TRIGGER fail_rebuild BEFORE INSERT ON opportunity_minutes "
