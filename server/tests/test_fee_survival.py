@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from fee_survival import (
     load_rows,
     parse_fee_argument,
     parse_utc,
+    stored_survival,
     summarize,
 )
 
@@ -63,8 +66,8 @@ def seed_database(path: Path, rows: list[EpisodeRow]) -> None:
         connection.executemany(
             "INSERT INTO opportunity_episodes (start_ns, end_ns, pair, quote_asset, buy_exchange, "
             "sell_exchange, buy_price, sell_price, spread_pct, max_size, theoretical_profit, "
-            "peak_spread_pct, peak_size, peak_profit, close_reason) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "peak_spread_pct, peak_size, peak_profit, close_reason, pricing_ledgers) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     row.start_ns,
@@ -82,6 +85,7 @@ def seed_database(path: Path, rows: list[EpisodeRow]) -> None:
                     str(row.peak_size),
                     str(row.peak_profit),
                     row.close_reason,
+                    json.dumps(row.pricing_ledgers),
                 )
                 for row in rows
             ],
@@ -182,3 +186,38 @@ def test_argument_parsing() -> None:
         parse_fee_argument("gemini")
     with pytest.raises(argparse.ArgumentTypeError):
         parse_fee_argument("gemini=-1")
+
+
+def test_stored_survival_uses_persisted_net_values_and_depth_outcome() -> None:
+    row = replace(
+        make_row(start_ns=1, spread_pct="3"),
+        pricing_ledgers=(
+            {
+                "notional": "100",
+                "net_executable_spread_pct": "0.25",
+                "insufficient_depth": False,
+            },
+            {
+                "notional": "1000",
+                "net_executable_spread_pct": None,
+                "insufficient_depth": True,
+            },
+        ),
+    )
+
+    assert stored_survival([row]) == [
+        {
+            "notional": "100",
+            "priced": 1,
+            "insufficient_depth": 0,
+            "survivors": 1,
+            "net_profit_by_quote": {"USD": "0.25"},
+        },
+        {
+            "notional": "1000",
+            "priced": 0,
+            "insufficient_depth": 1,
+            "survivors": 0,
+            "net_profit_by_quote": {},
+        },
+    ]

@@ -1,16 +1,12 @@
-"""Apply per-venue taker fees to stored opportunity episodes and count the survivors.
+"""Report fee survival from the product's stored executable-pricing ledgers.
 
-Stored episodes are theoretical and pre-fee by design. This script answers the
-question the detector deliberately does not: how many of them would, at their widest
-moment, still have been positive after paying a taker fee on both legs, and how much
-that would have been worth at the top-of-book size recorded at that moment. One
-episode is one dislocation from appearance to disappearance, so nothing here needs
-deduplicating; each is paid at most once.
+Schema-v4 episodes carry the exact fee schedule and measured depth impact used by
+the product. The default report reads those stored decimal strings, so rerunning it
+does not substitute today's fees or reconstruct executable values from top of book.
 
-Fees are percentages of notional per side. The built-in scenarios are illustrative
-base-tier public schedules, not live quotes; pass `--fee EXCHANGE=PCT` to use your own.
-Everything else the detector excludes (slippage, latency, inventory, partial fills,
-withdrawal costs) is still excluded, so a survivor is an upper bound, not a trade.
+`--fee EXCHANGE=PCT` remains an explicitly counterfactual top-of-book scenario for
+older research data. It is not the product result. Latency, inventory and withdrawal
+costs remain excluded, so a survivor is not a trade recommendation.
 """
 
 from __future__ import annotations
@@ -22,29 +18,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-
-BUILT_IN_SCENARIOS: dict[str, dict[str, Decimal]] = {
-    "base_retail_taker": {
-        "coinbase": Decimal("0.60"),
-        "gemini": Decimal("0.40"),
-        "binance": Decimal("0.60"),
-    },
-    "mid_volume_taker": {
-        "coinbase": Decimal("0.35"),
-        "gemini": Decimal("0.25"),
-        "binance": Decimal("0.35"),
-    },
-    "vip_taker": {
-        "coinbase": Decimal("0.10"),
-        "gemini": Decimal("0.10"),
-        "binance": Decimal("0.10"),
-    },
-    "zero_fee_upper_bound": {
-        "coinbase": Decimal("0"),
-        "gemini": Decimal("0"),
-        "binance": Decimal("0"),
-    },
-}
 
 
 @dataclass(frozen=True)
@@ -64,6 +37,7 @@ class EpisodeRow:
     peak_size: Decimal
     peak_profit: Decimal
     close_reason: str | None
+    pricing_ledgers: tuple[dict[str, object], ...] = ()
 
     @property
     def peak_notional(self) -> Decimal:
@@ -98,7 +72,7 @@ def parse_utc(value: str) -> int:
     return int(parsed.timestamp() * 1_000_000_000)
 
 
-EPISODE_COLUMNS = (
+BASE_EPISODE_COLUMNS = (
     "start_ns, end_ns, pair, buy_exchange, sell_exchange, buy_price, sell_price, spread_pct, "
     "max_size, quote_asset, theoretical_profit, peak_spread_pct, peak_size, peak_profit, "
     "close_reason"
@@ -116,9 +90,16 @@ def load_rows(database: Path, start_ns: int | None, end_ns: int | None) -> list[
         clauses.append("start_ns <= ?")
         params.append(end_ns)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    query = f"SELECT {EPISODE_COLUMNS} FROM opportunity_episodes{where} ORDER BY start_ns, id"
     uri = f"{database.resolve().as_uri()}?mode=ro"
     with sqlite3.connect(uri, uri=True) as connection:
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(opportunity_episodes)")
+        }
+        ledger_column = "pricing_ledgers" if "pricing_ledgers" in columns else "'[]'"
+        query = (
+            f"SELECT {BASE_EPISODE_COLUMNS}, {ledger_column} FROM opportunity_episodes"
+            f"{where} ORDER BY start_ns, id"
+        )
         return [
             EpisodeRow(
                 start_ns=int(row[0]),
@@ -136,6 +117,7 @@ def load_rows(database: Path, start_ns: int | None, end_ns: int | None) -> list[
                 peak_size=Decimal(row[12]),
                 peak_profit=Decimal(row[13]),
                 close_reason=None if row[14] is None else str(row[14]),
+                pricing_ledgers=tuple(json.loads(str(row[15]))),
             )
             for row in connection.execute(query, params)
         ]
@@ -180,6 +162,40 @@ def apply_scenario(
         net_profit_by_quote=profit_by_quote,
         missing_fee_exchanges=tuple(sorted(missing)),
     )
+
+
+def stored_survival(rows: list[EpisodeRow]) -> list[dict[str, object]]:
+    """Aggregate stored net results by configured notional without recomputing fees."""
+    totals: dict[str, dict[str, object]] = {}
+    for row in rows:
+        for ledger in row.pricing_ledgers:
+            notional = str(ledger["notional"])
+            entry = totals.setdefault(
+                notional,
+                {
+                    "notional": notional,
+                    "priced": 0,
+                    "insufficient_depth": 0,
+                    "survivors": 0,
+                    "net_profit_by_quote": {},
+                },
+            )
+            net_literal = ledger.get("net_executable_spread_pct")
+            if net_literal is None:
+                entry["insufficient_depth"] = int(entry["insufficient_depth"]) + 1
+                continue
+            entry["priced"] = int(entry["priced"]) + 1
+            net = Decimal(str(net_literal))
+            if net <= 0:
+                continue
+            entry["survivors"] = int(entry["survivors"]) + 1
+            profits = entry["net_profit_by_quote"]
+            assert isinstance(profits, dict)
+            profits[row.quote_asset] = str(
+                Decimal(str(profits.get(row.quote_asset, "0")))
+                + Decimal(notional) * net / Decimal(100)
+            )
+    return [totals[key] for key in sorted(totals, key=Decimal)]
 
 
 def percentile(values: list[Decimal], fraction: float) -> Decimal:
@@ -304,7 +320,7 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         type=parse_fee_argument,
         metavar="EXCHANGE=PCT",
-        help="per-side taker fee in percent; repeat per venue. Replaces the built-in scenarios.",
+        help="counterfactual per-side taker fee in percent; repeat per venue",
     )
     parser.add_argument("--json", action="store_true", help="emit a JSON document instead of text")
     return parser
@@ -317,9 +333,21 @@ def main() -> None:
         parse_utc(args.start) if args.start else None,
         parse_utc(args.end) if args.end else None,
     )
-    scenarios = {"custom": dict(args.fee)} if args.fee else BUILT_IN_SCENARIOS
     summary = summarize(rows)
-    results = [apply_scenario(name, fees, rows) for name, fees in scenarios.items()]
+    if not args.fee:
+        document = {
+            "database": str(args.database),
+            "start": args.start,
+            "end": args.end,
+            "summary": summary,
+            "stored_fee_survival": stored_survival(rows),
+        }
+        if args.json:
+            print(json.dumps(document, indent=2))
+        else:
+            print(render_stored(summary, document["stored_fee_survival"]))
+        return
+    results = [apply_scenario("counterfactual", dict(args.fee), rows)]
     if args.json:
         document = {
             "database": str(args.database),
@@ -342,6 +370,20 @@ def main() -> None:
         print(json.dumps(document, indent=2))
     else:
         print(render_text(summary, results))
+
+
+def render_stored(summary: dict[str, object], rows: object) -> str:
+    lines = [f"episodes: {summary['episodes']}", "stored product fee survival:"]
+    assert isinstance(rows, list)
+    if not rows:
+        lines.append("  no stored pricing ledgers (schema-v3 or empty database)")
+    for row in rows:
+        assert isinstance(row, dict)
+        lines.append(
+            f"  {row['notional']}: {row['survivors']}/{row['priced']} priced routes survive; "
+            f"{row['insufficient_depth']} insufficient depth; net profit {row['net_profit_by_quote']}"
+        )
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

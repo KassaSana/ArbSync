@@ -72,6 +72,46 @@ EpisodeCloseReason = Literal["spread_closed", "book_ineligible", "shutdown"]
 
 
 @dataclass(frozen=True)
+class PricingLedger:
+    """One route priced at a quote notional, from top of book through fees.
+
+    Nullable executable fields mean one or both subscribed books could not fill
+    the requested notional. Fees remain present in that case: the schedule is a
+    configured assumption, while a price must never be fabricated from short depth.
+    """
+
+    notional: Decimal
+    top_of_book_spread_pct: Decimal
+    buy_vwap: Decimal | None
+    sell_vwap: Decimal | None
+    gross_executable_spread_pct: Decimal | None
+    depth_impact_pct: Decimal | None
+    buy_taker_fee_pct: Decimal
+    sell_taker_fee_pct: Decimal
+    fee_impact_pct: Decimal | None
+    net_executable_spread_pct: Decimal | None
+    insufficient_depth: bool
+
+    def as_payload(self) -> dict[str, object]:
+        def decimal(value: Decimal | None) -> str | None:
+            return None if value is None else str(value)
+
+        return {
+            "notional": str(self.notional),
+            "top_of_book_spread_pct": str(self.top_of_book_spread_pct),
+            "buy_vwap": decimal(self.buy_vwap),
+            "sell_vwap": decimal(self.sell_vwap),
+            "gross_executable_spread_pct": decimal(self.gross_executable_spread_pct),
+            "depth_impact_pct": decimal(self.depth_impact_pct),
+            "buy_taker_fee_pct": str(self.buy_taker_fee_pct),
+            "sell_taker_fee_pct": str(self.sell_taker_fee_pct),
+            "fee_impact_pct": decimal(self.fee_impact_pct),
+            "net_executable_spread_pct": decimal(self.net_executable_spread_pct),
+            "insufficient_depth": self.insufficient_depth,
+        }
+
+
+@dataclass(frozen=True)
 class OpportunityEpisode:
     """One dislocation from appearance to disappearance on a (pair, buy, sell) route.
 
@@ -80,8 +120,9 @@ class OpportunityEpisode:
     distinct episode. `end_ns` is derived from a monotonic duration so a
     system-clock step cannot produce a negative or inflated lifetime. The `*_price`, `spread_pct`, `max_size` and
     `theoretical_profit` fields are the values at open; `peak_*` track the
-    widest spread seen and the size and profit at that moment. An open episode
-    has `end_ns`, `close_spread_pct` and `close_reason` unset.
+    widest spread seen and the size and profit at that moment. `pricing_ledgers`
+    snapshot the configured notionals at that same open or peak observation.
+    An open episode has `end_ns`, `close_spread_pct` and `close_reason` unset.
     """
 
     start_ns: int
@@ -97,6 +138,7 @@ class OpportunityEpisode:
     peak_spread_pct: Decimal
     peak_size: Decimal
     peak_profit: Decimal
+    pricing_ledgers: tuple[PricingLedger, ...] = ()
     end_ns: int | None = None
     close_spread_pct: Decimal | None = None
     close_reason: EpisodeCloseReason | None = None
@@ -130,6 +172,7 @@ class OpportunityEpisode:
             "peak_spread_pct": str(self.peak_spread_pct),
             "peak_size": str(self.peak_size),
             "peak_profit": str(self.peak_profit),
+            "pricing_ledgers": [ledger.as_payload() for ledger in self.pricing_ledgers],
             "close_spread_pct": (
                 None if self.close_spread_pct is None else str(self.close_spread_pct)
             ),

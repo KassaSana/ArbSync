@@ -41,3 +41,13 @@ cooldown_seconds = 300.0
 # per-venue fill rates. Omitting this section uses these same values.
 notionals = [100, 1000, 10000, 50000]
 sample_interval_seconds = 5.0
+
+[fees]
+# Per-venue taker fee as a percent of notional per side, charged once on each
+# leg when a spread is netted. Every exchange in [exchanges] must have an entry;
+# there is no default because a silent zero would be persisted as if real.
+# maker_pct is accepted and validated but unused until something consumes it.
+# These are illustrative base-tier public schedules, not live quotes.
+gemini = { taker_pct = 0.40 }
+coinbase = { taker_pct = 0.60 }
+binance = { taker_pct = 0.60 }

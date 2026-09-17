@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Iterable
 from decimal import Decimal
@@ -18,13 +19,14 @@ logger = structlog.get_logger(__name__)
 PersistenceFailureReason = Literal["initialize_failed", "worker_failed"]
 PersistenceState = Literal["open", "failed", "closed"]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # One row per episode: a (pair, buy venue, sell venue) route from the moment
 # its spread crossed the threshold to the moment it stopped. The `*_price`,
 # `spread_pct`, `max_size` and `theoretical_profit` columns are the values at
 # open; `peak_*` are the widest spread seen and the size and profit at that
-# moment, and equal the open values until a close event carries the real peak.
+# moment. `pricing_ledgers` holds exact decimal strings for the configured
+# notionals at that open/peak observation and is replaced when the peak grows.
 # `end_ns`, `close_spread_pct` and `close_reason` are NULL while the episode is
 # open. The natural key is the episode's identity across the open and close
 # events that write it.
@@ -45,6 +47,7 @@ CREATE TABLE IF NOT EXISTS opportunity_episodes (
     peak_spread_pct TEXT NOT NULL,
     peak_size TEXT NOT NULL,
     peak_profit TEXT NOT NULL,
+    pricing_ledgers TEXT NOT NULL,
     close_spread_pct TEXT,
     close_reason TEXT,
     UNIQUE (start_ns, pair, buy_exchange, sell_exchange)
@@ -63,13 +66,14 @@ UPSERT_EPISODE_SQL = """
 INSERT INTO opportunity_episodes (
     start_ns, end_ns, pair, quote_asset, buy_exchange, sell_exchange,
     buy_price, sell_price, spread_pct, max_size, theoretical_profit,
-    peak_spread_pct, peak_size, peak_profit, close_spread_pct, close_reason
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    peak_spread_pct, peak_size, peak_profit, pricing_ledgers, close_spread_pct, close_reason
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(start_ns, pair, buy_exchange, sell_exchange) DO UPDATE SET
     end_ns = excluded.end_ns,
     peak_spread_pct = excluded.peak_spread_pct,
     peak_size = excluded.peak_size,
     peak_profit = excluded.peak_profit,
+    pricing_ledgers = excluded.pricing_ledgers,
     close_spread_pct = excluded.close_spread_pct,
     close_reason = excluded.close_reason
 """
@@ -134,6 +138,9 @@ def _episode_row(episode: OpportunityEpisode) -> tuple[object, ...]:
         str(episode.peak_spread_pct),
         str(episode.peak_size),
         str(episode.peak_profit),
+        json.dumps(
+            [ledger.as_payload() for ledger in episode.pricing_ledgers], separators=(",", ":")
+        ),
         None if episode.close_spread_pct is None else str(episode.close_spread_pct),
         episode.close_reason,
     )
@@ -268,7 +275,7 @@ class OpportunityStore:
                 await db.execute("PRAGMA journal_mode=WAL;")
                 cursor = await db.execute("PRAGMA user_version")
                 version = int((await cursor.fetchone() or (0,))[0])
-                if version < SCHEMA_VERSION:
+                if version < 3:
                     # Schema 2 and earlier stored one row per book update while a
                     # spread persisted. Those samples cannot be folded into
                     # episodes after the fact (the book stream between them is
@@ -279,6 +286,11 @@ class OpportunityStore:
                         "DROP TABLE IF EXISTS opportunities;"
                     )
                 await db.executescript(CREATE_TABLE_SQL + CREATE_INDEX_SQL + CREATE_ROLLUP_SQL)
+                if version == 3:
+                    await db.execute(
+                        "ALTER TABLE opportunity_episodes "
+                        "ADD COLUMN pricing_ledgers TEXT NOT NULL DEFAULT '[]'"
+                    )
                 # Episodes a previous process left open never got a close event.
                 # They keep their count but no lifetime; the marker keeps them
                 # out of the open set.
@@ -400,7 +412,7 @@ class OpportunityStore:
         query = """
         SELECT start_ns, end_ns, pair, quote_asset, buy_exchange, sell_exchange, buy_price,
                sell_price, spread_pct, max_size, theoretical_profit, peak_spread_pct, peak_size,
-               peak_profit, close_spread_pct, close_reason
+               peak_profit, pricing_ledgers, close_spread_pct, close_reason
         FROM opportunity_episodes
         ORDER BY start_ns DESC, id DESC
         LIMIT ?
@@ -636,6 +648,7 @@ def _episode_payload(row: Any) -> dict[str, Any]:
         "peak_spread_pct": row[11],
         "peak_size": row[12],
         "peak_profit": row[13],
-        "close_spread_pct": row[14],
-        "close_reason": row[15],
+        "pricing_ledgers": json.loads(row[14]),
+        "close_spread_pct": row[15],
+        "close_reason": row[16],
     }

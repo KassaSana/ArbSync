@@ -287,6 +287,11 @@ cors_allowed_origins = []
 batch_size = 10
 flush_interval_seconds = 0.05
 queue_maxsize = 100
+
+[fees]
+gemini = { taker_pct = 0.40 }
+coinbase = { taker_pct = 0.60 }
+binance = { taker_pct = 0.60 }
 """
 
 
@@ -451,6 +456,7 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
             manager,
             [Decimal("100"), Decimal("10000")],
             {"gemini": None, "binance": 5000},
+            {},
             interval_seconds=1.0,
         )
         report = asyncio.run(

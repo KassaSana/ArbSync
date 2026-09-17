@@ -138,6 +138,13 @@ def create_app(
         return {
             "notionals": [str(notional) for notional in depth_sampler.notionals],
             "quotes": [quote.as_payload() for quote in quotes],
+            "routes": [
+                route.as_payload()
+                for known_pair in (
+                    {pair} if pair is not None else {p for _, p in book_manager.known_pairs()}
+                )
+                for route in depth_sampler.route_prices(known_pair)
+            ],
         }
 
     @app.get("/api/pricing/fill-rates")

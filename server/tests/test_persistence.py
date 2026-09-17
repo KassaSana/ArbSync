@@ -12,8 +12,8 @@ import aiosqlite
 import pytest
 from aiosqlite.core import _connection_worker_thread
 from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
-from arb.persistence import SCHEMA_VERSION, OpportunityStore, lifetime_summary
-from arb.types import OpportunityEpisode
+from arb.persistence import CREATE_TABLE_SQL, SCHEMA_VERSION, OpportunityStore, lifetime_summary
+from arb.types import OpportunityEpisode, PricingLedger
 from episodes import close_episode, make_episode
 
 
@@ -61,6 +61,31 @@ async def wait_for_rows(store: OpportunityStore, expected: int) -> list[dict[str
 async def test_initialize_is_idempotent(tmp_path: Path) -> None:
     store = OpportunityStore(str(tmp_path / "db.sqlite3"))
     await store.initialize()
+
+
+@pytest.mark.asyncio
+async def test_schema_v3_migrates_ledgers_in_place_without_inventing_fees(tmp_path: Path) -> None:
+    path = tmp_path / "v3.sqlite3"
+    v3_table = CREATE_TABLE_SQL.replace("    pricing_ledgers TEXT NOT NULL,\n", "")
+    async with aiosqlite.connect(path) as db:
+        await db.executescript(v3_table)
+        await db.execute(
+            "INSERT INTO opportunity_episodes (start_ns, pair, quote_asset, buy_exchange, "
+            "sell_exchange, buy_price, sell_price, spread_pct, max_size, theoretical_profit, "
+            "peak_spread_pct, peak_size, peak_profit) VALUES (1, 'BTC-USD', 'USD', 'gemini', "
+            "'coinbase', '100', '101', '1', '1', '1', '1', '1', '1')"
+        )
+        await db.execute("PRAGMA user_version = 3")
+        await db.commit()
+
+    store = OpportunityStore(str(path))
+    await store.initialize()
+
+    [row] = await store.recent()
+    assert row["pricing_ledgers"] == []
+    async with aiosqlite.connect(path) as db:
+        version = await (await db.execute("PRAGMA user_version")).fetchone()
+    assert version == (SCHEMA_VERSION,)
     # Calling twice must not raise — uses CREATE IF NOT EXISTS.
     await store.initialize()
 
@@ -126,6 +151,32 @@ async def test_close_drains_every_accepted_opportunity(tmp_path: Path) -> None:
     assert store.unflushed_count == 0
     rows = await store.recent(limit=10)
     assert [row["start_ns"] for row in rows] == [5, 4, 3, 2, 1]
+
+
+@pytest.mark.asyncio
+async def test_pricing_ledgers_round_trip_as_decimal_strings(tmp_path: Path) -> None:
+    store = OpportunityStore(str(tmp_path / "ledger.sqlite3"), batch_size=1)
+    await store.initialize()
+    runner = asyncio.create_task(store.run())
+    ledger = PricingLedger(
+        notional=Decimal("1000.00"),
+        top_of_book_spread_pct=Decimal("1.25"),
+        buy_vwap=Decimal("100.123456789"),
+        sell_vwap=Decimal("101.2"),
+        gross_executable_spread_pct=Decimal("1.075272817"),
+        depth_impact_pct=Decimal("-0.174727183"),
+        buy_taker_fee_pct=Decimal("0.40"),
+        sell_taker_fee_pct=Decimal("0.60"),
+        fee_impact_pct=Decimal("-1.006451636908"),
+        net_executable_spread_pct=Decimal("0.068821180092"),
+        insufficient_depth=False,
+    )
+    await store.enqueue(make_episode(pricing_ledgers=(ledger,)))
+    await store.close()
+    await runner
+
+    [row] = await store.recent()
+    assert row["pricing_ledgers"] == [ledger.as_payload()]
 
 
 @pytest.mark.asyncio

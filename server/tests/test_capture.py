@@ -36,6 +36,11 @@ cors_allowed_origins = ["https://dashboard.example.test"]
 batch_size = 500
 flush_interval_seconds = 1.0
 queue_maxsize = 1000
+
+[fees]
+gemini = { taker_pct = 0.40, maker_pct = 0.20 }
+coinbase = { taker_pct = 0.60 }
+binance = { taker_pct = 0.60 }
 """
 
 

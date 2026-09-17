@@ -707,6 +707,7 @@ def test_pricing_endpoints_walk_eligible_books_and_report_fill_rates(tmp_path: P
         manager,
         [Decimal("50"), Decimal("150")],
         {"gemini": None, "binance": 5000},
+        {},
         interval_seconds=5.0,
     )
     sampler.sample_all()
@@ -751,3 +752,51 @@ def test_pricing_endpoints_walk_eligible_books_and_report_fill_rates(tmp_path: P
     unconfigured = TestClient(create_app(store, manager, LiveBroadcaster()))
     assert unconfigured.get("/api/pricing/depth").status_code == 404
     assert unconfigured.get("/api/pricing/fill-rates").status_code == 404
+
+
+def test_depth_endpoint_includes_fee_aware_route_ledgers(tmp_path: Path) -> None:
+    from arb.pricing import DepthSampler
+
+    manager = OrderBookManager()
+    for exchange, bid, ask in (("gemini", "99", "100"), ("coinbase", "102", "103")):
+        manager.apply(
+            MarketEvent(
+                exchange,
+                "BTC-USD",
+                EventKind.SNAPSHOT,
+                1,
+                1,
+                bids=(PriceLevel(Decimal(bid), Decimal("20")),),
+                asks=(PriceLevel(Decimal(ask), Decimal("20")),),
+            )
+        )
+    sampler = DepthSampler(
+        manager,
+        [Decimal("1000")],
+        {"gemini": None, "coinbase": None},
+        {"gemini": Decimal("0.4"), "coinbase": Decimal("0.6")},
+        interval_seconds=5.0,
+    )
+    client = TestClient(
+        create_app(
+            OpportunityStore(str(tmp_path / "routes.sqlite3")),
+            manager,
+            LiveBroadcaster(),
+            depth_sampler=sampler,
+        )
+    )
+
+    routes = client.get("/api/pricing/depth?pair=BTC-USD").json()["routes"]
+    route = next(
+        row
+        for row in routes
+        if row["buy_exchange"] == "gemini" and row["sell_exchange"] == "coinbase"
+    )
+    assert route["top_of_book_spread_pct"] == "2.00"
+    assert route["gross_executable_spread_pct"] == "2.00"
+    assert route["depth_impact_pct"] == "0.00"
+    assert route["buy_taker_fee_pct"] == "0.4"
+    assert route["sell_taker_fee_pct"] == "0.6"
+    assert Decimal(route["net_executable_spread_pct"]) < Decimal(
+        route["gross_executable_spread_pct"]
+    )

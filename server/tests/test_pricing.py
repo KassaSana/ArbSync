@@ -3,8 +3,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from arb.pricing import DepthQuote, FillRateTracker, price_book, walk_levels
-from arb.types import PriceLevel
+from arb.pricing import DepthQuote, FillRateTracker, price_book, pricing_ledger, walk_levels
+from arb.types import PriceLevel, TopOfBook
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -64,6 +64,60 @@ def test_price_book_quotes_both_sides_for_every_notional() -> None:
     assert payload["vwap"] == "101"
     assert payload["subscribed_depth_levels"] is None
     assert quotes[2].as_payload()["vwap"] is None
+
+
+def test_pricing_ledger_keeps_theoretical_depth_fee_and_net_tiers_distinct() -> None:
+    buy_top = TopOfBook(
+        "gemini", "BTC-USD", Decimal("99"), Decimal("2"), Decimal("100"), Decimal("1"), 1, 1
+    )
+    sell_top = TopOfBook(
+        "coinbase", "BTC-USD", Decimal("103"), Decimal("1"), Decimal("104"), Decimal("2"), 1, 1
+    )
+    buy_fill = walk_levels(levels(("100", "1"), ("102", "2")), Decimal("200"))
+    sell_fill = walk_levels(levels(("103", "1"), ("101", "2")), Decimal("200"))
+
+    ledger = pricing_ledger(
+        notional=Decimal("200"),
+        buy_top=buy_top,
+        sell_top=sell_top,
+        buy_fill=buy_fill,
+        sell_fill=sell_fill,
+        buy_taker_fee_pct=Decimal("0.4"),
+        sell_taker_fee_pct=Decimal("0.6"),
+    )
+
+    assert ledger.top_of_book_spread_pct == Decimal("3")
+    assert ledger.buy_vwap is not None and ledger.sell_vwap is not None
+    assert ledger.gross_executable_spread_pct is not None
+    assert ledger.depth_impact_pct == ledger.gross_executable_spread_pct - Decimal("3")
+    assert ledger.net_executable_spread_pct is not None
+    assert (
+        ledger.fee_impact_pct
+        == ledger.net_executable_spread_pct - ledger.gross_executable_spread_pct
+    )
+    payload = ledger.as_payload()
+    assert payload["buy_taker_fee_pct"] == "0.4"
+    assert payload["net_executable_spread_pct"] == str(ledger.net_executable_spread_pct)
+
+
+def test_pricing_ledger_never_fabricates_executable_values_from_short_depth() -> None:
+    top = TopOfBook(
+        "gemini", "BTC-USD", Decimal("99"), Decimal("1"), Decimal("100"), Decimal("1"), 1, 1
+    )
+    short = walk_levels(levels(("100", "1")), Decimal("1000"))
+    full = walk_levels(levels(("100", "20")), Decimal("1000"))
+    ledger = pricing_ledger(
+        notional=Decimal("1000"),
+        buy_top=top,
+        sell_top=top,
+        buy_fill=full,
+        sell_fill=short,
+        buy_taker_fee_pct=Decimal("0"),
+        sell_taker_fee_pct=Decimal("0"),
+    )
+    assert ledger.insufficient_depth
+    assert ledger.gross_executable_spread_pct is None
+    assert ledger.net_executable_spread_pct is None
 
 
 # --- Properties (ARB-032) ---
@@ -195,6 +249,7 @@ def test_sampler_observes_eligible_books_and_counts_ineligible_ones() -> None:
         manager,
         [Decimal("100"), Decimal("1000")],
         {"gemini": None, "binance": 5000},
+        {},
         interval_seconds=5.0,
     )
 

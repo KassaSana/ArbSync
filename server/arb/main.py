@@ -249,7 +249,6 @@ def build_pipeline(
     """Construct and connect every component without starting any task."""
     started_at_ns = time.time_ns() if started_at_ns is None else started_at_ns
     book_manager = OrderBookManager(max_age_seconds=config.order_books.max_age_seconds)
-    detector = ArbitrageDetector(threshold_pct=Decimal(str(config.detector.threshold_pct)))
     store = OpportunityStore(
         config.server.database_path,
         batch_size=config.persistence.batch_size,
@@ -297,7 +296,12 @@ def build_pipeline(
         book_manager,
         config.pricing.notionals,
         {adapter.name: adapter.subscribed_depth_levels for adapter in adapters},
+        config.fees.taker_pct,
         interval_seconds=config.pricing.sample_interval_seconds,
+    )
+    detector = ArbitrageDetector(
+        threshold_pct=Decimal(str(config.detector.threshold_pct)),
+        ledger_factory=depth_sampler.ledgers_for_route,
     )
     app = create_app(
         store,

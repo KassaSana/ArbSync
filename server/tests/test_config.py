@@ -33,6 +33,11 @@ cycle_seconds = 90.0
 confirmation_count = 4
 size_confirmation_count = 6
 cooldown_seconds = 600.0
+
+[fees]
+gemini = { taker_pct = 0.40, maker_pct = 0.20 }
+coinbase = { taker_pct = 0.60 }
+binance = { taker_pct = 0.60 }
 """
 
 
@@ -470,3 +475,75 @@ def test_pricing_notionals_are_decimal_sorted_and_validated(tmp_path: Path) -> N
         path.write_text(VALID_CONFIG + f"\n[pricing]\n{bad}\n")
         with pytest.raises(ValueError, match=message):
             load_config(path)
+
+
+def test_fee_schedule_keeps_config_literals_exact(tmp_path: Path) -> None:
+    from decimal import Decimal
+
+    path = tmp_path / "config.toml"
+    path.write_text(VALID_CONFIG)
+
+    config = load_config(path)
+
+    # 0.40 as a binary float is not 0.40; the schedule must hold the literal.
+    assert config.fees.taker("gemini") == Decimal("0.4")
+    assert str(config.fees.taker("gemini")) == "0.4"
+    assert config.fees.taker_pct == {
+        "gemini": Decimal("0.4"),
+        "coinbase": Decimal("0.6"),
+        "binance": Decimal("0.6"),
+    }
+    assert config.fees.maker_pct == {"gemini": Decimal("0.2")}
+    assert config.fees.route_fee_pct("gemini", "coinbase") == Decimal("1.0")
+
+
+def test_fee_schedule_is_required_and_must_cover_every_exchange(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    without_fees = VALID_CONFIG.split("\n[fees]")[0]
+
+    path.write_text(without_fees)
+    with pytest.raises(ValueError, match="fees table is required"):
+        load_config(path)
+
+    path.write_text(without_fees + "\n[fees]\ngemini = { taker_pct = 0.4 }\n")
+    with pytest.raises(ValueError, match=r"missing taker_pct.*\['binance', 'coinbase'\]"):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    ("fees", "message"),
+    [
+        ("fees = 5", "fees must be a table"),
+        ("[fees]\nkraken = { taker_pct = 0.1 }", "unsupported exchange 'kraken'"),
+        ("[fees]\ngemini = 0.4", "fees.gemini must be a table"),
+        ("[fees]\ngemini = { maker_pct = 0.1 }", "fees.gemini.taker_pct is required"),
+        ("[fees]\ngemini = { taker_pct = -0.1 }", "fees.gemini.taker_pct must be finite"),
+        ("[fees]\ngemini = { taker_pct = true }", "fees.gemini.taker_pct must be a number"),
+        ("[fees]\ngemini = { taker_pct = 100.1 }", "must be at most 100"),
+        ("[fees]\ngemini = { taker_pct = 0.1, rebate = 1 }", "unknown key 'rebate'"),
+    ],
+)
+def test_invalid_fee_schedules_identify_field(tmp_path: Path, fees: str, message: str) -> None:
+    path = tmp_path / "config.toml"
+    without_fees = VALID_CONFIG.split("\n[fees]")[0]
+    if fees.startswith("fees = "):
+        path.write_text(fees + "\n" + without_fees)
+    else:
+        path.write_text(without_fees + "\n" + fees + "\n")
+
+    with pytest.raises(ValueError, match=message):
+        load_config(path)
+
+
+def test_zero_fee_is_an_explicit_choice_not_a_default(tmp_path: Path) -> None:
+    from decimal import Decimal
+
+    path = tmp_path / "config.toml"
+    without_fees = VALID_CONFIG.split("\n[fees]")[0]
+    path.write_text(
+        without_fees
+        + "\n[fees]\ngemini = { taker_pct = 0 }\ncoinbase = { taker_pct = 0 }\n"
+        + "binance = { taker_pct = 0 }\n"
+    )
+
+    assert load_config(path).fees.route_fee_pct("gemini", "binance") == Decimal("0")

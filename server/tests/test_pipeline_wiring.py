@@ -14,6 +14,7 @@ from arb.config import (
     AppConfig,
     CaptureConfig,
     DetectorConfig,
+    FeeSchedule,
     OrderBookConfig,
     PersistenceConfig,
     PricingConfig,
@@ -64,6 +65,9 @@ def make_config(tmp_path: Path) -> AppConfig:
         capture=CaptureConfig(queue_maxsize=11),
         pricing=PricingConfig(
             notionals=(Decimal("100"), Decimal("1000")), sample_interval_seconds=0.5
+        ),
+        fees=FeeSchedule(
+            taker_pct={"stub": Decimal("0.1"), "gemini": Decimal("0.4")}, maker_pct={}
         ),
     )
 

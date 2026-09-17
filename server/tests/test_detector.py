@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from arb.detector import ArbitrageDetector
-from arb.types import TopOfBook
+from arb.types import PricingLedger, TopOfBook
 
 
 def book(
@@ -58,6 +58,38 @@ def test_detection_above_threshold_opens_an_episode() -> None:
     assert opp.peak_size == opp.max_size
     assert opp.peak_profit == opp.theoretical_profit
     assert detector.open_episodes() == [opp]
+
+
+def test_episode_snapshots_pricing_ledgers_at_open() -> None:
+    ledger = PricingLedger(
+        Decimal("1000"),
+        Decimal("1"),
+        Decimal("100"),
+        Decimal("101"),
+        Decimal("1"),
+        Decimal("0"),
+        Decimal("0.4"),
+        Decimal("0.6"),
+        Decimal("-1.006"),
+        Decimal("-0.006"),
+        False,
+    )
+    calls: list[tuple[str, str, str, int]] = []
+
+    def ledgers(pair: str, buy: str, sell: str, now_ns: int) -> tuple[PricingLedger, ...]:
+        calls.append((pair, buy, sell, now_ns))
+        return (ledger,)
+
+    detector = ArbitrageDetector(Decimal("0.1"), ledger_factory=ledgers)
+    [episode] = detector.detect_for_pair(
+        "BTC-USD",
+        [book("coinbase", "100", "1", "101", "1"), book("gemini", "102", "1", "103", "1")],
+        10,
+        20,
+    )
+
+    assert episode.pricing_ledgers == (ledger,)
+    assert calls == [("BTC-USD", "coinbase", "gemini", 20)]
 
 
 def test_no_detection_below_threshold() -> None:

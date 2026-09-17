@@ -60,6 +60,26 @@ class PricingConfig:
 
 
 @dataclass(frozen=True)
+class FeeSchedule:
+    """Per-venue fees as a percent of notional per side, exact from their config literals.
+
+    Taker fees are what the product charges when it nets a spread; every
+    configured exchange must have one. Maker fees are validated so a schedule
+    can be written once, but nothing consumes them yet.
+    """
+
+    taker_pct: dict[str, Decimal]
+    maker_pct: dict[str, Decimal]
+
+    def taker(self, exchange: str) -> Decimal:
+        return self.taker_pct[exchange]
+
+    def route_fee_pct(self, buy_exchange: str, sell_exchange: str) -> Decimal:
+        """Percentage points a round trip pays: one taker fee on each leg."""
+        return self.taker_pct[buy_exchange] + self.taker_pct[sell_exchange]
+
+
+@dataclass(frozen=True)
 class ReconciliationConfig:
     cycle_seconds: float
     confirmation_count: int
@@ -77,6 +97,7 @@ class AppConfig:
     reconciliation: ReconciliationConfig
     capture: CaptureConfig
     pricing: PricingConfig
+    fees: FeeSchedule
 
 
 def load_config(path: str | Path = "config.toml") -> AppConfig:
@@ -152,6 +173,7 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
     sample_interval_seconds = _positive_number(
         "pricing.sample_interval_seconds", pricing.get("sample_interval_seconds", 5.0)
     )
+    fees = _fee_schedule(raw.get("fees"), exchanges)
     database_path = Path(str(raw["server"]["database_path"])).expanduser()
     if not database_path.is_absolute():
         database_path = config_path.parent / database_path
@@ -182,7 +204,45 @@ def load_config(path: str | Path = "config.toml") -> AppConfig:
             queue_maxsize=capture_queue_maxsize,
         ),
         pricing=PricingConfig(notionals=notionals, sample_interval_seconds=sample_interval_seconds),
+        fees=fees,
     )
+
+
+def _fee_schedule(value: object, exchanges: dict[str, list[str]]) -> FeeSchedule:
+    """A taker fee for every configured venue; absence is an error, not zero.
+
+    Net spreads are persisted, so a defaulted zero would be stored as if it
+    were a real schedule. TOML's parsed number is converted through its
+    decimal representation so binary artifacts never enter stored values.
+    """
+    if value is None:
+        raise ConfigError(
+            "fees table is required: give every exchange a taker_pct, "
+            "for example [fees] gemini = { taker_pct = 0.40 }"
+        )
+    if not isinstance(value, dict):
+        raise ConfigError(f"fees must be a table; got {value!r}")
+    taker: dict[str, Decimal] = {}
+    maker: dict[str, Decimal] = {}
+    for exchange, entry in value.items():
+        if exchange not in SYMBOL_NORMALIZERS:
+            raise ConfigError(f"fees contains unsupported exchange {exchange!r}")
+        if not isinstance(entry, dict):
+            raise ConfigError(f"fees.{exchange} must be a table; got {entry!r}")
+        if "taker_pct" not in entry:
+            raise ConfigError(f"fees.{exchange}.taker_pct is required")
+        for key, literal in entry.items():
+            if key not in {"taker_pct", "maker_pct"}:
+                raise ConfigError(f"fees.{exchange} has unknown key {key!r}")
+            _finite_number(f"fees.{exchange}.{key}", literal, minimum=0)
+            if float(literal) > 100:
+                raise ConfigError(f"fees.{exchange}.{key} must be at most 100; got {literal!r}")
+            target = taker if key == "taker_pct" else maker
+            target[exchange] = Decimal(str(literal))
+    missing = sorted(exchange for exchange in exchanges if exchange not in taker)
+    if missing:
+        raise ConfigError(f"fees is missing taker_pct for configured exchanges: {missing}")
+    return FeeSchedule(taker_pct=taker, maker_pct=maker)
 
 
 def _notionals(field: str, value: object) -> tuple[Decimal, ...]:

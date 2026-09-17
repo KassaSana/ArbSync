@@ -6,9 +6,10 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from itertools import permutations
 
-from arb.types import EpisodeCloseReason, OpportunityEpisode, TopOfBook
+from arb.types import EpisodeCloseReason, OpportunityEpisode, PricingLedger, TopOfBook
 
 Route = tuple[str, str, str]
+LedgerFactory = Callable[[str, str, str, int], tuple[PricingLedger, ...]]
 
 
 @dataclass(frozen=True)
@@ -48,9 +49,11 @@ class ArbitrageDetector:
         threshold_pct: Decimal,
         *,
         monotonic_clock: Callable[[], int] = time.monotonic_ns,
+        ledger_factory: LedgerFactory | None = None,
     ) -> None:
         self.threshold_pct = threshold_pct
         self._monotonic_clock = monotonic_clock
+        self._ledger_factory = ledger_factory
         self._open: dict[Route, _OpenEpisode] = {}
         # Wall clocks tick coarsely (about a millisecond on Windows), so a route
         # that closes and reopens inside one tick would otherwise reuse its
@@ -115,6 +118,7 @@ class ArbitrageDetector:
                     peak_spread_pct=quote.spread_pct,
                     peak_size=quote.max_size,
                     peak_profit=quote.theoretical_profit,
+                    pricing_ledgers=self._ledgers(route, now_monotonic_ns),
                 )
                 self._open[route] = _OpenEpisode(episode, now_monotonic_ns)
                 events.append(episode)
@@ -124,8 +128,14 @@ class ArbitrageDetector:
                     peak_spread_pct=quote.spread_pct,
                     peak_size=quote.max_size,
                     peak_profit=quote.theoretical_profit,
+                    pricing_ledgers=self._ledgers(route, now_monotonic_ns),
                 )
         return events
+
+    def _ledgers(self, route: Route, now_monotonic_ns: int) -> tuple[PricingLedger, ...]:
+        if self._ledger_factory is None:
+            return ()
+        return self._ledger_factory(*route, now_monotonic_ns)
 
     def close_for_book(
         self,
