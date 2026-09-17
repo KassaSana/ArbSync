@@ -700,7 +700,7 @@ Acceptance criteria:
   single-pair resync while other pairs keep receiving deltas.
 - Book eligibility for the other pairs stays `true` across the resync in a replay test.
 
-### [ ] ARB-029 — Attribute host connectivity loss in the soak observer
+### [x] ARB-029 — Attribute host connectivity loss in the soak observer
 
 - Priority: P3
 - Estimate: 2 hours

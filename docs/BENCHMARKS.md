@@ -138,7 +138,13 @@ canonical book eligibility and age, readiness, opportunities, background-task
 failures, HTTP failures, recovery durations, and backend RSS. It also keeps a
 lightweight `/ws/live` consumer connected, validates its initial state and stream
 sequence, and reports frames, reconnects, malformed messages, and delivery outages.
-Use `--no-websocket` only for diagnostic runs; such a run is not release evidence. The
+Use `--no-websocket` only for diagnostic runs; such a run is not release evidence. Each
+sample also runs a bounded TCP connect to public endpoints (`1.1.1.1:443`, then
+`8.8.8.8:443`; override with repeatable `--host-probe HOST:PORT`) concurrently with the
+backend requests, so the report can attribute a backend failure to lost host connectivity
+rather than to the backend, and summarizes contiguous outage windows at sample resolution.
+Probe failures are recorded but never interrupt a run; `--no-host-probe` disables the probe
+and leaves backend outages unattributed. The
 observer rewrites the report after every sample, so an interrupted run still leaves a
 readable report marked `interrupted`. Windows sleep prevention cannot override forced
 sleep, shutdown, lid policies, or host suspension. Durations below the four-hour bar are
