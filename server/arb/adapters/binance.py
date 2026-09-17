@@ -64,13 +64,15 @@ class BinanceAdapter(ExchangeAdapter):
         External recovery (reconciliation drift, an invalid book) discards
         only this pair's sync state; the next update for the pair takes the
         normal uninitialized path and re-aligns from REST while every other
-        pair keeps streaming. No snapshot is fetched here: waking the read
-        loop from another task would race its in-flight snapshot tasks, and
-        a thin pair with no imminent update is safer left ineligible until
-        traffic resumes than rebuilt from a snapshot with nothing to align.
+        pair keeps streaming. Buffered updates are deliberately kept: an
+        initialized pair never holds any, and a pair with a snapshot fetch
+        already in flight needs them for the alignment that rebuilds its
+        book. No snapshot is fetched here: waking the read loop from another
+        task would race its in-flight snapshot tasks, and a thin pair with
+        no imminent update is safer left ineligible until traffic resumes
+        than rebuilt from a snapshot with nothing to align.
         """
         self._begin_pair_resync(pair, trigger="external")
-        self._buffers.pop(pair, None)
         return True
 
     def _begin_pair_resync(self, pair: str, *, trigger: str) -> None:

@@ -239,7 +239,12 @@ def test_operational_counter_baselines_and_exact_metric_names() -> None:
     assert f"- `{late_metric}`: `3`" in markdown
     assert parse_operational_counters(
         f"{metric}\t6.0\n{metric}_created 123\n{late_metric} 3e0\n"
-    ) == {metric: 6, late_metric: 3}
+        'arb_adapter_pair_resyncs_total{exchange="binance",trigger="sequence_gap"} 2.0\n'
+    ) == {
+        metric: 6,
+        late_metric: 3,
+        'arb_adapter_pair_resyncs_total{exchange="binance",trigger="sequence_gap"}': 2,
+    }
 
 
 @pytest.mark.asyncio

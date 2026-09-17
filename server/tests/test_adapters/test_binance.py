@@ -534,6 +534,58 @@ def test_single_pair_resync_keeps_venue_eligible_in_replay() -> None:
     assert manager.eligibility("binance", "BTC-USDT").eligible is True
 
 
+def test_external_pair_resync_preserves_buffered_updates() -> None:
+    # An external recovery request must not drop the updates an in-flight
+    # (or imminent) snapshot alignment needs; the fresh snapshot rebuilds
+    # the book from them, which is exactly what the drift recovery wants.
+    adapter = BinanceAdapter(["BTCUSDT"])
+    adapter._buffer(
+        adapter._decode_depth_update({"s": "BTCUSDT", "U": 1, "u": 5, "b": [], "a": []})
+    )
+
+    assert adapter.request_pair_resync("BTC-USDT") is True
+
+    assert adapter._reconnect_requested is False
+    assert "BTC-USDT" not in adapter._initialized
+    assert len(adapter._buffers["BTC-USDT"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_external_resync_during_inflight_snapshot_keeps_connection() -> None:
+    # A reconciler/external recovery that lands while a REST snapshot fetch
+    # for the same pair is still in flight must complete scoped: the fetch
+    # resolves the drift by rebuilding the book, so nothing may escalate to
+    # a full-venue reconnect.
+    adapter = BinanceAdapter(["BTCUSDT"])
+    socket = ControlledSocket()
+    snapshot_started = asyncio.Event()
+    release_snapshot = asyncio.Event()
+
+    async def delayed_snapshot(
+        self: BinanceAdapter, pair: str, trigger_sequence: int
+    ) -> MarketEvent:
+        snapshot_started.set()
+        await release_snapshot.wait()
+        return binance_snapshot(3)
+
+    adapter.fetch_snapshot = types.MethodType(delayed_snapshot, adapter)
+    stream = adapter.stream_events(socket)
+    pending = asyncio.create_task(anext(stream))
+    await socket.push('{"s":"BTCUSDT","U":1,"u":5,"b":[["100","1"]],"a":[["101","1"]]}')
+    await snapshot_started.wait()
+
+    assert adapter.request_pair_resync("BTC-USDT") is True
+
+    release_snapshot.set()
+    snapshot = await asyncio.wait_for(pending, timeout=5)
+    delta = await asyncio.wait_for(anext(stream), timeout=5)
+    await stream.aclose()
+
+    assert snapshot.kind is EventKind.SNAPSHOT
+    assert delta.kind is EventKind.DELTA
+    assert adapter._reconnect_requested is False
+
+
 @pytest.mark.asyncio
 async def test_binance_server_shutdown_requests_reconnect() -> None:
     adapter = BinanceAdapter(["BTCUSDT"])
