@@ -91,6 +91,14 @@ the remaining validation gap materially changes.
   to `[x]` in the same commit. If work is partial or blocked, leave it unchecked and record
   the remaining gap.
 
+## Subagents
+
+- Delegate only when work can genuinely run in parallel, benefits from isolated context
+  (noisy test runs, large exploration), or needs an independent review of a finished diff.
+- Work directly for searches, sequential edits, and anything that depends on shared context.
+- One agent owns implementation. Do not split concurrent writers across detector,
+  persistence, and dashboard unless the changes are provably independent.
+
 ## Collaboration
 
 - Explain important design decisions, invariants, unexpected findings, and tradeoffs in
