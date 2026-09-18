@@ -76,6 +76,7 @@ counts new capture frames rather than blocking ingestion.
   benchmark. `json.dumps` and event summarization still occur synchronously in
   `record_ws`; this investigation did not show they are a bottleneck at the configured live
   rate, so moving mutable frame construction across threads would be speculative.
-- `tools/profile_pipeline.py` currently fails after collecting a run because it queries the
-  removed `opportunities` table instead of schema-v4 `opportunity_episodes`. This newly
-  discovered benchmark-tool bug is reported but intentionally not fixed in this task.
+- During this investigation, `tools/profile_pipeline.py` failed after collecting a run
+  because it queried the removed `opportunities` table. A follow-up changed the summary
+  count to schema-v4 `opportunity_episodes`, added a direct regression test, and completed
+  a valid connected-dashboard run at 110 events/s with 550/550 events processed.

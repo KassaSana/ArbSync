@@ -14,6 +14,8 @@
   so clients cannot retain or revive a quote the backend has rejected.
 - Reconcile minute rollups from canonical episode rows after updates, and prevent an
   older statistics response from replacing a newer dashboard request.
+- Count schema-v4 `opportunity_episodes` in the connected-dashboard profiler so a completed
+  run can produce its report instead of failing on the removed legacy table.
 
 ### Added
 

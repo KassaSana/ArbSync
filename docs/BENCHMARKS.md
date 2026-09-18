@@ -83,7 +83,7 @@ The [2026-09-18 focused investigation](../artifacts/benchmarks/performance/optim
 measures schema-v4 route-ledger computation and capture writing. Pricing only the requested
 route reduced ledger latency by 82–84%; batching capture writes off the event loop reduced
 the measured large-frame/backlog heartbeat stalls while preserving comparable drain time.
-It also records the workloads where neither change matters and the remaining tooling limit.
+It also records the workloads where neither change matters and the profiler follow-up.
 
 ## Fee-adjusted survival
 

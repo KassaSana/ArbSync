@@ -16,7 +16,6 @@ import os
 import platform
 import shutil
 import socket
-import sqlite3
 import subprocess
 import sys
 import time
@@ -27,6 +26,7 @@ from pathlib import Path
 import httpx
 import psutil
 import websockets
+from perf_database import persisted_episode_count
 from perf_feed import Feed
 from playwright.async_api import async_playwright, expect
 
@@ -115,8 +115,7 @@ def summarize(backend, feed, browser, resources, cdp_start, cdp_end, elapsed, da
     profiles: dict = defaultdict(list)
     for name, actual, _base, _commit in browser["profile"]["samples"]:
         profiles[name].append(actual)
-    with sqlite3.connect(database) as db:
-        rows = db.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0]
+    rows = persisted_episode_count(database)
     return {
         "sent_events": len(sent),
         "processed_events": len(backend["rows"]),
