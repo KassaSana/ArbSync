@@ -30,6 +30,7 @@ logger = structlog.get_logger(__name__)
 
 CAPTURE_FORMAT = "arbsync-capture"
 CAPTURE_VERSION = 1
+WRITE_BATCH_SIZE = 256
 
 FrameKind = Literal["ws", "snapshot"]
 
@@ -197,30 +198,43 @@ class CaptureWriter:
             "exchanges": self._exchanges,
             "started_wall_ns": time.time_ns(),
         }
+        handle: IO[str] | None = None
         try:
-            with _open_capture(self._path, "w") as handle:
-                handle.write(json.dumps(header) + "\n")
-                while True:
-                    line = await self._queue.get()
-                    if line is None:
+            handle = await asyncio.to_thread(_open_capture, self._path, "w")
+            await asyncio.to_thread(handle.write, json.dumps(header) + "\n")
+            stopped = False
+            while not stopped:
+                line = await self._queue.get()
+                if line is None:
+                    break
+                lines = [line]
+                while len(lines) < WRITE_BATCH_SIZE:
+                    try:
+                        next_line = self._queue.get_nowait()
+                    except asyncio.QueueEmpty:
                         break
-                    if line is None:
+                    if next_line is None:
+                        stopped = True
                         break
-                    handle.write(line + "\n")
-                    self._flushed_count += 1
-                    capture_unflushed_frames.set(self._accepted_count - self._flushed_count)
-                handle.write(
-                    json.dumps(
-                        {
-                            "type": "footer",
-                            "frame_count": self._frame_count,
-                            "counts": self._counts,
-                            "clean": True,
-                        }
-                    )
-                    + "\n"
+                    lines.append(next_line)
+                await asyncio.to_thread(handle.writelines, (item + "\n" for item in lines))
+                self._flushed_count += len(lines)
+                capture_unflushed_frames.set(self._accepted_count - self._flushed_count)
+            await asyncio.to_thread(
+                handle.write,
+                json.dumps(
+                    {
+                        "type": "footer",
+                        "frame_count": self._frame_count,
+                        "counts": self._counts,
+                        "clean": True,
+                    }
                 )
+                + "\n",
+            )
         finally:
+            if handle is not None:
+                await asyncio.to_thread(handle.close)
             capture_unflushed_frames.set(self._accepted_count - self._flushed_count)
 
     async def close(self) -> None:

@@ -99,6 +99,22 @@ def test_capture_gzip_round_trip(tmp_path: Path) -> None:
     assert frames[0].raw == '{"e":"depthUpdate"}'
 
 
+def test_capture_open_writes_and_close_run_off_event_loop(tmp_path: Path, monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def tracked_to_thread(function, /, *args, **kwargs):
+        calls.append(function.__name__)
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", tracked_to_thread)
+
+    asyncio.run(_write(tmp_path / "capture.jsonl.gz", {"gemini": ["btcusd"]}))
+
+    assert calls[0] == "_open_capture"
+    assert "writelines" in calls
+    assert calls[-1] == "close"
+
+
 def test_full_capture_queue_drops_frames_without_blocking(tmp_path: Path) -> None:
     writer = CaptureWriter(tmp_path / "capture.jsonl", {"gemini": ["btcusd"]}, queue_maxsize=1)
 

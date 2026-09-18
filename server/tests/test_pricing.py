@@ -305,6 +305,38 @@ def test_sampler_route_prices_conserves_acquired_base_across_legs() -> None:
     assert ledger.notional == Decimal("200")
 
 
+def test_sampler_requested_route_does_not_walk_unrelated_venues(monkeypatch) -> None:
+    from arb.orderbook import OrderBookManager
+    from arb.pricing import DepthSampler
+
+    manager = OrderBookManager(max_age_seconds=1.0, clock=lambda: 0)
+    for exchange in ("gemini", "coinbase", "binance"):
+        manager.apply(snapshot(exchange, [("150", "10")], [("100", "10")]))
+    sampler = DepthSampler(
+        manager,
+        [Decimal("200")],
+        {"gemini": None, "coinbase": None, "binance": 5000},
+        {exchange: Decimal("0") for exchange in ("gemini", "coinbase", "binance")},
+        interval_seconds=5.0,
+    )
+    expected = tuple(
+        route.ledger
+        for route in sampler.route_prices("BTC-USD", 0)
+        if route.buy_exchange == "gemini" and route.sell_exchange == "coinbase"
+    )
+    calls: list[str] = []
+    original = manager.depth_levels
+
+    def counting_depth_levels(exchange: str, pair: str, now_monotonic_ns: int | None = None):
+        calls.append(exchange)
+        return original(exchange, pair, now_monotonic_ns)
+
+    monkeypatch.setattr(manager, "depth_levels", counting_depth_levels)
+
+    assert sampler.ledgers_for_route("BTC-USD", "gemini", "coinbase", 0) == expected
+    assert calls == ["gemini", "coinbase"]
+
+
 # --- Properties (ARB-032) ---
 
 price = st.integers(min_value=1_00, max_value=200_00).map(lambda v: Decimal(v) / 100)

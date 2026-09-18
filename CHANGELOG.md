@@ -42,6 +42,13 @@
 - Every configured exchange now requires a `fees.<exchange>.taker_pct` entry. There is no
   implicit zero-fee default.
 
+### Performance
+
+- Price only the requested route when snapshotting an episode ledger instead of walking
+  every directed venue route and filtering afterward.
+- Drain capture files in bounded batches with file I/O and gzip compression off the asyncio
+  event loop; queue capacity and overload-drop behavior are unchanged.
+
 ## 0.1.0 — 2026-09-17
 
 First public alpha. Detection-only: ArbSync observes public order books and reports

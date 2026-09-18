@@ -181,6 +181,13 @@ non-daemon threads that outlast a brief join, so a single future occurrence is d
 without repeating runs. `tools/shutdown_probe.py` exercises that path at about 1.1 seconds
 per shutdown; it reports lifecycle behavior only and is not a capacity benchmark.
 
+The [2026-09-18 depth-ledger and capture-writer investigation](../artifacts/benchmarks/performance/optimization-20260918.md)
+found that one requested three-venue route redundantly priced all six directed routes:
+route-ledger median latency fell 82–84% after removing that amplification. Capture writing
+kept up at modeled 110 and 1,100 frames/s both before and after, but a large frame or queued
+gzip drain blocked the event loop for 25–88 ms; bounded batched thread writes reduced the
+measured heartbeat gaps to 11–16 ms without changing the queue or drop policy.
+
 ## Statistics query scaling
 
 The statistics endpoints previously aggregated every stored opportunity inside

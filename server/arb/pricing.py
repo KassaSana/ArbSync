@@ -508,11 +508,33 @@ class DepthSampler:
         sell_exchange: str,
         now_monotonic_ns: int | None = None,
     ) -> tuple[PricingLedger, ...]:
-        return tuple(
-            result.ledger
-            for result in self.route_prices(pair, now_monotonic_ns)
-            if result.buy_exchange == buy_exchange and result.sell_exchange == sell_exchange
-        )
+        if (
+            buy_exchange == sell_exchange
+            or buy_exchange not in self.taker_fees_pct
+            or sell_exchange not in self.taker_fees_pct
+        ):
+            return ()
+        buy_sides = self.book_manager.depth_levels(buy_exchange, pair, now_monotonic_ns)
+        sell_sides = self.book_manager.depth_levels(sell_exchange, pair, now_monotonic_ns)
+        buy_top = self.book_manager.top_of_book(buy_exchange, pair)
+        sell_top = self.book_manager.top_of_book(sell_exchange, pair)
+        if buy_sides is None or sell_sides is None or buy_top is None or sell_top is None:
+            return ()
+        ledgers: list[PricingLedger] = []
+        for notional in self.notionals:
+            buy_fill, sell_fill = matched_route_fills(buy_sides[1], sell_sides[0], notional)
+            ledgers.append(
+                pricing_ledger(
+                    notional=notional,
+                    buy_top=buy_top,
+                    sell_top=sell_top,
+                    buy_fill=buy_fill,
+                    sell_fill=sell_fill,
+                    buy_taker_fee_pct=self.taker_fees_pct[buy_exchange],
+                    sell_taker_fee_pct=self.taker_fees_pct[sell_exchange],
+                )
+            )
+        return tuple(ledgers)
 
     def sample_all(self, now_monotonic_ns: int | None = None) -> None:
         self.samples += 1
