@@ -530,6 +530,11 @@ def test_single_pair_resync_keeps_venue_eligible_in_replay() -> None:
     reset = next(t for t in report.transitions if t.pair == "BTC-USDT" and t.kind == "reset")
     assert reset.accepted is False
     assert reset.reason == "adapter_reset"
+    assert all(
+        observation.mono_ns != reset.mono_ns
+        for observation in report.observations
+        if observation.pair == "BTC-USDT"
+    )
     eth = [transition for transition in report.transitions if transition.pair == "ETH-USDT"]
     assert [transition.kind for transition in eth] == [
         "snapshot",

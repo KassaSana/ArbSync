@@ -2,23 +2,27 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from arb.replay import ReplayTransition
-from research import _hy_correlation, _lead_lag_rows, _survival_rows
+from arb.replay import ReplayObservation
+from research import _hy_correlation, _lead_lag_rows, _price_series, _survival_rows
 
 
-def _transition(exchange: str, wall_ns: int, bid: str, ask: str) -> ReplayTransition:
-    return ReplayTransition(
+def _observation(
+    exchange: str,
+    wall_ns: int,
+    bid: str,
+    ask: str,
+    *,
+    eligible: bool = True,
+) -> ReplayObservation:
+    return ReplayObservation(
         exchange=exchange,
         pair="BTC-USD",
-        kind="snapshot",
-        sequence=wall_ns,
-        bids=((bid, "1"),),
-        asks=((ask, "1"),),
-        accepted=True,
-        reason=None,
-        resync_requested=False,
+        best_bid_price=bid,
+        best_ask_price=ask,
         wall_ns=wall_ns,
         mono_ns=wall_ns,
+        sequence=wall_ns,
+        eligible=eligible,
     )
 
 
@@ -41,23 +45,23 @@ def test_hayashi_yoshida_correlation_aligns_asynchronous_intervals() -> None:
 
 
 def test_lead_lag_reports_the_leader_and_measurement_direction() -> None:
-    transitions = [
-        _transition("gemini", 1_000_000_000, "99", "101"),
-        _transition("gemini", 2_000_000_000, "100", "102"),
-        _transition("gemini", 3_000_000_000, "97.98", "99.98"),
-        _transition("gemini", 4_000_000_000, "100.9494", "102.9494"),
-        _transition("gemini", 5_000_000_000, "99.420159", "101.420159"),
-        _transition("gemini", 6_000_000_000, "101.930663", "103.930663"),
-        _transition("coinbase", 1_500_000_000, "99", "101"),
-        _transition("coinbase", 2_500_000_000, "100", "102"),
-        _transition("coinbase", 3_500_000_000, "97.98", "99.98"),
-        _transition("coinbase", 4_500_000_000, "100.9494", "102.9494"),
-        _transition("coinbase", 5_500_000_000, "99.420159", "101.420159"),
-        _transition("coinbase", 6_500_000_000, "101.930663", "103.930663"),
+    observations = [
+        _observation("gemini", 1_000_000_000, "99", "101"),
+        _observation("gemini", 2_000_000_000, "100", "102"),
+        _observation("gemini", 3_000_000_000, "97.98", "99.98"),
+        _observation("gemini", 4_000_000_000, "100.9494", "102.9494"),
+        _observation("gemini", 5_000_000_000, "99.420159", "101.420159"),
+        _observation("gemini", 6_000_000_000, "101.930663", "103.930663"),
+        _observation("coinbase", 1_500_000_000, "99", "101"),
+        _observation("coinbase", 2_500_000_000, "100", "102"),
+        _observation("coinbase", 3_500_000_000, "97.98", "99.98"),
+        _observation("coinbase", 4_500_000_000, "100.9494", "102.9494"),
+        _observation("coinbase", 5_500_000_000, "99.420159", "101.420159"),
+        _observation("coinbase", 6_500_000_000, "101.930663", "103.930663"),
     ]
 
     [row] = _lead_lag_rows(
-        transitions,
+        observations,
         tick_bin_ns=1,
         max_lag_ns=1_000_000_000,
         lag_step_ns=500_000_000,
@@ -69,6 +73,30 @@ def test_lead_lag_reports_the_leader_and_measurement_direction() -> None:
     assert row["estimated_lead_ns"] == 500_000_000
     assert row["hayashi_yoshida_correlation"] == 1.0
     assert row["correlation_ci_95_low"] <= 1.0 <= row["correlation_ci_95_high"]
+
+
+def test_price_series_uses_canonical_post_apply_observations() -> None:
+    observations = [
+        # Snapshot establishes the top of book.
+        _observation("gemini", 1, "100", "102"),
+        # A deep-only delta must not move the research midpoint to 99/103.
+        _observation("gemini", 2, "100", "102"),
+        # One-sided best-ask update is represented by the new canonical top.
+        _observation("gemini", 3, "100", "101"),
+        # Deleting the old best ask exposes the next level.
+        _observation("gemini", 4, "100", "102"),
+        # Invalidation may retain a cached top, but it is not a valid tick.
+        _observation("gemini", 5, "100", "102", eligible=False),
+    ]
+
+    series = _price_series(observations, tick_bin_ns=1)
+
+    assert [tick.price for tick in series[("BTC-USD", "gemini")]] == [
+        Decimal("101"),
+        Decimal("101"),
+        Decimal("100.5"),
+        Decimal("101"),
+    ]
 
 
 def test_survival_rows_separate_fee_survival_from_insufficient_size() -> None:

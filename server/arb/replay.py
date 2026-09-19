@@ -42,6 +42,29 @@ class ReplayError(ValueError):
     """A capture cannot be replayed: skew, truncation, or unknown venue."""
 
 
+REPLAY_OBSERVATION_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ReplayObservation:
+    """Canonical top-of-book state immediately after one replayed event.
+
+    The normalized event levels remain on :class:`ReplayTransition` for protocol
+    auditing. Research consumers must use this post-apply observation instead of
+    inferring a price from the levels changed by an input delta.
+    """
+
+    exchange: str
+    pair: str
+    best_bid_price: str
+    best_ask_price: str
+    wall_ns: int
+    mono_ns: int
+    sequence: int
+    eligible: bool
+    version: int = REPLAY_OBSERVATION_VERSION
+
+
 @dataclass(frozen=True)
 class ReplayTransition:
     exchange: str
@@ -60,6 +83,7 @@ class ReplayTransition:
 @dataclass
 class ReplayReport:
     transitions: list[ReplayTransition] = field(default_factory=list)
+    observations: list[ReplayObservation] = field(default_factory=list)
     opportunities: list[OpportunityEpisode] = field(default_factory=list)
     snapshots_consumed: int = 0
     digest: str = ""
@@ -162,6 +186,20 @@ def _digest(report: ReplayReport) -> str:
                     transition.resync_requested,
                 ]
                 for transition in report.transitions
+            ],
+            "observations": [
+                [
+                    observation.version,
+                    observation.exchange,
+                    observation.pair,
+                    observation.best_bid_price,
+                    observation.best_ask_price,
+                    observation.wall_ns,
+                    observation.mono_ns,
+                    observation.sequence,
+                    observation.eligible,
+                ]
+                for observation in report.observations
             ],
             "opportunities": [
                 {key: str(value) for key, value in opportunity.as_payload().items()}
@@ -293,6 +331,25 @@ async def replay_frames(
                     detected_at_ns=frame.wall_ns if recorded else None,
                     now_monotonic_ns=clock.now_ns if recorded else None,
                 )
+                status = active_manager.eligibility(
+                    event.exchange,
+                    event.pair,
+                    clock.now_ns if recorded else None,
+                )
+                if result.top_of_book is not None:
+                    top = result.top_of_book
+                    report.observations.append(
+                        ReplayObservation(
+                            exchange=top.exchange,
+                            pair=top.pair,
+                            best_bid_price=str(top.best_bid_price),
+                            best_ask_price=str(top.best_ask_price),
+                            wall_ns=frame.wall_ns,
+                            mono_ns=frame.mono_ns,
+                            sequence=top.sequence,
+                            eligible=status.eligible,
+                        )
+                    )
                 report.transitions.append(
                     ReplayTransition(
                         exchange=event.exchange,
@@ -348,7 +405,9 @@ async def replay_file(
 
 
 __all__ = [
+    "REPLAY_OBSERVATION_VERSION",
     "ReplayError",
+    "ReplayObservation",
     "ReplayReport",
     "ReplayTransition",
     "replay_file",

@@ -738,10 +738,9 @@ because every later feature needs deterministic tests against real exchange traf
 the consumer interface between the books and their readers is allowed to stay a plain
 callback list until replay shows what shape it needs; a plugin framework is out of scope.
 
-Release status: ARB-030 through ARB-033 are complete on the default branch after the
+Release status: ARB-030 through ARB-035 are complete on the default branch after the
 published `v0.1.0` tag and remain under `Unreleased`; package metadata is still `0.1.0`.
-The next reviewed minor candidate can include those changes. ARB-034 and ARB-035 remain
-open and should not be described as shipped.
+The next reviewed minor candidate can include those changes.
 
 ### [x] ARB-030 — Capture and replay real exchange traffic
 
@@ -895,9 +894,284 @@ ledgers; it does not write SQLite or run on ingestion. Added measurement-floor a
 clock-skew caveats in `docs/RESEARCH.md`, deterministic replay timestamps, and focused
 research tests. Backend tests, Ruff, formatting, and strict mypy pass.
 
-Original executability estimate: **39 engineer-hours** through ARB-034. Completed
-ARB-030 through ARB-033 account for 31 hours of that estimate; ARB-034 remains estimated
-at 8 hours. ARB-035 is a separate 6-hour first research module plus open-ended follow-ons.
+Original executability estimate: **39 engineer-hours** through ARB-034, now complete.
+ARB-035 added a separate 6-hour first research module. The audit after ARB-035 found that
+the research inputs and replay lifecycle need further correctness work before their output
+can support stronger market-structure or executability conclusions.
+
+## Research correctness and next roadmap
+
+This roadmap follows the ARB-035 audit. The immediate next ticket is ARB-036: make the
+research price series consume canonical post-apply book observations rather than changed
+levels from an input delta. Capture provenance, time-faithful replay, estimator validation,
+and age/skew observability follow it. These are related but distinct correctness boundaries;
+passing a deterministic replay hash does not by itself establish faithful timing or valid
+statistics.
+
+Live net-executable episodes are deliberately deferred. First measure net-positive intervals
+offline on faithful replay, define their semantics, and measure their cost. Only then decide
+whether a new live lifecycle and persistence schema provide enough product value.
+
+### [x] ARB-036 — Build research series from canonical post-apply observations
+
+- Priority: P1
+- Estimate: 8–12 hours
+- Dependencies: ARB-035
+
+Problem: `ReplayTransition.bids` and `asks` contain the levels changed by the normalized
+input event, not the canonical best bid and ask after applying it. ARB-035 treats the first
+changed bid and ask as a midpoint and discards one-sided updates. A deep-level update can
+therefore move the research price while the real top of book is unchanged, and a genuine
+best-price change can be omitted.
+
+Acceptance criteria:
+
+- Add a versioned replay/research observation representing the canonical state after an
+  event is applied: exchange, pair, canonical best bid and ask, local wall and monotonic
+  observation times, sequence, and whether the book is eligible.
+- Produce no valid price tick from an incomplete, crossed, disconnected, discontinuous, or
+  expired book. Preserve the normalized input delta separately where protocol auditing and
+  the replay digest still need it.
+- Make the ARB-035 price-series builder consume canonical observations only; it must never
+  infer a midpoint from the first changed levels in an event.
+- Cover a one-sided best-price update, a deep-only update that leaves the midpoint unchanged,
+  deletion of the current best level, a snapshot, and an invalidation boundary.
+- Keep the work offline/replay-facing. Do not add a database migration or change the live
+  opportunity model in this ticket.
+- Document that existing ARB-035 lead/lag output produced before this correction is not
+  valid evidence, while leaving estimator validation to ARB-039.
+
+Resolution: replay now emits version-1 canonical post-apply observations alongside the
+normalized input transitions. Observations carry the exchange, pair, exact canonical best
+prices, recorded wall and monotonic times, local sequence, and eligibility. The research
+price-series builder consumes only eligible observations, so deep-only updates, one-sided
+best-price changes, best-level deletion, snapshots, and reset boundaries cannot fabricate or
+omit a midpoint. Existing ARB-035 lead/lag output must be regenerated; estimator validation
+remains deferred to ARB-039.
+
+### [ ] ARB-037 — Make capture integrity and lifecycle provenance self-describing
+
+- Priority: P1
+- Estimate: 12–20 hours
+- Dependencies: ARB-036 observation contract
+
+Problem: a footer marked `clean` proves an orderly writer close but does not prove the
+capture is complete. Queue-full and closed-writer drops exist only in process metrics.
+Capture frames also do not identify connection boundaries or whether a REST response came
+from initial synchronization, scoped recovery, full reconnect recovery, or reconciliation.
+
+Acceptance criteria:
+
+- Version the capture format and record attempted, accepted, flushed, and dropped frame
+  counts by reason and kind in the artifact. A reader can distinguish clean shutdown from
+  lossless capture without consulting external metrics.
+- Record adapter connection/disconnection boundaries and enough recovery context to replay
+  when a canonical book became invalid and when a new connection generation began.
+- Correlate each recorded REST snapshot response with its request purpose, pair, connection
+  generation, request time, and response time. Do not match unrelated responses solely by
+  exchange and URL.
+- Treat writer failure, a missing footer, count mismatch, and declared frame loss as distinct
+  outcomes. Research rejects lossy input by default and requires an explicit override that
+  is written to its report metadata.
+- Define and test backward compatibility for version-1 captures. If some provenance cannot
+  be reconstructed, label that limitation instead of inventing it.
+- Preserve bounded, non-blocking ingestion and the existing observable drop policy.
+
+### [ ] ARB-038 — Replay recovery, disconnects, expiry, and snapshots on recorded time
+
+- Priority: P1
+- Estimate: 20–32 hours
+- Dependencies: ARB-036, ARB-037
+
+Problem: replay preloads REST responses and returns them immediately, so a snapshot recorded
+later can affect earlier WebSocket frames. It calls adapter parsers sequentially rather than
+reproducing Binance.US's concurrent buffering while a snapshot request is in flight. Replay
+also omits live connection-state callbacks and the eligibility monitor, so gaps,
+disconnects, and age expiry can leave episodes open until capture shutdown.
+
+Acceptance criteria:
+
+- Drive WebSocket frames, REST request completion, connection boundaries, and eligibility
+  deadlines with one deterministic scheduler on the recorded monotonic timeline.
+- A snapshot response cannot affect canonical state before its recorded completion time.
+  WebSocket frames received while it was in flight remain buffered and are aligned by the
+  production adapter's recovery rules.
+- Replay a disconnect or full reconnect through the same canonical invalidation effects as
+  live operation. A scoped Binance.US recovery invalidates only its affected pair.
+- Advance age-based eligibility even across quiet periods and close an affected episode at
+  the deterministic expiry boundary rather than only when another market frame arrives.
+- Add regression tests for future-snapshot lookahead, interleaved Binance.US updates,
+  reconnect generations, sequence-gap closure, quiet-book expiry, scoped recovery, and
+  missing or mismatched snapshot provenance.
+- Keep recorded replay deterministic and make its digest cover the canonical transitions
+  and lifecycle boundaries whose equality is being claimed.
+
+### [ ] ARB-039 — Validate the lead/lag estimator and uncertainty reporting
+
+- Priority: P1
+- Estimate: 12–20 hours
+- Dependencies: ARB-036, ARB-038
+
+Problem: correcting the input price series does not establish that the estimator is valid.
+The current overlap normalization can produce values outside `[-1, 1]`, zero-overlap inputs
+can be reported as `status="ok"`, and the approximate Fisher interval does not account for
+dependent overlaps or selection of the maximum across a lag grid.
+
+Acceptance criteria:
+
+- Define the exact estimator and normalization from a cited primary reference or a trusted
+  implementation, including how asynchronous intervals enter its variance terms.
+- Never report a correlation outside `[-1, 1]`; zero overlap, constant returns, too few
+  observations, and an unidentifiable maximum return explicit insufficient-data statuses.
+- Test planted positive, negative, and zero lags; irregular sampling; missing ticks; unequal
+  activity; constant series; no overlap; and a null simulation with no leader.
+- Use an uncertainty method appropriate to dependent asynchronous returns and lag-grid
+  selection, or remove confidence bounds and state precisely what evidence remains.
+- Report sensitivity to tick bin, lag step, window, and minimum overlap. Keep the result
+  labelled research rather than a live product metric.
+
+### [ ] ARB-040 — Measure absolute age and cross-venue receipt skew before gating routes
+
+- Priority: P1
+- Estimate: 12–20 hours
+- Dependencies: ARB-036, ARB-038
+
+Problem: canonical eligibility limits each book's age independently, but a route can compare
+a just-updated book with another book near the configured age limit. Relative receipt skew
+is useful evidence of asynchronous inputs, but it does not prove the quieter book is wrong,
+and equal-age books can both be too old. A guessed hard cutoff would encode policy before
+the data establishes one.
+
+Acceptance criteria:
+
+- Carry each route leg's monotonic receipt age and the absolute age difference into offline
+  observations and diagnostics without using exchange clocks as a freshness authority.
+- Analyze opportunity counts, spreads, lifetimes, and fee/depth survival across configurable
+  absolute-age and relative-skew bands on faithful captures.
+- Keep absolute age, relative skew, connection state, and sequence continuity as distinct
+  dimensions in output and documentation.
+- Add metrics or API fields needed to observe the same values live without changing route
+  eligibility by default.
+- Propose a default route gate only if the captured sensitivity results support one. If a
+  gate is adopted, make it configurable, close affected episodes deterministically, expose
+  the rejection reason, and add boundary tests.
+
+### [ ] ARB-041 — Analyze net-executable intervals offline before adding live episodes
+
+- Priority: P2
+- Estimate: 16–24 hours
+- Dependencies: ARB-038, ARB-040
+
+Problem: current episodes intentionally track theoretical top-of-book dislocations. Their
+pricing ledger is refreshed only at open or at a wider theoretical peak, so it cannot answer
+how long a configured notional stayed executable and net positive or whether depth improved
+without a new theoretical peak. That limitation does not by itself justify a second live
+episode lifecycle and schema.
+
+Acceptance criteria:
+
+- On faithful replay, compute per-notional route intervals from matched depth and configured
+  fees whenever a relevant canonical book change can alter the result.
+- Define opening, closing, insufficient-depth, invalidation, hysteresis, and end-of-capture
+  semantics explicitly. Keep theoretical and net-executable intervals as different datasets.
+- Report duration, peak and terminal net spread, executable base and quote amounts, depth
+  insufficiency, leg ages/skew, and sensitivity to threshold and assumed delay.
+- Measure CPU and memory cost at representative book depths and event rates before proposing
+  equivalent live computation.
+- End with a recorded product decision: add live net episodes, retain offline intervals, or
+  collect more evidence. Do not migrate SQLite or change live episode semantics unless that
+  decision approves a separately scoped follow-up.
+
+### [ ] ARB-042 — Make fill-rate statistics complete, windowed, and reproducible
+
+- Priority: P2
+- Estimate: 12–20 hours
+- Dependencies: ARB-037, ARB-038
+
+Problem: live fill counts exist only for the current process, and sampling iterates books
+that have already been seen. A configured book that never initializes can be absent rather
+than counted as unavailable, and the API has no time window or sample provenance.
+
+Acceptance criteria:
+
+- Sample the configured roster, including missing and never-initialized books, and preserve
+  ineligible observations separately from insufficient depth.
+- Define sample start/end, cadence, restart, missed-sample, depth-cap, and configuration
+  semantics. Expose raw counts alongside ratios.
+- Produce reproducible windowed aggregates by venue, pair, side, and notional from a bounded
+  persisted or file-backed representation chosen explicitly for this use case.
+- Verify restart behavior, quiet and missing books, configuration changes, capped versus
+  full-depth venues, and replay/live agreement on the same observation sequence.
+- Do not make this ticket depend on live net episodes.
+
+### [ ] ARB-043 — Add filtered historical opportunity queries and export
+
+- Priority: P2
+- Estimate: 12–20 hours
+- Dependencies: existing schema version 4; net-specific filters wait for an approved ARB-041 follow-up
+
+Problem: the API exposes only the latest bounded list. Existing canonical episode history
+cannot be paged or filtered for ordinary investigation without reading SQLite directly.
+
+Acceptance criteria:
+
+- Add stable cursor pagination with explicit ordering and filters for time range, pair,
+  buy venue, sell venue, close reason, and open/closed state.
+- Add a bounded JSONL or CSV export path that preserves decimal strings and quote units and
+  cannot monopolize ingestion or hold an unbounded result in memory.
+- Validate query limits, cursor stability across concurrent inserts, malformed filters, and
+  index-supported plans on a representative database.
+- Add dashboard drill-down only after the API contract is tested. Do not imply net-executable
+  filtering until that lifecycle exists or an explicit stored-ledger filter is defined.
+
+### [ ] ARB-044 — Keep venue-comparison route economics coherent with eligibility
+
+- Priority: P1
+- Estimate: 8–12 hours
+- Dependencies: ARB-034
+
+Problem: individual venue cells consult canonical book status, but the selected gross/net
+route is chosen from the last polled pricing response without applying those statuses. The
+panel can therefore show a route's economics after one leg has become ineligible. Its
+independent cheapest-buy and best-sell labels can also describe different venues from the
+route whose gross and net spread is displayed.
+
+Acceptance criteria:
+
+- Suppress a cached route immediately when either route leg becomes ineligible or the live
+  feed is disconnected; distinguish unavailable from insufficient depth.
+- Label the buy and sell venues for the exact displayed route. If independent per-side best
+  quotes remain useful, present them separately without implying they produced that route.
+- Carry an as-of marker or generation through pricing refreshes so an older response cannot
+  revive a route after a newer invalidation or refresh.
+- Test disconnect, age expiry, crossed/incomplete status, out-of-order pricing responses,
+  same-venue independent best quotes, route recovery, and a route that differs from the
+  independent cheapest-buy/best-sell pair.
+- After ARB-036 through ARB-040 settle their contracts, refresh the relevant architecture,
+  research, changelog, and validation claims and run a qualifying current-code soak. Keep
+  that evidence work out of feature implementation commits when it is independently scoped.
+
+### Revised dependency order
+
+```text
+ARB-036 canonical observations
+  -> ARB-037 capture integrity and provenance
+  -> ARB-038 time-faithful replay and lifecycle
+       -> ARB-039 estimator validation
+       -> ARB-040 age/skew observability
+            -> ARB-041 offline net-interval analysis
+
+ARB-037 + ARB-038 -> ARB-042 windowed fill-rate evidence
+schema v4         -> ARB-043 historical query/export
+ARB-034           -> ARB-044 dashboard route correctness
+```
+
+ARB-039 does not block ARB-040 or ARB-041: lead/lag estimator validity is separate from
+book-age diagnostics and executable-route arithmetic. ARB-041 is the decision gate for any
+future live net-episode ticket; it is not a prerequisite for existing-history queries or
+fill-rate correctness. Streaming multi-hour captures with bounded memory remains a focused
+follow-up when the chosen research dataset demonstrates that materialization is the actual
+limit; it should not be bundled with unrelated API performance work.
 
 ## Planning summary
 
@@ -905,8 +1179,9 @@ at 8 hours. ARB-035 is a separate 6-hour first research module plus open-ended f
 | --- | ---: | --- |
 | P0 release gate | 43 h | Required before public announcement |
 | P1 reliability and maintainability | 54 h | Strongly recommended for the first stable release |
-| P2 operations and evidence | 27 h | Can follow initial publication except where dependencies say otherwise |
-| Total | **124 h** | About 3.1 engineer-weeks at 40 h/week |
+| P2 operations and evidence | 29 h plus soak runtime | Can follow initial publication except where dependencies say otherwise |
+| Completed through ARB-035 | **171 h plus soak runtime** | Historical estimate, not actual elapsed time |
+| ARB-036 through ARB-044 | **112–180 h** | Revised next-work range; evidence may stop deferred product branches |
 
 The critical path is ARB-002 -> ARB-004/ARB-010 -> ARB-021. The highest-risk issue is
 quote-currency conflation, not performance. Avoid expanding into execution modeling until

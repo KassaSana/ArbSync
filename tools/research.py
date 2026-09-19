@@ -27,7 +27,7 @@ from arb.config import AppConfig, load_config
 from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager
 from arb.pricing import DepthSampler
-from arb.replay import ReplayReport, ReplayTransition, replay_frames
+from arb.replay import ReplayObservation, ReplayReport, replay_frames
 
 
 @dataclass(frozen=True)
@@ -172,20 +172,20 @@ def _survival_rows(episodes: Iterable[dict[str, object]]) -> list[dict[str, obje
 
 
 def _price_series(
-    transitions: Iterable[ReplayTransition], tick_bin_ns: int
+    observations: Iterable[ReplayObservation], tick_bin_ns: int
 ) -> dict[tuple[str, str], list[PriceTick]]:
     latest: dict[tuple[str, str, int], PriceTick] = {}
-    for transition in transitions:
-        if not transition.accepted or not transition.bids or not transition.asks:
+    for observation in observations:
+        if not observation.eligible:
             continue
-        if transition.wall_ns <= 0:
+        if observation.wall_ns <= 0:
             continue
-        bid = Decimal(transition.bids[0][0])
-        ask = Decimal(transition.asks[0][0])
+        bid = Decimal(observation.best_bid_price)
+        ask = Decimal(observation.best_ask_price)
         if bid <= 0 or ask <= 0:
             continue
-        key = (transition.pair, transition.exchange, transition.wall_ns // tick_bin_ns)
-        latest[key] = PriceTick(transition.wall_ns, (bid + ask) / Decimal(2))
+        key = (observation.pair, observation.exchange, observation.wall_ns // tick_bin_ns)
+        latest[key] = PriceTick(observation.wall_ns, (bid + ask) / Decimal(2))
 
     series: dict[tuple[str, str], list[PriceTick]] = defaultdict(list)
     for (pair, exchange, _), tick in latest.items():
@@ -272,13 +272,13 @@ def _correlation_interval(correlation: float, overlaps: int) -> tuple[float, flo
 
 
 def _lead_lag_rows(
-    transitions: Iterable[ReplayTransition],
+    observations: Iterable[ReplayObservation],
     *,
     tick_bin_ns: int,
     max_lag_ns: int,
     lag_step_ns: int,
 ) -> list[dict[str, object]]:
-    series = _price_series(transitions, tick_bin_ns)
+    series = _price_series(observations, tick_bin_ns)
     grouped: dict[str, list[str]] = defaultdict(list)
     for pair, exchange in series:
         grouped[pair].append(exchange)
@@ -347,7 +347,7 @@ def analyze_capture(
     survival = _survival_rows(episodes)
     fill_rates = [{"module": "venue_fill_rate", **row} for row in sampler.tracker.rows()]
     lead_lag = _lead_lag_rows(
-        report.transitions,
+        report.observations,
         tick_bin_ns=tick_bin_ns,
         max_lag_ns=max_lag_ns,
         lag_step_ns=lag_step_ns,
@@ -358,6 +358,8 @@ def analyze_capture(
         "fill_rates": fill_rates,
         "lead_lag": lead_lag,
         "measurement": {
+            "price_series_source": "canonical_post_apply_observations",
+            "replay_observation_version": 1,
             "estimator": "Hayashi-Yoshida asynchronous return correlation",
             "tick_bin_ns": tick_bin_ns,
             "lag_step_ns": lag_step_ns,
@@ -422,6 +424,7 @@ async def run_research(
         "replay_digest": replay_report.digest,
         "snapshots_consumed": replay_report.snapshots_consumed,
         "transition_count": len(replay_report.transitions),
+        "observation_count": len(replay_report.observations),
         "dataset_counts": counts,
         "measurement": datasets["measurement"],
     }

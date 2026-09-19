@@ -33,9 +33,13 @@ product persistence or ingestion.
 
 ## Lead/lag method and limits
 
-The tool builds midpoint ticks from accepted replay transitions, bins them at
-250 ms by default, converts them to asynchronous log-return intervals, and
-calculates Hayashi–Yoshida overlap covariance across a configurable lag grid.
+The tool builds midpoint ticks from versioned canonical post-apply replay
+observations, bins them at 250 ms by default, converts them to asynchronous
+log-return intervals, and calculates Hayashi–Yoshida overlap covariance across
+a configurable lag grid.
+The normalized input deltas remain available separately for protocol auditing;
+they are not a price source. Lead/lag datasets produced by ARB-035 before this
+observation correction are not valid evidence and must be regenerated.
 Positive lead time means the reported leader's return series is estimated to move
 before the follower's series. Internally, a positive lag shifts the follower's
 returns earlier to align them with the leader. The selected correlation includes an approximate

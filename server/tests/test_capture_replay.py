@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from arb import main
-from arb.capture import CaptureWriter
+from arb.capture import CaptureFrame, CaptureHeader, CaptureWriter
 from arb.replay import ReplayError, replay_file, replay_frames
 
 
@@ -81,6 +81,7 @@ def test_replay_twice_produces_identical_digest(tmp_path: Path) -> None:
 
     assert first.digest == second.digest
     assert first.transitions == second.transitions
+    assert first.observations == second.observations
     assert [opp.as_payload() for opp in first.opportunities] == [
         opp.as_payload() for opp in second.opportunities
     ]
@@ -99,6 +100,64 @@ def test_replay_runs_detector_on_the_real_path(tmp_path: Path) -> None:
     pairs = {(opp.buy_exchange, opp.sell_exchange) for opp in report.opportunities}
     assert ("coinbase", "gemini") in pairs
     assert all(opp.pair == "BTC-USD" for opp in report.opportunities)
+
+
+def test_replay_observations_capture_canonical_post_apply_tops() -> None:
+    second = 1_000_000_000
+    header = CaptureHeader(exchanges={"gemini": ["btcusd"]}, started_wall_ns=second)
+
+    def frame(index: int, raw: str) -> CaptureFrame:
+        return CaptureFrame(
+            exchange="gemini",
+            kind="ws",
+            wall_ns=second + index * second,
+            mono_ns=second + index * second,
+            raw=raw,
+            payload=None,
+            url=None,
+            events=(),
+        )
+
+    frames = [
+        frame(
+            0,
+            '{"e":"depthUpdate","s":"BTCUSD","U":1,"u":1,"E":1,'
+            '"b":[["100","1"],["99","1"]],"a":[["101","1"],["102","1"]]}',
+        ),
+        # Deep-only bid update: the canonical top remains 100/101.
+        frame(
+            1,
+            '{"e":"depthUpdate","s":"BTCUSD","U":2,"u":2,"E":2,"b":[["99","2"]],"a":[]}',
+        ),
+        # One-sided best-ask update.
+        frame(
+            2,
+            '{"e":"depthUpdate","s":"BTCUSD","U":3,"u":3,"E":3,"b":[],"a":[["100.5","1"]]}',
+        ),
+        # Deleting that best ask exposes the next canonical level.
+        frame(
+            3,
+            '{"e":"depthUpdate","s":"BTCUSD","U":4,"u":4,"E":4,"b":[],"a":[["100.5","0"]]}',
+        ),
+    ]
+
+    report = asyncio.run(replay_frames(header, frames))
+
+    assert [
+        (observation.sequence, observation.best_bid_price, observation.best_ask_price)
+        for observation in report.observations
+    ] == [
+        (1, "100", "101"),
+        (2, "100", "101"),
+        (3, "100", "100.5"),
+        (4, "100", "101"),
+    ]
+    assert [transition.bids for transition in report.transitions] == [
+        (("100", "1"), ("99", "1")),
+        (("99", "2"),),
+        (),
+        (),
+    ]
 
 
 def test_replay_serves_snapshots_per_request_url(tmp_path: Path) -> None:
