@@ -866,7 +866,7 @@ current or most recent episode lifetime. Missing quotes are shown as unavailable
 short books remain explicitly insufficient depth. Dashboard tests, typecheck, lint, and
 production build pass; the focused backend API, pricing, and detector tests pass.
 
-### [ ] ARB-035 — Offline lead/lag and market-structure research
+### [x] ARB-035 — Offline lead/lag and market-structure research
 
 - Priority: P3
 - Estimate: 6 hours to first module
@@ -886,6 +886,14 @@ Acceptance criteria:
   Hoffmann–Rosenbaum–Yoshida), reports confidence intervals, and documents the
   measurement floor from network geography and clock skew; results are labelled as
   research, not product metrics.
+
+Resolution: added the offline `tools/research.py` capture replay workflow with JSONL
+datasets for canonical episode lifetimes, fee and executable-size survival by notional,
+venue fill rates, and Hayashi–Yoshida lead/lag estimates. Replay uses production
+adapters, trusted books, the episode detector, depth sampler, and exact fee-aware
+ledgers; it does not write SQLite or run on ingestion. Added measurement-floor and
+clock-skew caveats in `docs/RESEARCH.md`, deterministic replay timestamps, and focused
+research tests. Backend tests, Ruff, formatting, and strict mypy pass.
 
 Original executability estimate: **39 engineer-hours** through ARB-034. Completed
 ARB-030 through ARB-033 account for 31 hours of that estimate; ARB-034 remains estimated

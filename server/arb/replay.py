@@ -53,6 +53,8 @@ class ReplayTransition:
     accepted: bool
     reason: str | None
     resync_requested: bool
+    wall_ns: int = 0
+    mono_ns: int = 0
 
 
 @dataclass
@@ -302,6 +304,8 @@ async def replay_frames(
                         accepted=result.accepted,
                         reason=result.reason,
                         resync_requested=resync_requested,
+                        wall_ns=frame.wall_ns,
+                        mono_ns=frame.mono_ns,
                     )
                 )
         # The capture ended with these spreads still standing. Closing them
