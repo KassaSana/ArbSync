@@ -24,10 +24,12 @@ function liveValue(overrides: Partial<LiveValue> = {}): LiveValue {
     stats: loading(),
     pairs: ready([{ exchange: "gemini", pair: "BTC-USD" }]),
     adapters: loading(),
+    depthPricing: loading(),
     refreshStats: vi.fn(),
     refreshOpportunities: vi.fn(),
     refreshAdapters: vi.fn(),
     refreshPairs: vi.fn(),
+    refreshDepthPricing: vi.fn(),
     ...overrides,
   };
 }

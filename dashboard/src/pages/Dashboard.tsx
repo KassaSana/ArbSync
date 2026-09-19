@@ -4,6 +4,7 @@ import { LiveSpreads } from "../components/LiveSpreads";
 import { OpportunityFeed } from "../components/OpportunityFeed";
 import { Placeholder } from "../components/Placeholder";
 import { StatsCards } from "../components/StatsCards";
+import { VenueComparison } from "../components/VenueComparison";
 import { age } from "../lib/format";
 import { useLive } from "../state/live";
 
@@ -85,6 +86,17 @@ export default function Dashboard() {
           />
         </ErrorBoundary>
       </div>
+
+      <ErrorBoundary label="Venue comparison">
+        <VenueComparison
+          pairs={live.pairs.state === "ready" ? live.pairs.data : []}
+          statuses={live.bookStatuses}
+          pricing={live.depthPricing}
+          opportunities={live.opportunities}
+          nowMs={live.nowMs}
+          onRetry={live.refreshDepthPricing}
+        />
+      </ErrorBoundary>
     </div>
   );
 }

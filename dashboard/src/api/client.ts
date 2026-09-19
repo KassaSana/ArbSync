@@ -1,6 +1,7 @@
 import {
   decodeAdapterStatuses,
   decodeBookStatuses,
+  decodeDepthPricing,
   decodeOpportunities,
   decodePairs,
   decodeStats,
@@ -9,6 +10,7 @@ import {
   decodeWindowStats,
   type AdapterStatus,
   type BookStatus,
+  type DepthPricing,
   type Opportunity,
   type PairRecord,
   type Stats,
@@ -32,6 +34,8 @@ export type {
   WindowKey,
   WindowStats,
 } from "./schema";
+
+export type { DepthPricing, DepthQuote, ExecutableRoute } from "./schema";
 
 const HOSTED_API_URL = "https://arb-detector-api.onrender.com";
 const API_BASE = (
@@ -95,6 +99,10 @@ export async function fetchAdapterStatus(): Promise<AdapterStatus[]> {
 
 export async function fetchBookStatus(): Promise<BookStatus[]> {
   return requestJson("/api/book-status", decodeBookStatuses);
+}
+
+export async function fetchDepthPricing(): Promise<DepthPricing> {
+  return requestJson("/api/pricing/depth", decodeDepthPricing);
 }
 
 export async function fetchSystemOverview(): Promise<SystemOverview> {

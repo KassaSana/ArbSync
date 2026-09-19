@@ -14,6 +14,31 @@ export type PricingLedger = {
   insufficient_depth: boolean;
 };
 
+export type DepthQuote = {
+  exchange: string;
+  pair: string;
+  side: "buy" | "sell";
+  notional: string;
+  vwap: string | null;
+  insufficient_depth: boolean;
+  filled_notional: string;
+  filled_base: string;
+  levels_used: number;
+  subscribed_depth_levels: number | null;
+};
+
+export type ExecutableRoute = PricingLedger & {
+  pair: string;
+  buy_exchange: string;
+  sell_exchange: string;
+};
+
+export type DepthPricing = {
+  notionals: string[];
+  quotes: DepthQuote[];
+  routes: ExecutableRoute[];
+};
+
 /**
  * One dislocation from appearance to disappearance on a (pair, buy, sell)
  * route. `start_ns` identifies it; a close for the same episode arrives as a
@@ -287,6 +312,65 @@ function decodePricingLedger(value: unknown, location: string): PricingLedger {
     insufficient_depth: boolean(
       field(source, "insufficient_depth", location),
       `${location}.insufficient_depth`,
+    ),
+  };
+}
+
+function decodeDepthQuote(value: unknown, location = "depth_quote"): DepthQuote {
+  const source = object(value, location);
+  const side = text(field(source, "side", location), `${location}.side`);
+  if (side !== "buy" && side !== "sell") {
+    throw new PayloadValidationError(`${location}.side`, "buy or sell");
+  }
+  return {
+    exchange: text(field(source, "exchange", location), `${location}.exchange`),
+    pair: text(field(source, "pair", location), `${location}.pair`),
+    side,
+    notional: decimal(field(source, "notional", location), `${location}.notional`),
+    vwap: nullable(field(source, "vwap", location), `${location}.vwap`, signedDecimal),
+    insufficient_depth: boolean(
+      field(source, "insufficient_depth", location),
+      `${location}.insufficient_depth`,
+    ),
+    filled_notional: decimal(
+      field(source, "filled_notional", location),
+      `${location}.filled_notional`,
+    ),
+    filled_base: decimal(field(source, "filled_base", location), `${location}.filled_base`),
+    levels_used: nonnegativeInteger(
+      field(source, "levels_used", location),
+      `${location}.levels_used`,
+    ),
+    subscribed_depth_levels: nullable(
+      field(source, "subscribed_depth_levels", location),
+      `${location}.subscribed_depth_levels`,
+      nonnegativeInteger,
+    ),
+  };
+}
+
+function decodeExecutableRoute(
+  value: unknown,
+  location = "executable_route",
+): ExecutableRoute {
+  const source = object(value, location);
+  return {
+    pair: text(field(source, "pair", location), `${location}.pair`),
+    buy_exchange: text(field(source, "buy_exchange", location), `${location}.buy_exchange`),
+    sell_exchange: text(field(source, "sell_exchange", location), `${location}.sell_exchange`),
+    ...decodePricingLedger(source, location),
+  };
+}
+
+export function decodeDepthPricing(value: unknown, location = "depth_pricing"): DepthPricing {
+  const source = object(value, location);
+  return {
+    notionals: array(field(source, "notionals", location), `${location}.notionals`, decimal),
+    quotes: array(field(source, "quotes", location), `${location}.quotes`, decodeDepthQuote),
+    routes: array(
+      field(source, "routes", location),
+      `${location}.routes`,
+      decodeExecutableRoute,
     ),
   };
 }

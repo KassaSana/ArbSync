@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeAdapterStatuses,
   decodeBookStatuses,
+  decodeDepthPricing,
   decodeLiveEnvelope,
   decodeOpportunities,
   decodePairs,
@@ -85,6 +86,42 @@ const status = {
   reason: null,
 };
 
+const depthPricing = {
+  notionals: ["100", "1000"],
+  quotes: [
+    {
+      exchange: "gemini",
+      pair: "BTC-USD",
+      side: "buy",
+      notional: "100",
+      vwap: "100",
+      insufficient_depth: false,
+      filled_notional: "100",
+      filled_base: "1",
+      levels_used: 1,
+      subscribed_depth_levels: null,
+    },
+  ],
+  routes: [
+    {
+      pair: "BTC-USD",
+      buy_exchange: "gemini",
+      sell_exchange: "coinbase",
+      notional: "100",
+      top_of_book_spread_pct: "2",
+      buy_vwap: "100",
+      sell_vwap: "102",
+      gross_executable_spread_pct: "2",
+      depth_impact_pct: "0",
+      buy_taker_fee_pct: "0.4",
+      sell_taker_fee_pct: "0.6",
+      fee_impact_pct: "-1",
+      net_executable_spread_pct: "1",
+      insufficient_depth: false,
+    },
+  ],
+};
+
 describe("network payload schemas", () => {
   it.each([
     ["opportunities", decodeOpportunities, [opportunity, closedOpportunity, orphanedOpportunity]],
@@ -109,6 +146,7 @@ describe("network payload schemas", () => {
       ],
     ],
     ["book status", decodeBookStatuses, [status]],
+    ["depth pricing", decodeDepthPricing, depthPricing],
     [
       "system overview",
       decodeSystemOverview,

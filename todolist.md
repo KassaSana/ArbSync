@@ -839,7 +839,7 @@ Acceptance criteria:
 - The soak-style survival report is reproducible from stored net values, and
   `tools/fee_survival.py` either reads them or is retired with its documentation updated.
 
-### [ ] ARB-034 — Venue-comparison dashboard view
+### [x] ARB-034 — Venue-comparison dashboard view
 
 - Priority: P2
 - Estimate: 8 hours
@@ -857,6 +857,14 @@ Acceptance criteria:
   separate market leadership from network path and exchange clock differences.
 - Existing eligibility, freshness, and connectivity panels remain; boundary validation
   covers every new REST and live message shape; coverage gates hold.
+
+Resolution: reused the existing depth-pricing endpoint and fee-aware route ledgers,
+added strict dashboard payload validation and five-second refreshes, and added a
+selected-notional venue comparison panel. The panel shows per-venue executable VWAPs,
+filled base depth, cheapest-buy and best-sell venues, gross and net route spreads, and
+current or most recent episode lifetime. Missing quotes are shown as unavailable while
+short books remain explicitly insufficient depth. Dashboard tests, typecheck, lint, and
+production build pass; the focused backend API, pricing, and detector tests pass.
 
 ### [ ] ARB-035 — Offline lead/lag and market-structure research
 

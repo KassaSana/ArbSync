@@ -11,8 +11,10 @@ import {
 import {
   AdapterStatus,
   BookStatus,
+  DepthPricing,
   fetchAdapterStatus,
   fetchBookStatus,
+  fetchDepthPricing,
   fetchPairs,
   fetchRecentOpportunities,
   fetchStats,
@@ -56,16 +58,19 @@ type LiveValue = {
   stats: Async<Stats>;
   pairs: Async<PairRecord[]>;
   adapters: Async<AdapterStatus[]>;
+  depthPricing: Async<DepthPricing>;
   refreshStats: () => void;
   refreshOpportunities: () => void;
   refreshAdapters: () => void;
   refreshPairs: () => void;
+  refreshDepthPricing: () => void;
 };
 
 const LiveContext = createContext<LiveValue | null>(null);
 
 const ADAPTER_POLL_MS = 5_000;
 const STATS_POLL_MS = 30_000;
+const DEPTH_PRICING_POLL_MS = 5_000;
 const MAX_FEED_ROWS = 50;
 
 function bookKey(entry: { exchange: string; pair: string }): string {
@@ -112,6 +117,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [stats, setStats] = useState<Async<Stats>>(loading);
   const [pairs, setPairs] = useState<Async<PairRecord[]>>(loading);
   const [adapters, setAdapters] = useState<Async<AdapterStatus[]>>(loading);
+  const [depthPricing, setDepthPricing] = useState<Async<DepthPricing>>(loading);
   const [lastTickAt, setLastTickAt] = useState<number | null>(null);
   const [invalidFrameCount, setInvalidFrameCount] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -150,6 +156,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       .catch((error: unknown) => setPairs(failed(error)));
   }, []);
 
+  const refreshDepthPricing = useCallback(() => {
+    fetchDepthPricing()
+      .then((data) => setDepthPricing(ready(data)))
+      .catch((error: unknown) => setDepthPricing(failed(error)));
+  }, []);
+
   useEffect(() => {
     refreshPairs();
 
@@ -165,14 +177,23 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     refreshStats();
     refreshOpportunities();
     refreshAdapters();
+    refreshDepthPricing();
 
     const adapterTimer = window.setInterval(refreshAdapters, ADAPTER_POLL_MS);
     const statsTimer = window.setInterval(refreshStats, STATS_POLL_MS);
+    const depthPricingTimer = window.setInterval(refreshDepthPricing, DEPTH_PRICING_POLL_MS);
     return () => {
       window.clearInterval(adapterTimer);
       window.clearInterval(statsTimer);
+      window.clearInterval(depthPricingTimer);
     };
-  }, [refreshAdapters, refreshOpportunities, refreshPairs, refreshStats]);
+  }, [
+    refreshAdapters,
+    refreshDepthPricing,
+    refreshOpportunities,
+    refreshPairs,
+    refreshStats,
+  ]);
 
   // Socket frames are coalesced into one state commit per animation frame.
   // At 27 subscriptions a setState per tick is the fastest way to fail INP.
@@ -323,10 +344,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       refreshOpportunities();
       refreshStats();
       refreshPairs();
+      refreshDepthPricing();
     }
   }, [
     websocket.connectionId,
     websocket.status,
+    refreshDepthPricing,
     refreshOpportunities,
     refreshPairs,
     refreshStats,
@@ -345,10 +368,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       stats,
       pairs,
       adapters,
+      depthPricing,
       refreshStats,
       refreshOpportunities,
       refreshAdapters,
       refreshPairs,
+      refreshDepthPricing,
     }),
     [
       websocket.status,
@@ -361,10 +386,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       stats,
       pairs,
       adapters,
+      depthPricing,
       refreshStats,
       refreshOpportunities,
       refreshAdapters,
       refreshPairs,
+      refreshDepthPricing,
     ],
   );
 
