@@ -949,7 +949,7 @@ best-price changes, best-level deletion, snapshots, and reset boundaries cannot 
 omit a midpoint. Existing ARB-035 lead/lag output must be regenerated; estimator validation
 remains deferred to ARB-039.
 
-### [ ] ARB-037 — Make capture integrity and lifecycle provenance self-describing
+### [x] ARB-037 — Make capture integrity and lifecycle provenance self-describing
 
 - Priority: P1
 - Estimate: 12–20 hours
@@ -976,6 +976,15 @@ Acceptance criteria:
 - Define and test backward compatibility for version-1 captures. If some provenance cannot
   be reconstructed, label that limitation instead of inventing it.
 - Preserve bounded, non-blocking ingestion and the existing observable drop policy.
+
+Resolution: capture format version 2 records lifecycle connection boundaries, per-kind
+attempted/accepted/flushed counts, dropped frames by reason and kind, writer-failure status,
+and request-correlated REST snapshot provenance. Adapter request context identifies initial,
+sequence-gap, scoped-recovery, full-reconnect, and reconciliation snapshots without relying
+on exchange and URL alone. The reader distinguishes missing footers, writer failures, count
+mismatches, and declared frame loss; research rejects lossy captures by default and records
+an explicit `--allow-lossy` override. Version-1 captures remain readable with legacy
+provenance limitations labelled.
 
 ### [ ] ARB-038 — Replay recovery, disconnects, expiry, and snapshots on recorded time
 

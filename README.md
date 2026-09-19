@@ -289,8 +289,15 @@ arbsync replay var/capture.jsonl.gz --serve
 `--serve` streams the capture through the dashboard API at real-time pacing
 (`--speed 2` doubles it), so the dashboard runs with no live backend. A
 three-venue sample lives under
-[`server/tests/fixtures/captured/`](server/tests/fixtures/captured/README.md)
-and is replayed deterministically by the backend suite.
+ [`server/tests/fixtures/captured/`](server/tests/fixtures/captured/README.md)
+ and is replayed deterministically by the backend suite.
+
+Capture artifacts use version 2 metadata to record lifecycle boundaries, snapshot
+request provenance, and attempted/accepted/flushed/dropped frame counts. Replay
+and research reject declared frame loss by default; legacy version-1 captures
+remain readable but are labelled as missing lifecycle provenance. Offline research
+can explicitly opt into a lossy artifact with `--allow-lossy`, which is recorded
+in its report metadata.
 
 The committed synthetic results are a September 8 baseline from before episode tracking
 and depth/fee ledgers. They are hardware-specific, do not represent the cost of the current

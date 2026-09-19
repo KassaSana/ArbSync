@@ -280,7 +280,7 @@ async def replay_frames(
         )
         next_sample_ns = clock.now_ns + sample_every_ns if sample_every_ns else None
         for index, frame in enumerate(frames):
-            if frame.kind == "snapshot":
+            if frame.kind in {"snapshot", "connection"}:
                 continue
             while (
                 depth_sampler is not None

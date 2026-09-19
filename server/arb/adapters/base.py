@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import contextvars
 import json
 import random
 import time
@@ -14,7 +15,7 @@ from typing import Any
 import httpx
 import structlog
 
-from arb.capture import CaptureWriter
+from arb.capture import CaptureWriter, SnapshotProvenance
 from arb.metrics import adapter_reconnects_total
 from arb.types import MarketEvent, PriceLevel
 
@@ -55,6 +56,15 @@ class AdapterStatusSnapshot:
         }
 
 
+@dataclass(frozen=True)
+class SnapshotRequestContext:
+    purpose: str
+    pair: str
+    connection_generation: int
+    request_wall_ns: int
+    request_mono_ns: int
+
+
 class ExchangeAdapter(abc.ABC):
     name: str
     ws_url: str
@@ -70,6 +80,10 @@ class ExchangeAdapter(abc.ABC):
         self._last_sequence_by_pair: dict[str, int] = {}
         self._connection_state_callback: Callable[[str, bool], Awaitable[None] | None] | None = None
         self._reconnect_requested = False
+        self.connection_generation = 0
+        self._snapshot_context: contextvars.ContextVar[SnapshotRequestContext | None] = (
+            contextvars.ContextVar("snapshot_context", default=None)
+        )
         self._client: httpx.AsyncClient | None = None
         self._capture_sink: CaptureWriter | None = None
 
@@ -87,6 +101,19 @@ class ExchangeAdapter(abc.ABC):
         self._connection_state_callback = callback
 
     async def _report_connection_state(self, connected: bool) -> None:
+        if connected:
+            self.connection_generation += 1
+        if self._capture_sink is not None:
+            record_connection = getattr(self._capture_sink, "record_connection", None)
+            if callable(record_connection):
+                record_connection(
+                    self.name,
+                    connected,
+                    self.connection_generation,
+                    wall_ns=time.time_ns(),
+                    mono_ns=time.monotonic_ns(),
+                    reason=self.last_error,
+                )
         if self._connection_state_callback is not None:
             result = self._connection_state_callback(self.name, connected)
             if isawaitable(result):
@@ -125,6 +152,24 @@ class ExchangeAdapter(abc.ABC):
         instead of applying deltas onto a stale book."""
         self._last_sequence_by_pair.clear()
         self._reconnect_requested = False
+
+    async def fetch_snapshot_with_context(
+        self, pair: str, trigger_sequence: int, *, purpose: str
+    ) -> MarketEvent:
+        """Fetch a snapshot while preserving its recovery provenance."""
+        token = self._snapshot_context.set(
+            SnapshotRequestContext(
+                purpose=purpose,
+                pair=pair,
+                connection_generation=self.connection_generation,
+                request_wall_ns=time.time_ns(),
+                request_mono_ns=time.monotonic_ns(),
+            )
+        )
+        try:
+            return await self.fetch_snapshot(pair, trigger_sequence)
+        finally:
+            self._snapshot_context.reset(token)
 
     # Levels the venue's subscription can hold at most, or None for a full
     # book. Depth pricing reports it with every quote because "could not fill"
@@ -188,9 +233,9 @@ class ExchangeAdapter(abc.ABC):
                     async for event in self.stream_events(websocket):
                         yield event
             except Exception as exc:  # pragma: no cover - reconnect path
+                self.last_error = str(exc)
                 self.connected = False
                 await self._report_connection_state(False)
-                self.last_error = str(exc)
                 self.reconnect_count += 1
                 adapter_reconnects_total.labels(exchange=self.name, reason=type(exc).__name__).inc()
                 logger.warning("adapter_reconnect", exchange=self.name, reason=str(exc))
@@ -211,11 +256,30 @@ class ExchangeAdapter(abc.ABC):
         Snapshot fetches happen on the recovery path, where a fresh client per
         call means a full TCP and TLS handshake before every resync.
         """
+        context = self._snapshot_context.get()
         response = await self.http_client().get(url)
         response.raise_for_status()
         payload = response.json()
         if self._capture_sink is not None and isinstance(payload, dict):
-            self._capture_sink.record_snapshot(self.name, url, payload)
+            response_wall_ns = time.time_ns()
+            response_mono_ns = time.monotonic_ns()
+            provenance = SnapshotProvenance(
+                purpose="unknown" if context is None else context.purpose,
+                pair="" if context is None else context.pair,
+                connection_generation=(
+                    self.connection_generation if context is None else context.connection_generation
+                ),
+                request_wall_ns=(None if context is None else context.request_wall_ns),
+                request_mono_ns=(None if context is None else context.request_mono_ns),
+                response_wall_ns=response_wall_ns,
+                response_mono_ns=response_mono_ns,
+            )
+            self._capture_sink.record_snapshot(
+                self.name,
+                url,
+                payload,
+                provenance=provenance,
+            )
         return payload  # type: ignore[no-any-return]
 
     def http_client(self) -> httpx.AsyncClient:

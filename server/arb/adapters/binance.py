@@ -53,6 +53,7 @@ class BinanceAdapter(ExchangeAdapter):
         self._local_seq: dict[str, int] = {}
         self._last_exchange_update_id: dict[str, int] = {}
         self._buffers: dict[str, list[_DepthUpdate]] = {}
+        self._snapshot_purpose: dict[str, str] = {}
 
     async def reset_state(self) -> None:
         await super().reset_state()
@@ -60,6 +61,7 @@ class BinanceAdapter(ExchangeAdapter):
         self._local_seq.clear()
         self._last_exchange_update_id.clear()
         self._buffers.clear()
+        self._snapshot_purpose.clear()
 
     def request_pair_resync(self, pair: str) -> bool:
         """Re-fetch one pair's book without dropping the combined stream.
@@ -91,6 +93,9 @@ class BinanceAdapter(ExchangeAdapter):
         self._local_seq.pop(pair, None)
         self._last_exchange_update_id.pop(pair, None)
         self._last_sequence_by_pair.pop(pair, None)
+        self._snapshot_purpose[pair] = (
+            "sequence_gap" if trigger == "sequence_gap" else "scoped_recovery"
+        )
         adapter_pair_resyncs_total.labels(exchange=self.name, trigger=trigger).inc()
         logger.info("adapter_pair_resync", exchange=self.name, pair=pair, trigger=trigger)
 
@@ -169,14 +174,26 @@ class BinanceAdapter(ExchangeAdapter):
                                     # other pairs keep flowing.
                                     snapshot_attempts[update.pair] = 1
                                     snapshot_tasks[update.pair] = asyncio.create_task(
-                                        self.fetch_snapshot(update.pair, trigger_sequence=0)
+                                        self.fetch_snapshot_with_context(
+                                            update.pair,
+                                            trigger_sequence=0,
+                                            purpose=self._snapshot_purpose.get(
+                                                update.pair, "initial_sync"
+                                            ),
+                                        )
                                     )
                             else:
                                 self._buffer(update)
                                 if update.pair not in snapshot_tasks:
                                     snapshot_attempts[update.pair] = 1
                                     snapshot_tasks[update.pair] = asyncio.create_task(
-                                        self.fetch_snapshot(update.pair, trigger_sequence=0)
+                                        self.fetch_snapshot_with_context(
+                                            update.pair,
+                                            trigger_sequence=0,
+                                            purpose=self._snapshot_purpose.get(
+                                                update.pair, "initial_sync"
+                                            ),
+                                        )
                                     )
                             if self._capture_sink is not None:
                                 self._capture_sink.record_ws(
@@ -224,10 +241,15 @@ class BinanceAdapter(ExchangeAdapter):
                             raise RuntimeError(f"snapshot did not catch up for {pair}")
                         snapshot_attempts[pair] += 1
                         snapshot_tasks[pair] = asyncio.create_task(
-                            self.fetch_snapshot(pair, trigger_sequence=0)
+                            self.fetch_snapshot_with_context(
+                                pair,
+                                trigger_sequence=0,
+                                purpose=self._snapshot_purpose.get(pair, "initial_sync"),
+                            )
                         )
                         continue
                     snapshot_attempts.pop(pair, None)
+                    self._snapshot_purpose.pop(pair, None)
                     for event in events:
                         yield event
                         if self._reconnect_requested:
@@ -303,7 +325,11 @@ class BinanceAdapter(ExchangeAdapter):
 
     async def _synchronize(self, pair: str) -> list[MarketEvent]:
         for _ in range(3):
-            snapshot = await self.fetch_snapshot(pair, trigger_sequence=0)
+            snapshot = await self.fetch_snapshot_with_context(
+                pair,
+                trigger_sequence=0,
+                purpose=self._snapshot_purpose.get(pair, "initial_sync"),
+            )
             events = self._align_snapshot(pair, snapshot)
             if events is None:
                 continue
@@ -334,6 +360,7 @@ class BinanceAdapter(ExchangeAdapter):
         self._last_exchange_update_id[pair] = snapshot_id
         self._last_sequence_by_pair[pair] = snapshot.sequence
         self._buffers.pop(pair, None)
+        self._snapshot_purpose.pop(pair, None)
         events = [snapshot]
         for update in pending:
             last_id = self._last_exchange_update_id[pair]

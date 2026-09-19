@@ -146,7 +146,9 @@ class SnapshotReconciler:
             return
 
         try:
-            snapshot = await adapter.fetch_snapshot(target.pair, trigger_sequence=0)
+            snapshot = await adapter.fetch_snapshot_with_context(
+                target.pair, trigger_sequence=0, purpose="reconciliation"
+            )
         except Exception as exc:
             self._reset_mismatches(state)
             reconcile_failures_total.labels(

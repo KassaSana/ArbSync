@@ -388,8 +388,9 @@ async def run_research(
     tick_bin_ns: int,
     max_lag_ns: int,
     lag_step_ns: int,
+    allow_lossy: bool = False,
 ) -> dict[str, object]:
-    header, frames = read_capture(capture)
+    header, frames = read_capture(capture, allow_lossy=allow_lossy)
     replay_report, sampler = await replay_for_research(header, frames, config)
     datasets = analyze_capture(
         replay_report,
@@ -425,6 +426,9 @@ async def run_research(
         "snapshots_consumed": replay_report.snapshots_consumed,
         "transition_count": len(replay_report.transitions),
         "observation_count": len(replay_report.observations),
+        "capture_integrity": header.integrity,
+        "capture_provenance": header.provenance,
+        "allow_lossy": allow_lossy,
         "dataset_counts": counts,
         "measurement": datasets["measurement"],
     }
@@ -440,6 +444,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--tick-bin-ms", type=float, default=250.0)
     parser.add_argument("--max-lag-ms", type=float, default=1000.0)
     parser.add_argument("--lag-step-ms", type=float, default=100.0)
+    parser.add_argument(
+        "--allow-lossy",
+        action="store_true",
+        help="analyze captures that declare dropped frames and record that override",
+    )
     return parser
 
 
@@ -458,6 +467,7 @@ def main() -> None:
             tick_bin_ns=int(values[0] * 1_000_000),
             max_lag_ns=int(values[1] * 1_000_000),
             lag_step_ns=int(values[2] * 1_000_000),
+            allow_lossy=args.allow_lossy,
         )
     )
     print(json.dumps(metadata, indent=2, sort_keys=True))

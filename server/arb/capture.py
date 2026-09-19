@@ -29,14 +29,18 @@ from arb.types import MarketEvent
 logger = structlog.get_logger(__name__)
 
 CAPTURE_FORMAT = "arbsync-capture"
-CAPTURE_VERSION = 1
+CAPTURE_VERSION = 2
 WRITE_BATCH_SIZE = 256
 
-FrameKind = Literal["ws", "snapshot"]
+FrameKind = Literal["ws", "snapshot", "connection"]
 
 
 class CaptureError(ValueError):
-    """A capture file is missing, malformed, or truncated and must not replay."""
+    """A capture file cannot provide trustworthy replay input."""
+
+    def __init__(self, message: str, *, reason: str = "invalid") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,27 @@ def summarize_event(event: MarketEvent) -> EventSummary:
 class CaptureHeader:
     exchanges: dict[str, list[str]]
     started_wall_ns: int
+    version: int = CAPTURE_VERSION
+    integrity: Literal["lossless", "lossy", "legacy_unknown", "unknown"] = "unknown"
+    provenance: Literal["complete", "legacy_v1_unavailable", "unknown"] = "unknown"
+
+
+@dataclass(frozen=True)
+class ConnectionBoundary:
+    connected: bool
+    generation: int
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class SnapshotProvenance:
+    purpose: str
+    pair: str
+    connection_generation: int
+    request_wall_ns: int | None
+    request_mono_ns: int | None
+    response_wall_ns: int
+    response_mono_ns: int
 
 
 @dataclass(frozen=True)
@@ -83,6 +108,8 @@ class CaptureFrame:
     payload: dict[str, Any] | None
     url: str | None
     events: tuple[EventSummary, ...]
+    connection: ConnectionBoundary | None = None
+    snapshot_provenance: SnapshotProvenance | None = None
 
 
 def _open_capture(path: Path, mode: str) -> IO[str]:
@@ -113,11 +140,16 @@ class CaptureWriter:
         self._exchanges = dict(exchanges)
         self._queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=queue_maxsize)
         self._closed = False
+        self._failed = False
         self._worker_started = False
+        self._attempted_count = 0
         self._accepted_count = 0
         self._flushed_count = 0
         self._frame_count = 0
         self._counts: dict[str, int] = {}
+        self._attempted_by_kind: dict[str, int] = {}
+        self._accepted_by_kind: dict[str, int] = {}
+        self._dropped_by_reason: dict[str, dict[str, int]] = {}
         capture_unflushed_frames.set(0)
 
     @property
@@ -159,7 +191,14 @@ class CaptureWriter:
             }
         )
 
-    def record_snapshot(self, exchange: str, url: str, payload: dict[str, Any]) -> bool:
+    def record_snapshot(
+        self,
+        exchange: str,
+        url: str,
+        payload: dict[str, Any],
+        *,
+        provenance: SnapshotProvenance | None = None,
+    ) -> bool:
         return self._enqueue(
             {
                 "exchange": exchange,
@@ -168,25 +207,95 @@ class CaptureWriter:
                 "mono_ns": time.monotonic_ns(),
                 "url": url,
                 "payload": payload,
+                "snapshot_provenance": (
+                    None
+                    if provenance is None
+                    else {
+                        "purpose": provenance.purpose,
+                        "pair": provenance.pair,
+                        "connection_generation": provenance.connection_generation,
+                        "request_wall_ns": provenance.request_wall_ns,
+                        "request_mono_ns": provenance.request_mono_ns,
+                        "response_wall_ns": provenance.response_wall_ns,
+                        "response_mono_ns": provenance.response_mono_ns,
+                    }
+                ),
             }
         )
 
+    def record_connection(
+        self,
+        exchange: str,
+        connected: bool,
+        generation: int,
+        *,
+        wall_ns: int | None = None,
+        mono_ns: int | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        return self._enqueue(
+            {
+                "exchange": exchange,
+                "kind": "connection",
+                "wall_ns": time.time_ns() if wall_ns is None else wall_ns,
+                "mono_ns": time.monotonic_ns() if mono_ns is None else mono_ns,
+                "connected": connected,
+                "connection_generation": generation,
+                "reason": reason,
+            }
+        )
+
+    def _drop(self, reason: str, kind: str) -> None:
+        by_kind = self._dropped_by_reason.setdefault(reason, {})
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+        capture_drops_total.labels(reason=reason).inc()
+
     def _enqueue(self, frame: dict[str, Any]) -> bool:
+        kind = str(frame["kind"])
+        self._attempted_count += 1
+        self._attempted_by_kind[kind] = self._attempted_by_kind.get(kind, 0) + 1
+        if self._failed:
+            self._drop("writer_failed", kind)
+            return False
         if self._closed:
-            capture_drops_total.labels(reason="writer_closed").inc()
+            self._drop("writer_closed", kind)
             return False
         try:
             self._queue.put_nowait(json.dumps(frame))
         except asyncio.QueueFull:
-            capture_drops_total.labels(reason="queue_full").inc()
+            self._drop("queue_full", kind)
+            return False
+        except (TypeError, ValueError):
+            self._drop("serialization_error", kind)
             return False
         self._accepted_count += 1
         self._frame_count += 1
         exchange = str(frame["exchange"])
         self._counts[exchange] = self._counts.get(exchange, 0) + 1
-        capture_frames_total.labels(exchange=exchange, kind=str(frame["kind"])).inc()
+        self._accepted_by_kind[kind] = self._accepted_by_kind.get(kind, 0) + 1
+        capture_frames_total.labels(exchange=exchange, kind=kind).inc()
         capture_unflushed_frames.set(self._accepted_count - self._flushed_count)
         return True
+
+    def _footer(self, *, status: str, failure: str | None = None) -> dict[str, Any]:
+        footer: dict[str, Any] = {
+            "type": "footer",
+            "frame_count": self._frame_count,
+            "counts": self._counts,
+            "clean": status == "clean",
+            "status": status,
+            "frame_counts": {
+                "attempted": self._attempted_count,
+                "accepted": self._accepted_count,
+                "flushed": self._flushed_count,
+                "attempted_by_kind": self._attempted_by_kind,
+                "accepted_by_kind": self._accepted_by_kind,
+                "dropped": self._dropped_by_reason,
+            },
+        }
+        if failure is not None:
+            footer["failure"] = failure
+        return footer
 
     async def run(self) -> None:
         self._worker_started = True
@@ -222,16 +331,21 @@ class CaptureWriter:
                 capture_unflushed_frames.set(self._accepted_count - self._flushed_count)
             await asyncio.to_thread(
                 handle.write,
-                json.dumps(
-                    {
-                        "type": "footer",
-                        "frame_count": self._frame_count,
-                        "counts": self._counts,
-                        "clean": True,
-                    }
-                )
-                + "\n",
+                json.dumps(self._footer(status="clean")) + "\n",
             )
+        except Exception as exc:
+            self._failed = True
+            failure = f"{type(exc).__name__}: {exc}"
+            logger.exception("capture_writer_failed", path=str(self._path), failure=failure)
+            if handle is not None:
+                try:
+                    await asyncio.to_thread(
+                        handle.write,
+                        json.dumps(self._footer(status="writer_failed", failure=failure)) + "\n",
+                    )
+                except Exception:
+                    logger.exception("capture_failure_footer_failed", path=str(self._path))
+            raise
         finally:
             if handle is not None:
                 await asyncio.to_thread(handle.close)
@@ -257,8 +371,10 @@ class CaptureWriter:
                 logger.error("capture_close_timed_out", path=str(self._path))
 
 
-def read_capture(path: str | Path) -> tuple[CaptureHeader, list[CaptureFrame]]:
-    """Read and validate a capture file, rejecting anything truncated."""
+def read_capture(
+    path: str | Path, *, allow_lossy: bool = False
+) -> tuple[CaptureHeader, list[CaptureFrame]]:
+    """Read and validate a capture file, rejecting untrustworthy artifacts."""
     location = Path(path)
     try:
         with _open_capture(location, "r") as handle:
@@ -272,27 +388,85 @@ def read_capture(path: str | Path) -> tuple[CaptureHeader, list[CaptureFrame]]:
     try:
         header_raw: Any = json.loads(lines[0])
     except json.JSONDecodeError as exc:
-        raise CaptureError(f"capture header is not valid JSON: {location}: {exc}") from exc
+        raise CaptureError(
+            f"capture header is not valid JSON: {location}: {exc}", reason="invalid_header"
+        ) from exc
+    version = header_raw.get("version") if isinstance(header_raw, dict) else None
     if (
         not isinstance(header_raw, dict)
         or header_raw.get("type") != "header"
         or header_raw.get("format") != CAPTURE_FORMAT
-        or header_raw.get("version") != CAPTURE_VERSION
+        or version not in (1, CAPTURE_VERSION)
     ):
-        raise CaptureError(f"capture header is invalid: {location}")
+        raise CaptureError(f"capture header is invalid: {location}", reason="unsupported_version")
     exchanges = header_raw.get("exchanges")
     if not isinstance(exchanges, dict) or not exchanges:
-        raise CaptureError(f"capture header names no exchanges: {location}")
+        raise CaptureError(
+            f"capture header names no exchanges: {location}", reason="invalid_header"
+        )
     try:
         footer_raw: Any = json.loads(lines[-1])
     except json.JSONDecodeError as exc:
-        raise CaptureError(f"capture file is truncated (no footer): {location}: {exc}") from exc
-    if (
-        not isinstance(footer_raw, dict)
-        or footer_raw.get("type") != "footer"
-        or footer_raw.get("clean") is not True
-    ):
-        raise CaptureError(f"capture file is truncated (no clean footer): {location}")
+        raise CaptureError(
+            f"capture missing footer (truncated): {location}: {exc}", reason="missing_footer"
+        ) from exc
+    if not isinstance(footer_raw, dict) or footer_raw.get("type") != "footer":
+        raise CaptureError(
+            f"capture missing footer (truncated): {location}", reason="missing_footer"
+        )
+    if footer_raw.get("status") == "writer_failed":
+        raise CaptureError(
+            f"capture writer failure: {footer_raw.get('failure', 'unknown failure')}: {location}",
+            reason="writer_failure",
+        )
+    if footer_raw.get("clean") is not True:
+        raise CaptureError(f"capture footer is not clean: {location}", reason="writer_failure")
+    frame_counts = footer_raw.get("frame_counts")
+    dropped_total = 0
+    if version == CAPTURE_VERSION and not isinstance(frame_counts, dict):
+        raise CaptureError(
+            f"capture footer is missing frame counts: {location}", reason="count_mismatch"
+        )
+    if isinstance(frame_counts, dict):
+        dropped = frame_counts.get("dropped", {})
+        if isinstance(dropped, dict):
+            for counts in dropped.values():
+                if isinstance(counts, dict):
+                    dropped_total += sum(
+                        int(value) for value in counts.values() if isinstance(value, int)
+                    )
+        accepted = frame_counts.get("accepted")
+        attempted = frame_counts.get("attempted")
+        flushed = frame_counts.get("flushed")
+        if (
+            version == CAPTURE_VERSION
+            and isinstance(attempted, int)
+            and isinstance(accepted, int)
+            and attempted != accepted + dropped_total
+        ):
+            raise CaptureError(
+                f"capture footer count mismatch: attempted={attempted} accepted={accepted} dropped={dropped_total}",
+                reason="count_mismatch",
+            )
+        if (
+            version == CAPTURE_VERSION
+            and isinstance(accepted, int)
+            and accepted != footer_raw.get("frame_count")
+        ):
+            raise CaptureError(
+                f"capture footer count mismatch: accepted={accepted} frame_count={footer_raw.get('frame_count')}",
+                reason="count_mismatch",
+            )
+        if isinstance(flushed, int) and flushed > int(accepted or 0):
+            raise CaptureError(
+                f"capture footer count mismatch: flushed={flushed} accepted={accepted}",
+                reason="count_mismatch",
+            )
+    if dropped_total and not allow_lossy:
+        raise CaptureError(
+            f"capture declares {dropped_total} dropped frames: {location}",
+            reason="declared_frame_loss",
+        )
     frames: list[CaptureFrame] = []
     for index, line in enumerate(lines[1:-1], start=2):
         try:
@@ -305,12 +479,31 @@ def read_capture(path: str | Path) -> tuple[CaptureHeader, list[CaptureFrame]]:
     expected = footer_raw.get("frame_count")
     if expected != len(frames):
         raise CaptureError(
-            f"capture footer expects {expected} frames but found {len(frames)}: {location}"
+            f"capture footer expects {expected} frames but found {len(frames)}: {location}",
+            reason="count_mismatch",
+        )
+    integrity: Literal["lossless", "lossy", "legacy_unknown"] = (
+        "legacy_unknown" if version == 1 else "lossy" if dropped_total else "lossless"
+    )
+    provenance: Literal["complete", "legacy_v1_unavailable", "unknown"]
+    if version == 1:
+        provenance = "legacy_v1_unavailable"
+    else:
+        provenance = (
+            "complete"
+            if all(
+                frame.kind != "snapshot" or frame.snapshot_provenance is not None
+                for frame in frames
+            )
+            else "unknown"
         )
     return (
         CaptureHeader(
             exchanges={str(k): [str(s) for s in v] for k, v in exchanges.items()},
             started_wall_ns=int(header_raw.get("started_wall_ns", 0)),
+            version=version,
+            integrity=integrity,
+            provenance=provenance,
         ),
         frames,
     )
@@ -320,7 +513,7 @@ def _parse_frame(raw_frame: Any, index: int, location: Path) -> CaptureFrame:
     if not isinstance(raw_frame, dict):
         raise CaptureError(f"capture line {index} is not an object: {location}")
     kind = raw_frame.get("kind")
-    if kind not in ("ws", "snapshot"):
+    if kind not in ("ws", "snapshot", "connection"):
         raise CaptureError(f"capture line {index} has unknown kind {kind!r}: {location}")
     raw = raw_frame.get("raw")
     payload = raw_frame.get("payload")
@@ -328,6 +521,8 @@ def _parse_frame(raw_frame: Any, index: int, location: Path) -> CaptureFrame:
         raise CaptureError(f"capture line {index} has no raw message: {location}")
     if kind == "snapshot" and not isinstance(payload, dict):
         raise CaptureError(f"capture line {index} has no snapshot payload: {location}")
+    if kind == "connection" and not isinstance(raw_frame.get("connected"), bool):
+        raise CaptureError(f"capture line {index} has invalid connection state: {location}")
     summaries: list[EventSummary] = []
     events = raw_frame.get("events", [])
     if not isinstance(events, list):
@@ -364,6 +559,45 @@ def _parse_frame(raw_frame: Any, index: int, location: Path) -> CaptureFrame:
             f"capture line {index} has invalid timestamps: {location}: {exc}"
         ) from exc
     url = raw_frame.get("url")
+    connection: ConnectionBoundary | None = None
+    if kind == "connection":
+        try:
+            connection = ConnectionBoundary(
+                connected=bool(raw_frame["connected"]),
+                generation=int(raw_frame["connection_generation"]),
+                reason=(None if raw_frame.get("reason") is None else str(raw_frame["reason"])),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CaptureError(
+                f"capture line {index} has invalid connection metadata: {location}: {exc}"
+            ) from exc
+    snapshot_provenance: SnapshotProvenance | None = None
+    raw_provenance = raw_frame.get("snapshot_provenance")
+    if raw_provenance is not None:
+        if not isinstance(raw_provenance, dict):
+            raise CaptureError(f"capture line {index} has invalid snapshot provenance: {location}")
+        try:
+            snapshot_provenance = SnapshotProvenance(
+                purpose=str(raw_provenance["purpose"]),
+                pair=str(raw_provenance["pair"]),
+                connection_generation=int(raw_provenance["connection_generation"]),
+                request_wall_ns=(
+                    None
+                    if raw_provenance.get("request_wall_ns") is None
+                    else int(raw_provenance["request_wall_ns"])
+                ),
+                request_mono_ns=(
+                    None
+                    if raw_provenance.get("request_mono_ns") is None
+                    else int(raw_provenance["request_mono_ns"])
+                ),
+                response_wall_ns=int(raw_provenance["response_wall_ns"]),
+                response_mono_ns=int(raw_provenance["response_mono_ns"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CaptureError(
+                f"capture line {index} has invalid snapshot provenance: {location}: {exc}"
+            ) from exc
     return CaptureFrame(
         exchange=str(raw_frame.get("exchange")),
         kind=kind,
@@ -373,4 +607,6 @@ def _parse_frame(raw_frame: Any, index: int, location: Path) -> CaptureFrame:
         payload=payload if isinstance(payload, dict) else None,
         url=str(url) if url is not None else None,
         events=tuple(summaries),
+        connection=connection,
+        snapshot_provenance=snapshot_provenance,
     )

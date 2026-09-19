@@ -102,6 +102,25 @@ def test_replay_runs_detector_on_the_real_path(tmp_path: Path) -> None:
     assert all(opp.pair == "BTC-USD" for opp in report.opportunities)
 
 
+def test_replay_ignores_connection_lifecycle_frames(tmp_path: Path) -> None:
+    path = tmp_path / "capture.jsonl"
+
+    async def scenario() -> None:
+        writer = CaptureWriter(path, {"gemini": ["btcusd"]})
+        task = asyncio.create_task(writer.run())
+        assert writer.record_connection("gemini", True, 1)
+        assert writer.record_ws("gemini", _gemini_snapshot(), [])
+        assert writer.record_connection("gemini", False, 1, reason="socket closed")
+        await writer.close()
+        await task
+
+    asyncio.run(scenario())
+    report = asyncio.run(replay_file(path))
+
+    assert len(report.transitions) == 1
+    assert report.transitions[0].kind == "snapshot"
+
+
 def test_replay_observations_capture_canonical_post_apply_tops() -> None:
     second = 1_000_000_000
     header = CaptureHeader(exchanges={"gemini": ["btcusd"]}, started_wall_ns=second)

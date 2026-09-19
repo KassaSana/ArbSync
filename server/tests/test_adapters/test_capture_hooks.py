@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from arb.adapters.binance import BinanceAdapter
 from arb.adapters.gemini import GeminiAdapter
-from arb.capture import CaptureWriter, read_capture
+from arb.capture import CaptureWriter, SnapshotProvenance, read_capture
 from arb.types import EventKind, MarketEvent, PriceLevel
 
 
@@ -44,8 +44,39 @@ class RecordingSink:
         )
         return True
 
-    def record_snapshot(self, exchange: str, url: str, payload: dict[str, Any]) -> bool:
-        self.snapshot_calls.append({"exchange": exchange, "url": url, "payload": payload})
+    def record_snapshot(
+        self,
+        exchange: str,
+        url: str,
+        payload: dict[str, Any],
+        *,
+        provenance: SnapshotProvenance | None = None,
+    ) -> bool:
+        self.snapshot_calls.append(
+            {"exchange": exchange, "url": url, "payload": payload, "provenance": provenance}
+        )
+        return True
+
+    def record_connection(
+        self,
+        exchange: str,
+        connected: bool,
+        generation: int,
+        *,
+        wall_ns: int | None = None,
+        mono_ns: int | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        self.snapshot_calls.append(
+            {
+                "exchange": exchange,
+                "connected": connected,
+                "generation": generation,
+                "wall_ns": wall_ns,
+                "mono_ns": mono_ns,
+                "reason": reason,
+            }
+        )
         return True
 
 
@@ -104,12 +135,35 @@ async def test_snapshot_fetch_records_url_and_payload() -> None:
             return FakeResponse()
 
     adapter.http_client = lambda: FakeClient()  # type: ignore[method-assign]
-    event = await adapter.fetch_snapshot("BTC-USD", 0)
+    event = await adapter.fetch_snapshot_with_context("BTC-USD", 0, purpose="initial_sync")
 
     assert event.kind is EventKind.SNAPSHOT
     assert len(sink.snapshot_calls) == 1
     assert sink.snapshot_calls[0]["url"].endswith("/btcusd?limit_bids=100&limit_asks=100")
     assert sink.snapshot_calls[0]["payload"] == payload
+    provenance = sink.snapshot_calls[0]["provenance"]
+    assert isinstance(provenance, SnapshotProvenance)
+    assert provenance.purpose == "initial_sync"
+    assert provenance.pair == "BTC-USD"
+    assert provenance.connection_generation == 0
+    assert provenance.request_wall_ns is not None
+    assert provenance.response_wall_ns >= provenance.request_wall_ns
+
+
+@pytest.mark.asyncio
+async def test_connection_boundaries_are_captured_with_generations() -> None:
+    adapter = GeminiAdapter(["btcusd"])
+    sink = RecordingSink()
+    adapter.set_capture_sink(sink)  # type: ignore[arg-type]
+
+    await adapter._report_connection_state(True)
+    await adapter._report_connection_state(False)
+
+    boundaries = [entry for entry in sink.snapshot_calls if "connected" in entry]
+    assert [(entry["connected"], entry["generation"]) for entry in boundaries] == [
+        (True, 1),
+        (False, 1),
+    ]
 
 
 @pytest.mark.asyncio

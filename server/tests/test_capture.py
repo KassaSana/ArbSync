@@ -11,6 +11,7 @@ from arb import main as main_module
 from arb.capture import (
     CaptureError,
     CaptureWriter,
+    SnapshotProvenance,
     read_capture,
     summarize_event,
 )
@@ -89,6 +90,118 @@ def test_capture_round_trip_preserves_raw_text_and_metadata(tmp_path: Path) -> N
     assert snapshot_frame.mono_ns >= ws_frame.mono_ns
 
 
+def test_capture_round_trip_preserves_lifecycle_and_snapshot_provenance(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "capture.jsonl"
+
+    async def scenario() -> None:
+        writer = CaptureWriter(path, {"gemini": ["btcusd"]})
+        task = asyncio.create_task(writer.run())
+        assert writer.record_connection("gemini", True, 3, wall_ns=10, mono_ns=20)
+        assert writer.record_snapshot(
+            "gemini",
+            "https://example.test/depth",
+            {"lastUpdateId": 7},
+            provenance=SnapshotProvenance(
+                purpose="sequence_gap",
+                pair="BTC-USD",
+                connection_generation=3,
+                request_wall_ns=30,
+                request_mono_ns=40,
+                response_wall_ns=50,
+                response_mono_ns=60,
+            ),
+        )
+        await writer.close()
+        await task
+
+    asyncio.run(scenario())
+    header, frames = read_capture(path)
+
+    assert header.version == 2
+    assert header.integrity == "lossless"
+    assert header.provenance == "complete"
+    assert frames[0].connection is not None
+    assert frames[0].connection.generation == 3
+    assert frames[1].snapshot_provenance is not None
+    assert frames[1].snapshot_provenance.purpose == "sequence_gap"
+    assert frames[1].snapshot_provenance.request_mono_ns == 40
+
+
+def test_lossy_capture_is_rejected_by_default_and_explicitly_overridable(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "lossy.jsonl"
+
+    async def scenario() -> None:
+        writer = CaptureWriter(path, {"gemini": ["btcusd"]}, queue_maxsize=1)
+        assert writer.record_ws("gemini", "one", [])
+        assert not writer.record_ws("gemini", "two", [])
+        task = asyncio.create_task(writer.run())
+        await asyncio.sleep(0)
+        await writer.close()
+        await task
+
+    asyncio.run(scenario())
+
+    with pytest.raises(CaptureError, match="declares 1 dropped") as error:
+        read_capture(path)
+    assert error.value.reason == "declared_frame_loss"
+    header, frames = read_capture(path, allow_lossy=True)
+    assert header.integrity == "lossy"
+    assert len(frames) == 1
+    footer = json.loads(path.read_text().splitlines()[-1])
+    assert footer["frame_counts"]["attempted"] == 2
+    assert footer["frame_counts"]["accepted"] == 1
+    assert footer["frame_counts"]["flushed"] == 1
+    assert footer["frame_counts"]["dropped"] == {"queue_full": {"ws": 1}}
+
+
+def test_version_one_capture_is_read_with_legacy_limitations(tmp_path: Path) -> None:
+    path = tmp_path / "capture.jsonl"
+    asyncio.run(_write(path, {"gemini": ["btcusd"], "binance": ["BTCUSD"]}))
+    lines = path.read_text().splitlines()
+    header = json.loads(lines[0])
+    header["version"] = 1
+    lines[0] = json.dumps(header)
+    footer = json.loads(lines[-1])
+    footer.pop("frame_counts", None)
+    footer.pop("status", None)
+    lines[-1] = json.dumps(footer)
+    path.write_text("\n".join(lines) + "\n")
+
+    parsed_header, _ = read_capture(path)
+
+    assert parsed_header.version == 1
+    assert parsed_header.integrity == "legacy_unknown"
+    assert parsed_header.provenance == "legacy_v1_unavailable"
+
+
+def test_writer_failure_is_distinct_from_a_missing_footer(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "failed.jsonl"
+
+    async def failing_to_thread(function, /, *args, **kwargs):
+        if function.__name__ == "writelines":
+            raise OSError("disk full")
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", failing_to_thread)
+
+    async def scenario() -> None:
+        writer = CaptureWriter(path, {"gemini": ["btcusd"]})
+        task = asyncio.create_task(writer.run())
+        assert writer.record_ws("gemini", "one", [])
+        with pytest.raises(OSError, match="disk full"):
+            await task
+
+    asyncio.run(scenario())
+
+    with pytest.raises(CaptureError, match="writer failure") as error:
+        read_capture(path)
+    assert error.value.reason == "writer_failure"
+
+
 def test_capture_gzip_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "capture.jsonl.gz"
     asyncio.run(_write(path, {"gemini": ["btcusd"], "binance": ["BTCUSD"]}))
@@ -152,8 +265,9 @@ def test_footer_frame_count_mismatch_is_rejected(tmp_path: Path) -> None:
     lines[-1] = json.dumps(footer)
     path.write_text("\n".join(lines) + "\n")
 
-    with pytest.raises(CaptureError, match="footer expects"):
+    with pytest.raises(CaptureError, match="count mismatch") as error:
         read_capture(path)
+    assert error.value.reason == "count_mismatch"
 
 
 def test_unknown_format_version_is_rejected(tmp_path: Path) -> None:
