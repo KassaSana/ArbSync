@@ -40,6 +40,12 @@
 - Persist exact-string schema-v4 pricing ledgers that separate top-of-book theoretical,
   gross depth-executable, fee impact, and net executable spread. The dashboard opportunity
   feed shows peak theoretical values, the first notional's stored net spread, and lifetime.
+- Observe each route leg's local receipt age and the legs' absolute skew without gating
+  on them: `arb_route_open_leg_age_seconds` and `arb_route_open_age_skew_seconds`
+  histograms at episode open, `buy_age_ms`/`sell_age_ms`/`age_skew_ms` on
+  `/api/pricing/depth` routes, and research datasets `route_leg_ages.jsonl`,
+  `age_skew_bands.jsonl`, and `age_skew_gate_sensitivity.jsonl` with configurable
+  `--age-bands-ms` and `--skew-bands-ms`.
 
 ### Upgrade notes
 
@@ -52,6 +58,8 @@
 - Research reports are now `version` 2. The Fisher confidence interval fields were removed
   from `lead_lag.jsonl` because they were invalid for dependent, grid-selected estimates;
   regenerate any earlier lead/lag output.
+- Research reports are now `version` 3, adding the route leg age datasets and their band
+  settings to `measurement`; existing dataset rows are unchanged.
 
 ### Performance
 

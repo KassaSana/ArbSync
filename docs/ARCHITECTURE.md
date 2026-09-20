@@ -155,6 +155,16 @@ serialize them as decimal strings.
 These detector calculations exclude fees and depth beyond the best level. They are the
 theoretical tier that opens and updates episodes, not executable trade quotes.
 
+Each book's age is limited on its own by canonical eligibility, so a route can still pair a
+just-updated book with one near the age limit. The detector therefore reports, for every
+route it compares, each leg's local monotonic receipt age and the absolute difference
+between them (the receipt skew). These are diagnostics: absolute age, relative skew,
+connection state, and sequence continuity stay separate dimensions, exchange timestamps
+are never used as a freshness authority, and no route is gated on age or skew. Live, the
+values reach Prometheus histograms at episode open and the `/api/pricing/depth` route rows;
+offline, `tools/research.py` bands them (see [`RESEARCH.md`](RESEARCH.md)). A default gate
+is adopted only if that research supports one.
+
 ## Depth-executable and fee-adjusted pricing
 
 For every configured quote notional, `DepthSampler` walks each eligible venue book in exact
@@ -288,6 +298,7 @@ The system makes degraded state visible instead of treating it as valid market d
 | Malformed dashboard API response | REST requests fail with endpoint context; live frames are quarantined and counted without changing state |
 | Supervised background task exits | The failure is recorded, logged, counted, and exposed through readiness |
 | Browser socket disconnects | Last-known values are visibly marked stale while reconnecting |
+| Route legs with unequal receipt ages | Both ages and their skew are observed (`arb_route_open_leg_age_seconds`, `arb_route_open_age_skew_seconds`, pricing route `*_age_ms`) without changing eligibility |
 
 `/healthz` answers whether the HTTP process is alive. `/readyz` is the stronger operational
 signal: it checks adapter connections, canonical status for every expected book, and

@@ -13,8 +13,9 @@ uv run python tools/research.py `
 ```
 
 The output directory contains JSONL datasets for episode lifetimes,
-fee-adjusted/executable-size survival by notional, venue fill rates, lead/lag, and
-lead/lag sensitivity, plus `report.json` with the replay digest, row counts, and measurement metadata.
+fee-adjusted/executable-size survival by notional, venue fill rates, lead/lag,
+lead/lag sensitivity, and route leg age and skew, plus `report.json` (`version` 3)
+with the replay digest, row counts, and measurement metadata.
 The datasets are files rather than SQLite tables so research runs cannot affect
 product persistence or ingestion.
 
@@ -30,6 +31,48 @@ product persistence or ingestion.
 - `venue_fill_rates.jsonl` contains the depth sampler's per-venue, per-pair,
   per-notional, per-side observations. Ineligible samples remain separate from
   insufficient depth.
+- `route_leg_ages.jsonl`, `age_skew_bands.jsonl`, and
+  `age_skew_gate_sensitivity.jsonl` are described under
+  [Route leg age and receipt skew](#route-leg-age-and-receipt-skew).
+
+## Route leg age and receipt skew
+
+Canonical eligibility bounds each book's age independently, so a route can compare a
+book updated a moment ago with one close to the configured limit. The detector reports
+each compared route's leg ages on the local monotonic clock, and research keeps two
+separate dimensions from them:
+
+- **absolute age**: the older leg's receipt age (`max(buy_age, sell_age)`), which asks
+  whether either input was old;
+- **relative skew**: `|buy_age - sell_age|`, which asks how asynchronous the two inputs
+  were. A large skew shows the books were not observed together; it does not show the
+  quieter book was wrong, and equal ages say nothing about freshness.
+
+Ages come from local receipt times only. Exchange timestamps carry venue-specific clock
+behaviour and are never a freshness authority. Connection state and sequence continuity
+are reported through `close_reason` (`book_ineligible`) and the replay lifecycle trace
+rather than folded into either dimension.
+
+- `route_leg_ages.jsonl` has one row per canonical episode with both legs' ages and skew
+  at open, at the last peak, and at close, the widest skew observed while the episode was
+  open (`max_age_skew_ms`), lifetime, peak spread and profit, close reason, and whether
+  any stored ledger was net positive (`fee_survivor`). A close caused by a lost leg keeps
+  the last ages seen with both legs present.
+- `age_skew_bands.jsonl` has one row per dimension and band. Bands are configured as
+  upper edges in milliseconds (`--age-bands-ms`, default `100,500,1000,5000,15000`;
+  `--skew-bands-ms`, default `50,250,1000,5000`); a value equal to an edge belongs to the
+  lower band and one open-ended band follows the last edge. Each row counts every route
+  comparison the detector made in that band (`evaluations`), the episodes that opened
+  there (`episodes_opened`, `open_rate`), those later closed by a lost leg, fee survivors,
+  peak-spread and lifetime percentiles (floating-point summaries), and the same
+  survival-by-notional arithmetic as `survival_by_notional.jsonl` restricted to the band.
+- `age_skew_gate_sensitivity.jsonl` reports, for a cutoff at each band edge, how many
+  episodes would have been retained and rejected at open, how many fee survivors and
+  `book_ineligible` closures fall on each side, and the retained share of theoretical
+  peak profit per quote asset. USD and USDT totals are never added together.
+
+No gate is applied. The sensitivity table exists so a cutoff can be argued from a
+faithful capture; the decision is recorded in this section once the evidence is in.
 
 ## Lead/lag method and limits
 
