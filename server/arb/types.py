@@ -92,11 +92,26 @@ class RouteLegAges:
     sell_age_ns: int | None
     skew_ns: int | None
 
+    @classmethod
+    def between(
+        cls, buy_book: TopOfBook, sell_book: TopOfBook, now_monotonic_ns: int
+    ) -> RouteLegAges:
+        """Ages of both legs at `now_monotonic_ns`, from local receipt times only."""
+        buy_age = _age(buy_book.received_monotonic_ns, now_monotonic_ns)
+        sell_age = _age(sell_book.received_monotonic_ns, now_monotonic_ns)
+        skew = None if buy_age is None or sell_age is None else abs(buy_age - sell_age)
+        return cls(buy_age_ns=buy_age, sell_age_ns=sell_age, skew_ns=skew)
+
     def as_payload(self) -> dict[str, object]:
+        buy_ms = _ms(self.buy_age_ns)
+        sell_ms = _ms(self.sell_age_ns)
+        # The wire skew is the difference of the wire ages, so a reader can
+        # always reconcile the three; flooring each field separately would
+        # let them disagree by a millisecond.
         return {
-            "buy_age_ms": _ms(self.buy_age_ns),
-            "sell_age_ms": _ms(self.sell_age_ns),
-            "age_skew_ms": _ms(self.skew_ns),
+            "buy_age_ms": buy_ms,
+            "sell_age_ms": sell_ms,
+            "age_skew_ms": None if buy_ms is None or sell_ms is None else abs(buy_ms - sell_ms),
         }
 
 
@@ -110,9 +125,10 @@ class RouteAgeEvent:
     `evaluated` fires for every ordered pair of eligible books the detector
     compared, whether or not a spread existed, so band statistics have a
     denominator. `open`, `peak`, and `close` follow one episode; `start_ns`
-    joins them to the episode row. For a close caused by a leg leaving the
-    eligible set the ages are the last ones observed while both legs were
-    present, since the missing leg has no current top.
+    joins them to the episode row. A `spread_closed` close carries the ages of
+    the comparison that closed it; every other close (`book_ineligible`,
+    `shutdown`) reports the last ages observed while both legs were present,
+    since a missing leg has no current top.
     """
 
     kind: RouteAgeEventKind
@@ -128,6 +144,12 @@ class RouteAgeEvent:
 
 def _ms(value: int | None) -> int | None:
     return None if value is None else value // 1_000_000
+
+
+def _age(received_monotonic_ns: int | None, now_monotonic_ns: int) -> int | None:
+    if received_monotonic_ns is None:
+        return None
+    return max(0, now_monotonic_ns - received_monotonic_ns)
 
 
 @dataclass(frozen=True)

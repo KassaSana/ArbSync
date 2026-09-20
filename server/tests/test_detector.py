@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from arb.detector import ArbitrageDetector, leg_ages
+from arb.detector import ArbitrageDetector
 from arb.types import PricingLedger, RouteAgeEvent, RouteLegAges, TopOfBook
 
 
@@ -423,14 +423,14 @@ def aged(
 def test_leg_ages_are_local_receipt_ages_and_skew_is_symmetric() -> None:
     fresh = aged("coinbase", "100", "101", 9_000)
     quiet = aged("gemini", "102", "103", 2_000)
-    ages = leg_ages(fresh, quiet, 10_000)
+    ages = RouteLegAges.between(fresh, quiet, 10_000)
     assert (ages.buy_age_ns, ages.sell_age_ns, ages.skew_ns) == (1_000, 8_000, 7_000)
-    mirrored = leg_ages(quiet, fresh, 10_000)
+    mirrored = RouteLegAges.between(quiet, fresh, 10_000)
     assert (mirrored.buy_age_ns, mirrored.sell_age_ns, mirrored.skew_ns) == (8_000, 1_000, 7_000)
     # A receipt stamped after `now` (clock granularity) clamps to zero, never negative.
-    assert leg_ages(aged("a", "1", "2", 11_000), quiet, 10_000).buy_age_ns == 0
+    assert RouteLegAges.between(aged("a", "1", "2", 11_000), quiet, 10_000).buy_age_ns == 0
     # A top with no receipt time yields no age and no skew, never a fabricated zero.
-    unknown = leg_ages(aged("a", "1", "2", None), quiet, 10_000)
+    unknown = RouteLegAges.between(aged("a", "1", "2", None), quiet, 10_000)
     assert (unknown.buy_age_ns, unknown.sell_age_ns, unknown.skew_ns) == (None, 8_000, None)
     assert ages.as_payload() == {"buy_age_ms": 0, "sell_age_ms": 0, "age_skew_ms": 0}
     assert RouteLegAges(1_500_000, None, None).as_payload() == {
@@ -438,6 +438,45 @@ def test_leg_ages_are_local_receipt_ages_and_skew_is_symmetric() -> None:
         "sell_age_ms": None,
         "age_skew_ms": None,
     }
+    # The wire skew is the difference of the wire ages, never a separately
+    # floored nanosecond value that could disagree with them by one.
+    straddling = RouteLegAges.between(
+        aged("a", "1", "2", 10_000_000 - 1_200_000),
+        aged("b", "1", "2", 10_000_000 - 900_000),
+        10_000_000,
+    )
+    assert straddling.skew_ns == 300_000
+    assert straddling.as_payload() == {"buy_age_ms": 1, "sell_age_ms": 0, "age_skew_ms": 1}
+
+
+def test_live_observer_computes_ages_only_for_routes_that_open_or_are_open(monkeypatch) -> None:
+    """Without evaluation events the compared-pair loop must not compute ages."""
+    calls: list[tuple[str, str]] = []
+    original = RouteLegAges.between
+
+    def counting(cls, buy_book, sell_book, now_monotonic_ns):  # type: ignore[no-untyped-def]
+        calls.append((buy_book.exchange, sell_book.exchange))
+        return original.__func__(cls, buy_book, sell_book, now_monotonic_ns)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(RouteLegAges, "between", classmethod(counting))
+    detector = ArbitrageDetector(threshold_pct=Decimal("0.1"), route_observer=lambda event: None)
+    flat = [
+        aged("coinbase", "100", "100.1", 900),
+        aged("gemini", "100", "100.1", 800),
+        aged("binanceus", "100", "100.1", 700),
+    ]
+    assert detector.detect_for_pair("BTC-USD", flat, 10, 1_000) == []
+    assert calls == [], "six compared pairs, no episode, no age arithmetic"
+
+    # Two venues, one crossing direction: exactly one route opens.
+    crossed = [
+        aged("coinbase", "100", "101", 900),
+        aged("gemini", "103", "104", 800),
+    ]
+    assert len(detector.detect_for_pair("BTC-USD", crossed, 11, 2_000)) == 1
+    assert calls == [("coinbase", "gemini")], "only the route that opened"
+    detector.detect_for_pair("BTC-USD", crossed, 12, 3_000)
+    assert calls == [("coinbase", "gemini")] * 2, "one refresh per open route per update"
 
 
 def test_route_observer_follows_one_episode_from_open_to_close() -> None:

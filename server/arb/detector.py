@@ -21,20 +21,6 @@ LedgerFactory = Callable[[str, str, str, int], tuple[PricingLedger, ...]]
 RouteObserver = Callable[[RouteAgeEvent], None]
 
 
-def leg_ages(buy_book: TopOfBook, sell_book: TopOfBook, now_monotonic_ns: int) -> RouteLegAges:
-    """Receipt ages of both legs at `now_monotonic_ns`, from local receipt times only."""
-    buy_age = _age(buy_book.received_monotonic_ns, now_monotonic_ns)
-    sell_age = _age(sell_book.received_monotonic_ns, now_monotonic_ns)
-    skew = None if buy_age is None or sell_age is None else abs(buy_age - sell_age)
-    return RouteLegAges(buy_age_ns=buy_age, sell_age_ns=sell_age, skew_ns=skew)
-
-
-def _age(received_monotonic_ns: int | None, now_monotonic_ns: int) -> int | None:
-    if received_monotonic_ns is None:
-        return None
-    return max(0, now_monotonic_ns - received_monotonic_ns)
-
-
 _NO_AGES = RouteLegAges(buy_age_ns=None, sell_age_ns=None, skew_ns=None)
 
 
@@ -86,9 +72,10 @@ class ArbitrageDetector:
         self._monotonic_clock = monotonic_clock
         self._ledger_factory = ledger_factory
         # Leg-age diagnostics are observed, never gating: route eligibility is
-        # decided by the canonical book status alone. `evaluated` events cost an
-        # allocation per compared pair on every update, so research opts in and
-        # live ingestion does not.
+        # decided by the canonical book status alone. Ages are computed only for
+        # routes that open, peak, or are already open, so the live path pays per
+        # open episode, not per compared pair; `evaluated` events cost one
+        # allocation per compared pair on every update and are research-only.
         self._route_observer = route_observer
         self._observe_evaluations = observe_evaluations and route_observer is not None
         self._open: dict[Route, _OpenEpisode] = {}
@@ -117,28 +104,27 @@ class ArbitrageDetector:
         base_asset, separator, quote_asset = pair.rpartition("-")
         books = [book for book in books if book.pair == pair]
         quotes: dict[Route, _Quote] = {}
-        ages: dict[Route, RouteLegAges] = {}
         if base_asset and separator and quote_asset and len(books) >= 2:
             for buy_book, sell_book in permutations(books, 2):
                 route = (pair, buy_book.exchange, sell_book.exchange)
-                if self._route_observer is not None:
-                    ages[route] = leg_ages(buy_book, sell_book, now_monotonic_ns)
-                    if self._observe_evaluations:
-                        self._route_observer(
-                            RouteAgeEvent(
-                                kind="evaluated",
-                                pair=pair,
-                                buy_exchange=route[1],
-                                sell_exchange=route[2],
-                                start_ns=None,
-                                monotonic_ns=now_monotonic_ns,
-                                spread_pct=_spread_pct(buy_book, sell_book),
-                                ages=ages[route],
-                            )
+                if self._observe_evaluations:
+                    assert self._route_observer is not None
+                    self._route_observer(
+                        RouteAgeEvent(
+                            kind="evaluated",
+                            pair=pair,
+                            buy_exchange=route[1],
+                            sell_exchange=route[2],
+                            start_ns=None,
+                            monotonic_ns=now_monotonic_ns,
+                            spread_pct=_spread_pct(buy_book, sell_book),
+                            ages=RouteLegAges.between(buy_book, sell_book, now_monotonic_ns),
                         )
+                    )
                 quote = self._quote(buy_book, sell_book)
                 if quote is not None:
                     quotes[route] = quote
+        by_exchange = {book.exchange: book for book in books}
 
         events: list[OpportunityEpisode] = []
         present = {book.exchange for book in books}
@@ -149,10 +135,10 @@ class ArbitrageDetector:
             legs_present = buy_exchange in present and sell_exchange in present
             reason: EpisodeCloseReason = "spread_closed" if legs_present else "book_ineligible"
             close_spread = self._spread_pct(buy_exchange, sell_exchange, books)
-            if route in ages:
+            if legs_present:
                 # Both legs were compared at this instant, so the close carries
                 # these ages; a missing leg keeps the last pair actually seen.
-                state.last_ages = ages[route]
+                state.last_ages = self._leg_ages(route, by_exchange, now_monotonic_ns)
             events.append(
                 self._close(route, state, timestamp_ns, now_monotonic_ns, reason, close_spread)
             )
@@ -178,13 +164,13 @@ class ArbitrageDetector:
                     peak_profit=quote.theoretical_profit,
                     pricing_ledgers=self._ledgers(route, now_monotonic_ns),
                 )
-                self._open[route] = _OpenEpisode(
-                    episode, now_monotonic_ns, ages.get(route, _NO_AGES)
-                )
+                ages = self._leg_ages(route, by_exchange, now_monotonic_ns)
+                self._open[route] = _OpenEpisode(episode, now_monotonic_ns, ages)
                 events.append(episode)
                 self._observe("open", route, start_ns, now_monotonic_ns, quote.spread_pct, ages)
             else:
-                existing.last_ages = ages.get(route, _NO_AGES)
+                ages = self._leg_ages(route, by_exchange, now_monotonic_ns)
+                existing.last_ages = ages
                 if quote.spread_pct > existing.episode.peak_spread_pct:
                     existing.episode = replace(
                         existing.episode,
@@ -203,6 +189,14 @@ class ArbitrageDetector:
                     )
         return events
 
+    def _leg_ages(
+        self, route: Route, by_exchange: dict[str, TopOfBook], now_monotonic_ns: int
+    ) -> RouteLegAges:
+        """Ages for one route, computed only when an observer will see them."""
+        if self._route_observer is None:
+            return _NO_AGES
+        return RouteLegAges.between(by_exchange[route[1]], by_exchange[route[2]], now_monotonic_ns)
+
     def _observe(
         self,
         kind: Literal["open", "peak"],
@@ -210,7 +204,7 @@ class ArbitrageDetector:
         start_ns: int,
         now_monotonic_ns: int,
         spread_pct: Decimal,
-        ages: dict[Route, RouteLegAges],
+        ages: RouteLegAges,
     ) -> None:
         if self._route_observer is None:
             return
@@ -223,7 +217,7 @@ class ArbitrageDetector:
                 start_ns=start_ns,
                 monotonic_ns=now_monotonic_ns,
                 spread_pct=spread_pct,
-                ages=ages[route],
+                ages=ages,
             )
         )
 

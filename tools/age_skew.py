@@ -272,8 +272,9 @@ def gate_sensitivity_rows(
 ) -> list[dict[str, object]]:
     """What a cutoff at each band edge would have retained and rejected at episode open.
 
-    Episodes without an age on the dimension are counted separately: a gate
-    could not have judged them either way.
+    Episodes without an age on the dimension are only counted in
+    `episodes_unknown`: a gate could not have judged them, so they are in
+    neither side's survivors, profit, or shares.
     """
     bands = recorder.bands
     rows: list[dict[str, object]] = []
@@ -282,21 +283,20 @@ def gate_sensitivity_rows(
         for episode in episodes
         if _episode_key(episode) in recorder.episodes
     ]
-    total_profit = _profit_by_quote(episode for episode, _ in records)
-    total_survivors = sum(1 for e, _ in records if survives_any_notional(e))
     for dimension in DIMENSIONS:
+        # Episodes the gate could not judge stay out of every total on this
+        # dimension, so shares describe only what a cutoff actually decided.
+        judged = [
+            (episode, value)
+            for episode, record in records
+            if (value := dimension_value(dimension, record.open_ages)) is not None
+        ]
+        unknown = len(records) - len(judged)
+        total_profit = _profit_by_quote(episode for episode, _ in judged)
+        total_survivors = sum(1 for e, _ in judged if survives_any_notional(e))
         for edge in bands.edges(dimension):
-            retained: list[dict[str, object]] = []
-            rejected: list[dict[str, object]] = []
-            unknown = 0
-            for episode, record in records:
-                value = dimension_value(dimension, record.open_ages)
-                if value is None:
-                    unknown += 1
-                elif value <= edge:
-                    retained.append(episode)
-                else:
-                    rejected.append(episode)
+            retained = [episode for episode, value in judged if value <= edge]
+            rejected = [episode for episode, value in judged if value > edge]
             retained_profit = _profit_by_quote(retained)
             retained_survivors = sum(1 for e in retained if survives_any_notional(e))
             rows.append(

@@ -285,11 +285,13 @@ def test_gate_sensitivity_reports_retained_and_rejected_per_cutoff_per_quote() -
         2,
         1,
     )
-    assert (strict["fee_survivors_retained"], strict["fee_survivors_rejected"]) == (1, 2)
-    assert strict["retained_survivor_share"] == 1 / 3
+    # Episode 4 has no age, so the gate never judged it: it is not a rejected
+    # survivor and its USDT profit is in no total.
+    assert (strict["fee_survivors_retained"], strict["fee_survivors_rejected"]) == (1, 1)
+    assert strict["retained_survivor_share"] == 0.5
     assert strict["book_ineligible_rejected"] == 1 and strict["book_ineligible_retained"] == 0
     # USD and USDT profit are never added together.
-    assert strict["total_peak_profit_by_quote"] == {"USD": "3", "USDT": "12"}
+    assert strict["total_peak_profit_by_quote"] == {"USD": "3", "USDT": "4"}
     assert strict["retained_peak_profit_by_quote"] == {"USD": "1"}
     assert strict["retained_peak_profit_share_by_quote"] == {
         "USD": str(Decimal(1) / Decimal(3)),

@@ -24,8 +24,9 @@ book_eligible = Gauge(
     "arb_book_eligible", "Whether an order book is eligible for detection", ["exchange", "pair"]
 )
 # Route-leg age diagnostics at episode open, on the local monotonic clock.
-# Observed, not gating: eligibility stays a per-book decision. Buckets span
-# sub-tick receipt differences up to the default 30 s book age limit and beyond.
+# Observed, not gating: eligibility stays a per-book decision. Buckets run from
+# 10 ms (below the ~15.6 ms Windows monotonic tick, so the lowest ones fill only
+# on finer clocks) to the default 30 s book age limit and beyond.
 _AGE_BUCKETS = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0)
 route_open_leg_age_seconds = Histogram(
     "arb_route_open_leg_age_seconds",

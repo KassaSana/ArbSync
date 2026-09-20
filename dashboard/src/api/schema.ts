@@ -371,17 +371,17 @@ function decodeExecutableRoute(
     buy_age_ms: nullable(
       field(source, "buy_age_ms", location),
       `${location}.buy_age_ms`,
-      nonnegativeNumber,
+      nonnegativeInteger,
     ),
     sell_age_ms: nullable(
       field(source, "sell_age_ms", location),
       `${location}.sell_age_ms`,
-      nonnegativeNumber,
+      nonnegativeInteger,
     ),
     age_skew_ms: nullable(
       field(source, "age_skew_ms", location),
       `${location}.age_skew_ms`,
-      nonnegativeNumber,
+      nonnegativeInteger,
     ),
     ...decodePricingLedger(source, location),
   };

@@ -163,7 +163,9 @@ connection state, and sequence continuity stay separate dimensions, exchange tim
 are never used as a freshness authority, and no route is gated on age or skew. Live, the
 values reach Prometheus histograms at episode open and the `/api/pricing/depth` route rows;
 offline, `tools/research.py` bands them (see [`RESEARCH.md`](RESEARCH.md)). A default gate
-is adopted only if that research supports one.
+is adopted only if that research supports one. Resolution follows the host monotonic clock
+(about 15.6 ms per tick on Windows with Python 3.12), so histogram buckets below that tick
+stay empty there.
 
 ## Depth-executable and fee-adjusted pricing
 

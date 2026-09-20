@@ -24,7 +24,6 @@ from decimal import Decimal
 from fractions import Fraction
 from typing import Literal
 
-from arb.detector import leg_ages
 from arb.orderbook import OrderBookManager
 from arb.types import PriceLevel, PricingLedger, RouteLegAges, TopOfBook
 
@@ -485,7 +484,7 @@ class DepthSampler:
                     or sell_exchange not in self.taker_fees_pct
                 ):
                     continue
-                ages = leg_ages(tops[buy_exchange], tops[sell_exchange], now)
+                ages = RouteLegAges.between(tops[buy_exchange], tops[sell_exchange], now)
                 for notional in self.notionals:
                     buy_fill, sell_fill = matched_route_fills(
                         books[buy_exchange][1], books[sell_exchange][0], notional

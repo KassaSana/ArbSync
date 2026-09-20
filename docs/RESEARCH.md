@@ -51,7 +51,11 @@ separate dimensions from them:
 Ages come from local receipt times only. Exchange timestamps carry venue-specific clock
 behaviour and are never a freshness authority. Connection state and sequence continuity
 are reported through `close_reason` (`book_ineligible`) and the replay lifecycle trace
-rather than folded into either dimension.
+rather than folded into either dimension. Resolution is bounded by the recording host's
+monotonic clock: on Windows with Python 3.12 `time.monotonic_ns` advances in roughly
+15.6 ms steps, so ages and skews from such a capture are multiples of that tick and the
+50 ms skew band is the smallest one that can be read there. A future gate proposal must
+state the tick of the capture it rests on.
 
 - `route_leg_ages.jsonl` has one row per canonical episode with both legs' ages and skew
   at open, at the last peak, and at close, the widest skew observed while the episode was
