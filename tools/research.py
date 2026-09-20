@@ -322,7 +322,8 @@ def analyze_capture(
 
 def _write_jsonl(path: Path, rows: Iterable[dict[str, object]]) -> int:
     count = 0
-    with path.open("w", encoding="utf-8") as handle:
+    # LF bytes on every host, so a committed dataset never depends on the recording OS.
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
         for row in rows:
             handle.write(json.dumps(row, sort_keys=True) + "\n")
             count += 1
@@ -387,7 +388,9 @@ async def run_research(
         "dataset_counts": counts,
         "measurement": datasets["measurement"],
     }
-    (output_dir / "report.json").write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+    (output_dir / "report.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
     return metadata
 
 
