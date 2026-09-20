@@ -102,15 +102,17 @@ def test_replay_runs_detector_on_the_real_path(tmp_path: Path) -> None:
     assert all(opp.pair == "BTC-USD" for opp in report.opportunities)
 
 
-def test_replay_ignores_connection_lifecycle_frames(tmp_path: Path) -> None:
+def test_replay_processes_connection_lifecycle_without_market_transitions(tmp_path: Path) -> None:
     path = tmp_path / "capture.jsonl"
 
     async def scenario() -> None:
         writer = CaptureWriter(path, {"gemini": ["btcusd"]})
         task = asyncio.create_task(writer.run())
-        assert writer.record_connection("gemini", True, 1)
-        assert writer.record_ws("gemini", _gemini_snapshot(), [])
-        assert writer.record_connection("gemini", False, 1, reason="socket closed")
+        assert writer.record_connection("gemini", True, 1, wall_ns=1, mono_ns=1)
+        assert writer.record_ws("gemini", _gemini_snapshot(), [], wall_ns=2, mono_ns=2)
+        assert writer.record_connection(
+            "gemini", False, 1, wall_ns=3, mono_ns=3, reason="socket closed"
+        )
         await writer.close()
         await task
 
@@ -119,6 +121,7 @@ def test_replay_ignores_connection_lifecycle_frames(tmp_path: Path) -> None:
 
     assert len(report.transitions) == 1
     assert report.transitions[0].kind == "snapshot"
+    assert [event.kind for event in report.lifecycle] == ["connected", "disconnected"]
 
 
 def test_replay_observations_capture_canonical_post_apply_tops() -> None:
@@ -476,8 +479,8 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
 
     Gemini's DOT book is thin (about $510 a side), so $100 fills and $10,000
     never does. Binance's book covers $10,000 but goes through a sequence gap
-    whose resync only completes at the next update, three sampling intervals
-    later; those samples count as ineligible, not as depth shortfalls.
+    whose replacement snapshot only lands three sampling intervals later on the
+    recorded clock; those samples count as ineligible, not as depth shortfalls.
     """
     from arb.capture import CaptureFrame, CaptureHeader
     from arb.orderbook import OrderBookManager
@@ -546,7 +549,8 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
     again, samples_again, digest_again = run()
     assert (rows, samples, digest) == (again, samples_again, digest_again)
 
-    # Samples fire before frames at t=1..7: seven samples on the recorded clock.
+    # Samples fire after same-instant frames at t=1..7: seven samples on the
+    # recorded clock.
     assert samples == 7
     by_key = {(r["exchange"], r["notional"], r["side"]): r for r in rows}
     thin_small = by_key[("gemini", "100", "buy")]
@@ -556,8 +560,10 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
     assert thin_large["subscribed_depth_levels"] is None
 
     deep_large = by_key[("binance", "10000", "buy")]
-    # Eligible at the samples for t=2 and t=3 (before the gap frame), then
-    # ineligible at t=4, t=5 and t=6, then eligible again at t=7.
-    assert deep_large["observations"] == 3 and deep_large["filled"] == 3
+    # The recorded snapshot completes at t=1, so the t=1 and t=2 samples see an
+    # eligible book. The gap frame at t=3 lands before that instant's sample,
+    # so t=3, t=4 and t=5 are ineligible; the replacement snapshot recorded at
+    # t=6 completes before the t=6 sample, so t=6 and t=7 are eligible again.
+    assert deep_large["observations"] == 4 and deep_large["filled"] == 4
     assert deep_large["ineligible_samples"] == 3
     assert deep_large["subscribed_depth_levels"] == 5000

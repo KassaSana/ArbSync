@@ -65,6 +65,28 @@ class SnapshotRequestContext:
     request_mono_ns: int
 
 
+@dataclass(frozen=True)
+class SnapshotRequest:
+    """One REST snapshot the adapter needs started for `pair` right now.
+
+    The adapter's recovery state machine emits these instead of fetching
+    itself, so the live stream shell and offline replay decide *when* the
+    response lands while the adapter alone decides what to do with it.
+    """
+
+    pair: str
+    purpose: str
+    attempt: int
+
+
+@dataclass(frozen=True)
+class IngestResult:
+    """Normalized events plus the snapshot fetches one input made necessary."""
+
+    events: list[MarketEvent]
+    snapshot_requests: list[SnapshotRequest]
+
+
 class ExchangeAdapter(abc.ABC):
     name: str
     ws_url: str
@@ -145,6 +167,31 @@ class ExchangeAdapter(abc.ABC):
     @abc.abstractmethod
     async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
         raise NotImplementedError
+
+    async def ingest_message(self, text: str, received_monotonic_ns: int) -> IngestResult:
+        """Advance the adapter's sequence state by one inbound message.
+
+        Performs no network or clock waits: any REST snapshot the message
+        makes necessary is returned as a :class:`SnapshotRequest` for the
+        caller to start, and its result comes back through
+        :meth:`complete_snapshot`. Venues whose stream carries its own
+        snapshots never request one, so the default simply parses.
+        """
+        return IngestResult(await self.parse_message(text), [])
+
+    def complete_snapshot(self, pair: str, snapshot: MarketEvent) -> IngestResult:
+        """Deliver a fetched snapshot to the adapter's recovery state machine.
+
+        Returns the events it unlocks, or a retry request when the snapshot
+        predates the buffered updates it must align with. Raises
+        ``RuntimeError`` once bounded recovery is exhausted, after requesting
+        a full reconnect.
+        """
+        raise NotImplementedError(f"{self.name} never synchronizes from REST snapshots")
+
+    def snapshot_failed(self, pair: str) -> None:
+        """Record that a requested snapshot fetch raised instead of returning."""
+        self.request_reconnect()
 
     async def reset_state(self) -> None:
         """Clear per-connection state. Called before each (re)subscribe so

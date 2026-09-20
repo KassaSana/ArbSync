@@ -986,7 +986,7 @@ mismatches, and declared frame loss; research rejects lossy captures by default 
 an explicit `--allow-lossy` override. Version-1 captures remain readable with legacy
 provenance limitations labelled.
 
-### [ ] ARB-038 — Replay recovery, disconnects, expiry, and snapshots on recorded time
+### [x] ARB-038 — Replay recovery, disconnects, expiry, and snapshots on recorded time
 
 - Priority: P1
 - Estimate: 20–32 hours
@@ -1014,6 +1014,16 @@ Acceptance criteria:
   missing or mismatched snapshot provenance.
 - Keep recorded replay deterministic and make its digest cover the canonical transitions
   and lifecycle boundaries whose equality is being claimed.
+
+Resolution: replay now drives connection boundaries, WebSocket input, correlated REST
+snapshot completion, book-expiry deadlines, and depth samples through one recorded-time
+priority queue. Binance.US exposes the same sans-I/O buffering and snapshot-alignment state
+machine to live streaming and replay, including pair-scoped recovery and bounded retries.
+Disconnects invalidate canonical books, quiet books expire at their exact age boundary, and
+version-2 snapshot provenance is matched by pair, purpose, and connection generation;
+legacy captures retain explicitly labelled URL-order timing. The versioned lifecycle trace
+and canonical transitions are covered by the deterministic digest and focused regression
+tests.
 
 ### [ ] ARB-039 — Validate the lead/lag estimator and uncertainty reporting
 

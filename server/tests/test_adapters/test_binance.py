@@ -509,7 +509,9 @@ def test_single_pair_resync_keeps_venue_eligible_in_replay() -> None:
         ws_frame(4, '{"s":"ETHUSDT","U":4,"u":4,"E":1,"b":[["200","1"]],"a":[["201","1"]]}'),
         # Sequence gap on BTC-USDT: last seen exchange id 6, range starts at 20.
         ws_frame(5, '{"s":"BTCUSDT","U":20,"u":20,"E":1,"b":[["100","1"]],"a":[["101","1"]]}'),
-        rest_frame(5, "BTCUSDT", 21, "100", "101"),
+        # The replacement REST response lands one tick after the gap, as a
+        # real round-trip would; replay applies it at that recorded instant.
+        rest_frame(6, "BTCUSDT", 21, "100", "101"),
         ws_frame(6, '{"s":"ETHUSDT","U":5,"u":5,"E":1,"b":[["200","1"]],"a":[["201","1"]]}'),
         ws_frame(7, '{"s":"BTCUSDT","U":21,"u":25,"E":1,"b":[["100","2"]],"a":[["101","1"]]}'),
     ]
@@ -750,3 +752,92 @@ def test_binance_symbol_normalization_separates_usd_and_usdt() -> None:
     assert normalize_binance_symbol("ETHUSDC") == "ETH-USDC"
     # Unknown quote assets pass through uppercased.
     assert normalize_binance_symbol("btceth") == "BTCETH"
+
+
+def test_ingest_requests_one_snapshot_per_pair_while_in_flight() -> None:
+    # ARB-038: the sans-I/O state machine asks for a fetch exactly once per
+    # alignment. Updates arriving while it is outstanding are buffered for
+    # the alignment and never trigger a second request.
+    adapter = BinanceAdapter(["BTCUSDT"])
+    first = asyncio.run(adapter.ingest_message('{"s":"BTCUSDT","U":95,"u":99,"b":[],"a":[]}', 1))
+    second = asyncio.run(
+        adapter.ingest_message('{"s":"BTCUSDT","U":100,"u":105,"b":[["100","2"]],"a":[]}', 2)
+    )
+
+    assert first.events == []
+    assert [(r.pair, r.purpose, r.attempt) for r in first.snapshot_requests] == [
+        ("BTC-USDT", "initial_sync", 1)
+    ]
+    assert second.events == [] and second.snapshot_requests == []
+    assert len(adapter._buffers["BTC-USDT"]) == 2
+    assert "BTC-USDT" in adapter._snapshot_in_flight
+
+
+def test_complete_snapshot_aligns_buffered_updates_at_completion() -> None:
+    adapter = BinanceAdapter(["BTCUSDT"])
+    asyncio.run(adapter.ingest_message('{"s":"BTCUSDT","U":95,"u":99,"b":[],"a":[]}', 1))
+    asyncio.run(
+        adapter.ingest_message('{"s":"BTCUSDT","U":100,"u":105,"b":[["100","2"]],"a":[]}', 2)
+    )
+
+    result = adapter.complete_snapshot("BTC-USDT", binance_snapshot(100))
+
+    assert [event.kind for event in result.events] == [EventKind.SNAPSHOT, EventKind.DELTA]
+    assert result.events[1].exchange_first_sequence == 100
+    assert result.events[1].received_monotonic_ns == 2
+    assert result.snapshot_requests == []
+    assert "BTC-USDT" not in adapter._snapshot_in_flight
+    assert "BTC-USDT" in adapter._initialized
+
+
+def test_complete_snapshot_accepts_range_starting_immediately_after_snapshot() -> None:
+    adapter = BinanceAdapter(["BTCUSDT"])
+    asyncio.run(
+        adapter.ingest_message('{"s":"BTCUSDT","U":101,"u":101,"b":[["100","2"]],"a":[]}', 1)
+    )
+
+    result = adapter.complete_snapshot("BTC-USDT", binance_snapshot(100))
+
+    assert [event.kind for event in result.events] == [EventKind.SNAPSHOT, EventKind.DELTA]
+    assert result.snapshot_requests == []
+    assert adapter._reconnect_requested is False
+
+
+def test_complete_snapshot_retries_then_escalates_to_reconnect() -> None:
+    adapter = BinanceAdapter(["BTCUSDT"])
+    asyncio.run(adapter.ingest_message('{"s":"BTCUSDT","U":95,"u":105,"b":[],"a":[]}', 1))
+
+    retry = adapter.complete_snapshot("BTC-USDT", binance_snapshot(90))
+    assert retry.events == []
+    assert [(r.pair, r.attempt) for r in retry.snapshot_requests] == [("BTC-USDT", 2)]
+    assert "BTC-USDT" in adapter._snapshot_in_flight
+
+    again = adapter.complete_snapshot("BTC-USDT", binance_snapshot(90))
+    assert [r.attempt for r in again.snapshot_requests] == [3]
+
+    with pytest.raises(RuntimeError, match="snapshot did not catch up"):
+        adapter.complete_snapshot("BTC-USDT", binance_snapshot(90))
+    assert adapter._reconnect_requested is True
+    assert "BTC-USDT" not in adapter._snapshot_in_flight
+
+
+def test_ingest_gap_emits_reset_and_requests_scoped_snapshot() -> None:
+    adapter = BinanceAdapter(["BTCUSDT"])
+    asyncio.run(
+        adapter.parse_message(
+            '{"symbol":"BTCUSDT","lastUpdateId":100,"bids":[["100","1"]],"asks":[["101","1"]]}'
+        )
+    )
+
+    result = asyncio.run(adapter.ingest_message('{"s":"BTCUSDT","U":108,"u":110,"b":[],"a":[]}', 5))
+
+    assert [event.kind for event in result.events] == [EventKind.RESET]
+    assert [(r.pair, r.purpose) for r in result.snapshot_requests] == [("BTC-USDT", "sequence_gap")]
+    assert adapter._reconnect_requested is False
+
+
+def test_ingest_server_shutdown_requests_reconnect_without_snapshot() -> None:
+    adapter = BinanceAdapter(["BTCUSDT"])
+    result = asyncio.run(adapter.ingest_message('{"e":"serverShutdown"}', 1))
+    assert result.events == [] and result.snapshot_requests == []
+    assert adapter._reconnect_requested is True

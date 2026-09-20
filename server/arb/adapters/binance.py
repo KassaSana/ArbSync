@@ -9,7 +9,7 @@ from typing import Any
 
 import structlog
 
-from arb.adapters.base import ExchangeAdapter, parse_levels
+from arb.adapters.base import ExchangeAdapter, IngestResult, SnapshotRequest, parse_levels
 from arb.metrics import adapter_pair_resyncs_total
 from arb.types import EventKind, MarketEvent, PriceLevel
 
@@ -54,6 +54,11 @@ class BinanceAdapter(ExchangeAdapter):
         self._last_exchange_update_id: dict[str, int] = {}
         self._buffers: dict[str, list[_DepthUpdate]] = {}
         self._snapshot_purpose: dict[str, str] = {}
+        # Pairs with a REST snapshot requested and not yet completed, and how
+        # many fetches the current alignment has used. Held here rather than
+        # in the stream loop so replay can drive the same state machine.
+        self._snapshot_in_flight: set[str] = set()
+        self._snapshot_attempts: dict[str, int] = {}
 
     async def reset_state(self) -> None:
         await super().reset_state()
@@ -62,6 +67,8 @@ class BinanceAdapter(ExchangeAdapter):
         self._last_exchange_update_id.clear()
         self._buffers.clear()
         self._snapshot_purpose.clear()
+        self._snapshot_in_flight.clear()
+        self._snapshot_attempts.clear()
 
     def request_pair_resync(self, pair: str) -> bool:
         """Re-fetch one pair's book without dropping the combined stream.
@@ -133,12 +140,84 @@ class BinanceAdapter(ExchangeAdapter):
 
         return []
 
+    def _request_snapshot(self, pair: str, *, attempt: int) -> SnapshotRequest:
+        self._snapshot_in_flight.add(pair)
+        self._snapshot_attempts[pair] = attempt
+        return SnapshotRequest(
+            pair=pair,
+            purpose=self._snapshot_purpose.get(pair, "initial_sync"),
+            attempt=attempt,
+        )
+
+    async def ingest_message(self, text: str, received_monotonic_ns: int) -> IngestResult:
+        """Buffer or emit one message; report any pair that now needs a snapshot.
+
+        This is the recovery state machine without its I/O: the caller starts
+        the returned fetches and hands their results to
+        :meth:`complete_snapshot`, so the live shell and offline replay make
+        the same decisions from the same inputs.
+        """
+        payload = json.loads(text)
+        if payload.get("e") == "serverShutdown":
+            self.request_reconnect()
+            return IngestResult([], [])
+        if not ("b" in payload and "a" in payload and "s" in payload):
+            return IngestResult(await self.parse_message(text), [])
+
+        update = self._decode_depth_update(payload, received_monotonic_ns)
+        emitted: list[MarketEvent] = []
+        if update.pair in self._initialized:
+            emitted = self._emit_initialized(update)
+        else:
+            self._buffer(update)
+        requests: list[SnapshotRequest] = []
+        if (
+            update.pair not in self._initialized
+            and update.pair not in self._snapshot_in_flight
+            and not self._reconnect_requested
+        ):
+            # Either the pair was never aligned or a sequence gap just demoted
+            # it. Re-fetch only this pair; the socket and the other pairs keep
+            # flowing.
+            requests.append(self._request_snapshot(update.pair, attempt=1))
+        return IngestResult(emitted, requests)
+
+    def complete_snapshot(self, pair: str, snapshot: MarketEvent) -> IngestResult:
+        self._snapshot_in_flight.discard(pair)
+        events = self._align_snapshot(pair, snapshot)
+        if events is None:
+            attempts = self._snapshot_attempts.get(pair, 1)
+            if attempts >= 3:
+                self._snapshot_attempts.pop(pair, None)
+                self._restart_sync(pair)
+                raise RuntimeError(f"snapshot did not catch up for {pair}")
+            return IngestResult([], [self._request_snapshot(pair, attempt=attempts + 1)])
+        self._snapshot_attempts.pop(pair, None)
+        self._snapshot_purpose.pop(pair, None)
+        return IngestResult(events, [])
+
+    def snapshot_failed(self, pair: str) -> None:
+        self._snapshot_in_flight.discard(pair)
+        self._snapshot_attempts.pop(pair, None)
+        self._restart_sync(pair)
+
     async def stream_events(self, websocket: Any) -> AsyncIterator[MarketEvent]:
-        """Keep reading and buffering depth updates while snapshots are in flight."""
+        """Keep reading and buffering depth updates while snapshots are in flight.
+
+        The shell owns the tasks and the clock; every sequencing decision is
+        made by :meth:`ingest_message` and :meth:`complete_snapshot`.
+        """
         iterator = websocket.__aiter__()
         read_task: asyncio.Task[Any] | None = asyncio.create_task(anext(iterator))
         snapshot_tasks: dict[str, asyncio.Task[MarketEvent]] = {}
-        snapshot_attempts: dict[str, int] = {}
+
+        def start(request: SnapshotRequest) -> None:
+            snapshot_tasks[request.pair] = asyncio.create_task(
+                self.fetch_snapshot_with_context(
+                    request.pair, trigger_sequence=0, purpose=request.purpose
+                )
+            )
+
         try:
             while read_task is not None or snapshot_tasks:
                 waiting: set[asyncio.Task[Any]] = set(snapshot_tasks.values())
@@ -156,70 +235,21 @@ class BinanceAdapter(ExchangeAdapter):
                         received_wall_ns = time.time_ns()
                         self.last_message_ns = received_wall_ns
                         text_message = message.decode() if isinstance(message, bytes) else message
-                        payload = json.loads(text_message)
-                        if payload.get("e") == "serverShutdown":
-                            self.request_reconnect()
-                        elif "b" in payload and "a" in payload and "s" in payload:
-                            update = self._decode_depth_update(payload, received_monotonic_ns)
-                            emitted: list[MarketEvent] = []
-                            if update.pair in self._initialized:
-                                emitted = self._emit_initialized(update)
-                                if (
-                                    update.pair not in self._initialized
-                                    and update.pair not in snapshot_tasks
-                                    and not self._reconnect_requested
-                                ):
-                                    # A sequence gap just demoted this pair.
-                                    # Re-fetch only it; the socket and the
-                                    # other pairs keep flowing.
-                                    snapshot_attempts[update.pair] = 1
-                                    snapshot_tasks[update.pair] = asyncio.create_task(
-                                        self.fetch_snapshot_with_context(
-                                            update.pair,
-                                            trigger_sequence=0,
-                                            purpose=self._snapshot_purpose.get(
-                                                update.pair, "initial_sync"
-                                            ),
-                                        )
-                                    )
-                            else:
-                                self._buffer(update)
-                                if update.pair not in snapshot_tasks:
-                                    snapshot_attempts[update.pair] = 1
-                                    snapshot_tasks[update.pair] = asyncio.create_task(
-                                        self.fetch_snapshot_with_context(
-                                            update.pair,
-                                            trigger_sequence=0,
-                                            purpose=self._snapshot_purpose.get(
-                                                update.pair, "initial_sync"
-                                            ),
-                                        )
-                                    )
-                            if self._capture_sink is not None:
-                                self._capture_sink.record_ws(
-                                    self.name,
-                                    text_message,
-                                    emitted,
-                                    wall_ns=received_wall_ns,
-                                    mono_ns=received_monotonic_ns,
-                                )
-                            for event in emitted:
-                                yield event
-                        else:
-                            parsed = await self.parse_message(text_message)
-                            if self._capture_sink is not None:
-                                self._capture_sink.record_ws(
-                                    self.name,
-                                    text_message,
-                                    parsed,
-                                    wall_ns=received_wall_ns,
-                                    mono_ns=received_monotonic_ns,
-                                )
-                            for event in parsed:
-                                yield event
-                                if self._reconnect_requested:
-                                    raise RuntimeError("adapter requested reconnect")
-
+                        result = await self.ingest_message(text_message, received_monotonic_ns)
+                        if self._capture_sink is not None:
+                            self._capture_sink.record_ws(
+                                self.name,
+                                text_message,
+                                result.events,
+                                wall_ns=received_wall_ns,
+                                mono_ns=received_monotonic_ns,
+                            )
+                        for request in result.snapshot_requests:
+                            start(request)
+                        for event in result.events:
+                            yield event
+                            if self._reconnect_requested:
+                                raise RuntimeError("adapter requested reconnect")
                         if self._reconnect_requested:
                             raise RuntimeError("adapter requested reconnect")
                         read_task = asyncio.create_task(anext(iterator))
@@ -231,32 +261,20 @@ class BinanceAdapter(ExchangeAdapter):
                     try:
                         snapshot = task.result()
                     except Exception as exc:
-                        self._restart_sync(pair)
+                        self.snapshot_failed(pair)
                         raise RuntimeError(f"snapshot retrieval failed for {pair}") from exc
 
-                    events = self._align_snapshot(pair, snapshot)
-                    if events is None:
-                        if snapshot_attempts[pair] >= 3:
-                            self._restart_sync(pair)
-                            raise RuntimeError(f"snapshot did not catch up for {pair}")
-                        snapshot_attempts[pair] += 1
-                        snapshot_tasks[pair] = asyncio.create_task(
-                            self.fetch_snapshot_with_context(
-                                pair,
-                                trigger_sequence=0,
-                                purpose=self._snapshot_purpose.get(pair, "initial_sync"),
-                            )
-                        )
-                        continue
-                    snapshot_attempts.pop(pair, None)
-                    self._snapshot_purpose.pop(pair, None)
-                    for event in events:
+                    result = self.complete_snapshot(pair, snapshot)
+                    for request in result.snapshot_requests:
+                        start(request)
+                    for event in result.events:
                         yield event
                         if self._reconnect_requested:
                             raise RuntimeError("adapter requested reconnect")
                     if self._reconnect_requested:
                         raise RuntimeError("adapter requested reconnect")
         finally:
+            self._snapshot_in_flight.difference_update(snapshot_tasks)
             tasks = [*snapshot_tasks.values()]
             if read_task is not None:
                 tasks.append(read_task)
@@ -343,7 +361,10 @@ class BinanceAdapter(ExchangeAdapter):
             self._restart_sync(pair)
             return []
         snapshot_id = snapshot.exchange_last_sequence or snapshot.sequence
-        if snapshot_id < buffer[0].first_id:
+        # The first retained range only needs to cover ``lastUpdateId + 1``.
+        # A snapshot ending immediately before that range is therefore
+        # current enough to align; retry only when there is a real hole.
+        if snapshot_id + 1 < buffer[0].first_id:
             return None
 
         pending = [update for update in buffer if update.last_id > snapshot_id]

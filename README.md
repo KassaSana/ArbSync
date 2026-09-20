@@ -277,7 +277,9 @@ baseline lives in [`docs/VALIDATION.md`](docs/VALIDATION.md).
 ## Benchmarks, capture, and replay
 
 Record real traffic and replay it through the production pipeline without network
-access; replaying the same capture twice produces identical book transitions and
+access. Version-2 replay schedules WebSocket frames, correlated snapshot completions,
+connection boundaries, and book expiry on the recorded monotonic timeline; replaying the
+same capture twice produces identical canonical transitions, lifecycle boundaries, and
 detector outputs:
 
 ```bash
@@ -295,7 +297,8 @@ three-venue sample lives under
 Capture artifacts use version 2 metadata to record lifecycle boundaries, snapshot
 request provenance, and attempted/accepted/flushed/dropped frame counts. Replay
 and research reject declared frame loss by default; legacy version-1 captures
-remain readable but are labelled as missing lifecycle provenance. Offline research
+remain readable with explicitly labelled legacy snapshot timing and missing lifecycle
+provenance. Offline research
 can explicitly opt into a lossy artifact with `--allow-lossy`, which is recorded
 in its report metadata.
 

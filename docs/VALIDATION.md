@@ -44,9 +44,11 @@ The suite covers:
   missing-configuration errors, and safe example generation
 - explicit history pruning: exact boundaries, partial-minute rollup repair, active writes,
   restart/statistics, lock contention, query-budget expiry, and atomic failure rollback
-- deterministic capture/replay, episode boundaries and orphan recovery, decimal-exact
-  depth walking, matched-route quantity, explicit insufficient depth, fee-aware ledgers,
-  schema-v4 persistence, and dashboard rendering of peak, net, and lifetime tiers
+- deterministic capture/replay, recorded-time snapshot completion and buffering,
+  disconnect/reconnect generations, scoped recovery, exact age-expiry boundaries, episode
+  boundaries and orphan recovery, decimal-exact depth walking, matched-route quantity,
+  explicit insufficient depth, fee-aware ledgers, schema-v4 persistence, and dashboard
+  rendering of peak, net, and lifetime tiers
 
 CI also runs strict mypy, Ruff, frontend type checking, ESLint, the production
 dashboard build, and coverage gates: 85% over the whole backend package and 75%
