@@ -79,6 +79,58 @@ EpisodeCloseReason = Literal["spread_closed", "book_ineligible", "shutdown", "or
 
 
 @dataclass(frozen=True)
+class RouteLegAges:
+    """Receipt ages of a route's two legs at one instant, on the local monotonic clock.
+
+    `skew_ns` is the absolute difference between the legs. Both dimensions are
+    diagnostics: a large skew shows the inputs are asynchronous, not that the
+    quieter book is wrong, and equal ages say nothing about whether either is
+    fresh. None means a leg's top carried no receipt time.
+    """
+
+    buy_age_ns: int | None
+    sell_age_ns: int | None
+    skew_ns: int | None
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "buy_age_ms": _ms(self.buy_age_ns),
+            "sell_age_ms": _ms(self.sell_age_ns),
+            "age_skew_ms": _ms(self.skew_ns),
+        }
+
+
+RouteAgeEventKind = Literal["evaluated", "open", "peak", "close"]
+
+
+@dataclass(frozen=True)
+class RouteAgeEvent:
+    """One detector observation of a route's leg ages.
+
+    `evaluated` fires for every ordered pair of eligible books the detector
+    compared, whether or not a spread existed, so band statistics have a
+    denominator. `open`, `peak`, and `close` follow one episode; `start_ns`
+    joins them to the episode row. For a close caused by a leg leaving the
+    eligible set the ages are the last ones observed while both legs were
+    present, since the missing leg has no current top.
+    """
+
+    kind: RouteAgeEventKind
+    pair: str
+    buy_exchange: str
+    sell_exchange: str
+    start_ns: int | None
+    monotonic_ns: int
+    spread_pct: Decimal | None
+    ages: RouteLegAges
+    close_reason: EpisodeCloseReason | None = None
+
+
+def _ms(value: int | None) -> int | None:
+    return None if value is None else value // 1_000_000
+
+
+@dataclass(frozen=True)
 class PricingLedger:
     """One route priced at a quote budget, from top of book through fees.
 

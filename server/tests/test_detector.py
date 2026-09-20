@@ -1,7 +1,7 @@
 from decimal import Decimal
 
-from arb.detector import ArbitrageDetector
-from arb.types import PricingLedger, TopOfBook
+from arb.detector import ArbitrageDetector, leg_ages
+from arb.types import PricingLedger, RouteAgeEvent, RouteLegAges, TopOfBook
 
 
 def book(
@@ -398,3 +398,153 @@ def test_reopen_inside_one_wall_clock_tick_keeps_a_distinct_identity() -> None:
     ]
     [eth] = detector.detect_for_pair("ETH-USD", other, 5_000)
     assert eth.start_ns == 5_000
+
+
+def aged(
+    exchange: str,
+    bid: str,
+    ask: str,
+    received_monotonic_ns: int | None,
+    size: str = "1",
+) -> TopOfBook:
+    return TopOfBook(
+        exchange=exchange,
+        pair="BTC-USD",
+        best_bid_price=Decimal(bid),
+        best_bid_size=Decimal(size),
+        best_ask_price=Decimal(ask),
+        best_ask_size=Decimal(size),
+        sequence=1,
+        timestamp_ns=1,
+        received_monotonic_ns=received_monotonic_ns,
+    )
+
+
+def test_leg_ages_are_local_receipt_ages_and_skew_is_symmetric() -> None:
+    fresh = aged("coinbase", "100", "101", 9_000)
+    quiet = aged("gemini", "102", "103", 2_000)
+    ages = leg_ages(fresh, quiet, 10_000)
+    assert (ages.buy_age_ns, ages.sell_age_ns, ages.skew_ns) == (1_000, 8_000, 7_000)
+    mirrored = leg_ages(quiet, fresh, 10_000)
+    assert (mirrored.buy_age_ns, mirrored.sell_age_ns, mirrored.skew_ns) == (8_000, 1_000, 7_000)
+    # A receipt stamped after `now` (clock granularity) clamps to zero, never negative.
+    assert leg_ages(aged("a", "1", "2", 11_000), quiet, 10_000).buy_age_ns == 0
+    # A top with no receipt time yields no age and no skew, never a fabricated zero.
+    unknown = leg_ages(aged("a", "1", "2", None), quiet, 10_000)
+    assert (unknown.buy_age_ns, unknown.sell_age_ns, unknown.skew_ns) == (None, 8_000, None)
+    assert ages.as_payload() == {"buy_age_ms": 0, "sell_age_ms": 0, "age_skew_ms": 0}
+    assert RouteLegAges(1_500_000, None, None).as_payload() == {
+        "buy_age_ms": 1,
+        "sell_age_ms": None,
+        "age_skew_ms": None,
+    }
+
+
+def test_route_observer_follows_one_episode_from_open_to_close() -> None:
+    events: list[RouteAgeEvent] = []
+    detector = ArbitrageDetector(threshold_pct=Decimal("0.1"), route_observer=events.append)
+    buy = aged("coinbase", "100.8", "101", 900)
+    sell = aged("gemini", "102", "102.4", 500)
+    detector.detect_for_pair("BTC-USD", [buy, sell], 10, 1_000)
+    # Evaluations are not observed unless requested; the open is.
+    assert [event.kind for event in events] == ["open"]
+    opened = events[0]
+    assert (opened.buy_exchange, opened.sell_exchange, opened.start_ns) == (
+        "coinbase",
+        "gemini",
+        10,
+    )
+    assert (opened.ages.buy_age_ns, opened.ages.sell_age_ns, opened.ages.skew_ns) == (100, 500, 400)
+    assert opened.spread_pct == (Decimal("102") - Decimal("101")) / Decimal("101") * Decimal("100")
+
+    # A wider spread reports a peak with the ages at that instant.
+    detector.detect_for_pair(
+        "BTC-USD",
+        [aged("coinbase", "100.8", "101", 1_900), aged("gemini", "103", "103.4", 500)],
+        11,
+        2_000,
+    )
+    assert events[-1].kind == "peak"
+    assert events[-1].start_ns == 10
+    assert (events[-1].ages.buy_age_ns, events[-1].ages.sell_age_ns) == (100, 1_500)
+
+    # The spread narrowing below threshold closes with the ages of that evaluation.
+    detector.detect_for_pair(
+        "BTC-USD",
+        [aged("coinbase", "100.8", "101", 2_900), aged("gemini", "101", "101.4", 2_950)],
+        12,
+        3_000,
+    )
+    closed = events[-1]
+    assert (closed.kind, closed.close_reason, closed.start_ns) == ("close", "spread_closed", 10)
+    assert (closed.ages.buy_age_ns, closed.ages.sell_age_ns, closed.ages.skew_ns) == (100, 50, 50)
+    assert closed.spread_pct == Decimal("0")
+
+
+def test_close_without_a_leg_reports_last_ages_seen_with_both_legs() -> None:
+    events: list[RouteAgeEvent] = []
+    detector = ArbitrageDetector(threshold_pct=Decimal("0.1"), route_observer=events.append)
+    detector.detect_for_pair(
+        "BTC-USD",
+        [aged("coinbase", "100.8", "101", 900), aged("gemini", "102", "102.4", 500)],
+        10,
+        1_000,
+    )
+    # Still open, ages refreshed at a later evaluation that did not set a new peak.
+    detector.detect_for_pair(
+        "BTC-USD",
+        [aged("coinbase", "100.8", "101", 4_900), aged("gemini", "102", "102.4", 4_000)],
+        11,
+        5_000,
+    )
+    assert [event.kind for event in events] == ["open"]
+    # gemini leaves the eligible set: the close must not invent an age for it.
+    detector.close_for_book("gemini", "BTC-USD", 12, 6_000)
+    closed = events[-1]
+    assert (closed.kind, closed.close_reason) == ("close", "book_ineligible")
+    assert (closed.ages.buy_age_ns, closed.ages.sell_age_ns, closed.ages.skew_ns) == (
+        100,
+        1_000,
+        900,
+    )
+    assert closed.spread_pct is None
+
+
+def test_evaluated_events_cover_every_ordered_pair_only_when_enabled() -> None:
+    events: list[RouteAgeEvent] = []
+    detector = ArbitrageDetector(
+        threshold_pct=Decimal("0.1"), route_observer=events.append, observe_evaluations=True
+    )
+    books = [
+        aged("coinbase", "100", "100.1", 900),
+        aged("gemini", "100", "100.1", 800),
+        aged("binanceus", "100", "100.1", 700),
+    ]
+    assert detector.detect_for_pair("BTC-USD", books, 10, 1_000) == []
+    assert all(event.kind == "evaluated" for event in events)
+    assert sorted((event.buy_exchange, event.sell_exchange) for event in events) == sorted(
+        (a.exchange, b.exchange) for a in books for b in books if a is not b
+    )
+    # Every evaluation carries a raw spread (negative here) and no episode identity.
+    assert all(event.spread_pct < 0 and event.start_ns is None for event in events)
+    skews = {(event.buy_exchange, event.sell_exchange): event.ages.skew_ns for event in events}
+    assert skews[("coinbase", "binanceus")] == 200 == skews[("binanceus", "coinbase")]
+
+    # Without an observer nothing is recorded and detection is unchanged.
+    silent = ArbitrageDetector(threshold_pct=Decimal("0.1"), observe_evaluations=True)
+    assert silent.detect_for_pair("BTC-USD", books, 10, 1_000) == []
+
+
+def test_observer_gets_no_ages_for_tops_without_receipt_time() -> None:
+    events: list[RouteAgeEvent] = []
+    detector = ArbitrageDetector(threshold_pct=Decimal("0.1"), route_observer=events.append)
+    detector.detect_for_pair(
+        "BTC-USD",
+        [book("coinbase", "100.8", "2", "101", "1"), book("gemini", "102", "0.5", "102.4", "1")],
+        10,
+        1_000,
+    )
+    detector.close_all(11, 2_000)
+    assert [event.kind for event in events] == ["open", "close"]
+    assert all(event.ages == RouteLegAges(None, None, None) for event in events)
+    assert events[-1].close_reason == "shutdown"
