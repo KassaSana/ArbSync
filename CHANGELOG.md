@@ -16,6 +16,9 @@
   older statistics response from replacing a newer dashboard request.
 - Count schema-v4 `opportunity_episodes` in the connected-dashboard profiler so a completed
   run can produce its report instead of failing on the removed legacy table.
+- Validate the offline lead/lag estimator: select the lag by `argmax |U(θ)|` on a symmetric
+  grid, never report a correlation outside `[-1, 1]` or a zero-overlap lag as a result,
+  and return explicit `insufficient_data` and `not_identifiable` statuses with reasons.
 
 ### Added
 
@@ -31,6 +34,9 @@
   lifetime, and crash-recovered `orphaned` closure (SQLite schema version 3).
 - Walk eligible L2 books for configured quote notionals, expose venue VWAP/fill-rate
   results and explicit insufficient depth, and price sells using matched base quantity.
+- Research lead/lag rows carry window-stability and shifted-surrogate null diagnostics,
+  `--min-overlap`, `--windows`, and `--null-surrogates` settings, and a one-at-a-time
+  `lead_lag_sensitivity.jsonl` dataset (`--no-sensitivity` skips it).
 - Persist exact-string schema-v4 pricing ledgers that separate top-of-book theoretical,
   gross depth-executable, fee impact, and net executable spread. The dashboard opportunity
   feed shows peak theoretical values, the first notional's stored net spread, and lifetime.
@@ -43,6 +49,9 @@
   matters.
 - Every configured exchange now requires a `fees.<exchange>.taker_pct` entry. There is no
   implicit zero-fee default.
+- Research reports are now `version` 2. The Fisher confidence interval fields were removed
+  from `lead_lag.jsonl` because they were invalid for dependent, grid-selected estimates;
+  regenerate any earlier lead/lag output.
 
 ### Performance
 

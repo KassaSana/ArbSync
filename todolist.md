@@ -1025,7 +1025,7 @@ legacy captures retain explicitly labelled URL-order timing. The versioned lifec
 and canonical transitions are covered by the deterministic digest and focused regression
 tests.
 
-### [ ] ARB-039 — Validate the lead/lag estimator and uncertainty reporting
+### [x] ARB-039 — Validate the lead/lag estimator and uncertainty reporting
 
 - Priority: P1
 - Estimate: 12–20 hours
@@ -1048,6 +1048,21 @@ Acceptance criteria:
   selection, or remove confidence bounds and state precisely what evidence remains.
 - Report sensitivity to tick bin, lag step, window, and minimum overlap. Keep the result
   labelled research rather than a live product metric.
+
+Resolution: the estimator moved to `tools/lead_lag.py` with the contrast, `argmax |U(θ)|`
+lag selection, and realized-variance normalization cited to Hayashi–Yoshida 2005,
+Hoffmann–Rosenbaum–Yoshida 2013, and Huth–Abergel 2014. The grid is symmetric, zero
+overlap and sub-`min_overlap` lags never enter selection, and rows report explicit
+`insufficient_data` and `not_identifiable` reasons. Validation showed that the normalized
+contrast straddles one for near-perfectly correlated asynchronous series even at the
+correct lag, so an out-of-range value nulls the bounded correlation and exposes the raw
+ratio instead of vetoing the lag. The Fisher interval was removed; window stability and
+a circularly shifted surrogate null with a permutation p-value replace it, calibrated on
+30 seeded independent walks (29 retained). Planted ±/zero lags, dropout, unequal
+activity, noise, constant, disjoint, too-few, tied, grid-edge, and null cases are tested,
+and a Hypothesis property pins the overlap sweep to brute force. A one-at-a-time
+sensitivity dataset is written per run; the committed 150-second capture analyses in
+about 27 seconds.
 
 ### [ ] ARB-040 — Measure absolute age and cross-venue receipt skew before gating routes
 

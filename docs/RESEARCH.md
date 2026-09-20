@@ -13,8 +13,8 @@ uv run python tools/research.py `
 ```
 
 The output directory contains JSONL datasets for episode lifetimes,
-fee-adjusted/executable-size survival by notional, venue fill rates, and lead/lag,
-plus `report.json` with the replay digest, row counts, and measurement metadata.
+fee-adjusted/executable-size survival by notional, venue fill rates, lead/lag, and
+lead/lag sensitivity, plus `report.json` with the replay digest, row counts, and measurement metadata.
 The datasets are files rather than SQLite tables so research runs cannot affect
 product persistence or ingestion.
 
@@ -35,17 +35,86 @@ product persistence or ingestion.
 
 The tool builds midpoint ticks from versioned canonical post-apply replay
 observations, bins them at 250 ms by default, converts them to asynchronous
-log-return intervals, and calculates Hayashi–Yoshida overlap covariance across
-a configurable lag grid.
-The normalized input deltas remain available separately for protocol auditing;
-they are not a price source. Lead/lag datasets produced by ARB-035 before this
-observation correction are not valid evidence and must be regenerated.
+log-return intervals, and estimates lead/lag with the Hayashi–Yoshida contrast
+in `tools/lead_lag.py`. The normalized input deltas remain available separately
+for protocol auditing; they are not a price source. Lead/lag datasets produced
+before the ARB-036 observation correction or before the ARB-039 estimator
+validation (research report `version` 1) are not valid evidence and must be
+regenerated; version 2 rows are not comparable with version 1 rows.
+
+### Estimator
+
+With left returns `r_i` on intervals `I_i`, right returns `s_j` on intervals
+`J_j`, and lag `θ`:
+
+- Contrast `U(θ) = Σ r_i · s_j · 1{I_i ∩ (J_j − θ) ≠ ∅}` (Hayashi & Yoshida,
+  *Bernoulli* 11(2), 2005). Intervals that only touch do not overlap.
+- Lag estimate `θ* = argmax |U(θ)|` over a symmetric grid `±K·step`,
+  `K = ⌊max_lag / step⌋` (Hoffmann, Rosenbaum & Yoshida, *Bernoulli* 19(2),
+  2013). Ties resolve to the smallest `|θ|`.
+- Reported correlation `U(θ*) / √(Σ r_i² · Σ s_j²)` (Huth & Abergel, *Journal
+  of Empirical Finance* 26, 2014).
+
 Positive lead time means the reported leader's return series is estimated to move
-before the follower's series. Internally, a positive lag shifts the follower's
-returns earlier to align them with the leader. The selected correlation includes an approximate
-95% Fisher-transform interval based on overlap count; overlapping returns are not
-independent, so this interval is directional research evidence rather than a
-formal product statistic.
+before the follower's. Internally, a positive lag shifts the follower's returns
+earlier to align them with the leader.
+
+The normalized contrast is consistent for the true correlation but not bounded
+by one in finite samples: every return is multiplied by each partner return it
+overlaps while the denominator counts it once, so a near-perfectly correlated
+pair sampled asynchronously straddles one. The lag estimate does not depend on
+the normalization, so an out-of-range value leaves the lag status alone;
+`hayashi_yoshida_correlation` is `null`, the raw ratio remains in
+`normalized_contrast`, and `correlation_out_of_range` is `true`. A row never
+carries `hayashi_yoshida_correlation` outside `[-1, 1]`.
+
+The contrast is flat over a plateau one sampling interval wide around the true
+lag: a lag misaligned by less than one interval overlaps two returns on the
+other side and is not distinguishable. The lag step therefore cannot resolve
+below the typical inter-tick spacing, which the tick bin only bounds from below.
+
+### Statuses
+
+| `status` | `reason` | Meaning |
+| --- | --- | --- |
+| `ok` | — | A lag was selected, cleared the null screen, and sits inside the grid. |
+| `insufficient_data` | `too_few_observations` | Fewer than two return intervals on a side. |
+| `insufficient_data` | `constant_returns` | Zero or non-finite realized variance on a side. |
+| `insufficient_data` | `no_overlap` | No interval pair overlaps at any grid lag. |
+| `insufficient_data` | `too_few_overlaps` | No grid lag reaches `--min-overlap` overlapping pairs. |
+| `not_identifiable` | `tied_maximum` | Lags of opposite sign share the maximum; the leader is ambiguous. |
+| `not_identifiable` | `maximum_at_grid_edge` | The maximum sits at `±grid_max_lag_ns`; raise `--max-lag-ms`. |
+| `not_identifiable` | `null_not_rejected` | The surrogate null was not rejected at 0.05. |
+
+Zero overlap is never reported as a correlation of zero, and lags below
+`--min-overlap` never enter selection. Non-`ok` rows keep whichever diagnostics
+were computed before the ladder stopped.
+
+### Uncertainty
+
+There is no confidence interval. Overlapping asynchronous returns are dependent,
+and the reported value is a maximum selected over a lag grid, so a Fisher-style
+interval on the overlap count would be wrong on both counts. Two diagnostics
+replace it:
+
+- **Window stability** (`window_*`): the capture span is split into
+  `--windows` equal windows and the estimate is repeated in each.
+  `window_agreement_fraction` is the share of `ok` windows whose leader sign
+  matches the full sample, or `null` with fewer than two `ok` windows.
+- **Shifted-surrogate null** (`null_*`): the right series is circularly
+  rotated by `±base·(1 + 5k)` for `k = 1..--null-surrogates`, `base` being the
+  larger of the max lag and lag step, and the grid maximum `|ρ|` is recomputed.
+  Rotation preserves each series' variance and overlap coverage while
+  destroying any lead/lag inside the grid. `null_p_value` is the permutation
+  form `(exceedances + 1) / (count + 1)`; at least 10 surrogates per sign are
+  required so it can reach 0.05. Surrogates share the same data, so this is a
+  screening diagnostic for grid-selection noise, not a calibrated test. On 30
+  seeded independent random-walk pairs it retained 29 nulls.
+
+`lead_lag_sensitivity.jsonl` repeats the estimate one knob at a time at half and
+double the configured tick bin, lag step, window count, and minimum overlap,
+with null surrogates disabled; the `baseline` variant matches `lead_lag.jsonl`
+apart from the null screen. `--no-sensitivity` skips it.
 
 The report records a measurement floor of at least the larger of the tick-bin and
 lag-step sizes. Local receive timestamps include each venue's network path and
