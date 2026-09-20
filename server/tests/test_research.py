@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import math
+import random
 from decimal import Decimal
 
+import pytest
 from arb.replay import ReplayObservation
-from research import _hy_correlation, _lead_lag_rows, _price_series, _survival_rows
+from lead_lag import price_series
+from research import (
+    LeadLagSettings,
+    _lead_lag_rows,
+    _lead_lag_sensitivity_rows,
+    _sensitivity_variants,
+    _survival_rows,
+)
 
 
 def _observation(
@@ -26,53 +36,121 @@ def _observation(
     )
 
 
-def test_hayashi_yoshida_correlation_aligns_asynchronous_intervals() -> None:
-    from research import ReturnInterval
+def _shifted_pair(shift_ns: int, count: int = 400, seed: int = 7) -> list[ReplayObservation]:
+    """One seeded random-walk path sampled every 100 ms on two venues, coinbase delayed.
 
-    left = [
-        ReturnInterval(0, 10, 1.0),
-        ReturnInterval(10, 20, 1.0),
-    ]
-    right = [
-        ReturnInterval(5, 15, 1.0),
-        ReturnInterval(15, 25, 1.0),
-    ]
+    The lag grid step must be at least the 100 ms sampling interval: a lag that
+    misaligns by less than one interval overlaps two returns on the other side
+    and sits on a plateau of the contrast, so it cannot be told apart.
+    """
+    rng = random.Random(seed)
+    observations: list[ReplayObservation] = []
+    mid = 100.0
+    for index in range(count):
+        mid *= math.exp(rng.gauss(0.0, 0.01))
+        bid = Decimal(f"{mid - 1:.6f}")
+        ask = Decimal(f"{mid + 1:.6f}")
+        stamp = (index + 1) * 100_000_000
+        observations.append(_observation("gemini", stamp, str(bid), str(ask)))
+        observations.append(_observation("coinbase", stamp + shift_ns, str(bid), str(ask)))
+    return observations
 
-    correlation, overlaps = _hy_correlation(left, right, 5)
 
-    assert correlation == 1.0
-    assert overlaps == 2
+SETTINGS = LeadLagSettings(
+    tick_bin_ns=1,
+    max_lag_ns=1_000_000_000,
+    lag_step_ns=500_000_000,
+    min_overlap=5,
+    windows=2,
+    null_surrogates=10,
+)
 
 
 def test_lead_lag_reports_the_leader_and_measurement_direction() -> None:
-    observations = [
-        _observation("gemini", 1_000_000_000, "99", "101"),
-        _observation("gemini", 2_000_000_000, "100", "102"),
-        _observation("gemini", 3_000_000_000, "97.98", "99.98"),
-        _observation("gemini", 4_000_000_000, "100.9494", "102.9494"),
-        _observation("gemini", 5_000_000_000, "99.420159", "101.420159"),
-        _observation("gemini", 6_000_000_000, "101.930663", "103.930663"),
-        _observation("coinbase", 1_500_000_000, "99", "101"),
-        _observation("coinbase", 2_500_000_000, "100", "102"),
-        _observation("coinbase", 3_500_000_000, "97.98", "99.98"),
-        _observation("coinbase", 4_500_000_000, "100.9494", "102.9494"),
-        _observation("coinbase", 5_500_000_000, "99.420159", "101.420159"),
-        _observation("coinbase", 6_500_000_000, "101.930663", "103.930663"),
-    ]
-
-    [row] = _lead_lag_rows(
-        observations,
-        tick_bin_ns=1,
-        max_lag_ns=1_000_000_000,
-        lag_step_ns=500_000_000,
-    )
+    [row] = _lead_lag_rows(_shifted_pair(500_000_000), SETTINGS)
 
     assert row["status"] == "ok"
+    assert row["reason"] is None
     assert row["leader_exchange"] == "gemini"
     assert row["follower_exchange"] == "coinbase"
     assert row["estimated_lead_ns"] == 500_000_000
-    assert row["hayashi_yoshida_correlation"] == 1.0
-    assert row["correlation_ci_95_low"] <= 1.0 <= row["correlation_ci_95_high"]
+    assert row["hayashi_yoshida_correlation"] == pytest.approx(1.0)
+    assert -1.0 <= row["hayashi_yoshida_correlation"] <= 1.0
+    assert "correlation_ci_95_low" not in row
+    assert row["null_surrogate_count"] == 20
+    assert row["null_exceedance_fraction"] == 0.0
+    assert row["window_count"] == 2
+    assert row["window_agreement_fraction"] == 1.0
+
+
+def test_sensitivity_variants_are_one_at_a_time_without_null_surrogates() -> None:
+    variants = dict(_sensitivity_variants(SETTINGS))
+
+    assert list(variants) == [
+        "baseline",
+        "tick_bin_half",
+        "tick_bin_double",
+        "lag_step_half",
+        "lag_step_double",
+        "windows_half",
+        "windows_double",
+        "min_overlap_half",
+        "min_overlap_double",
+    ]
+    assert all(candidate.null_surrogates == 0 for candidate in variants.values())
+    assert variants["baseline"] == LeadLagSettings(
+        tick_bin_ns=1,
+        max_lag_ns=1_000_000_000,
+        lag_step_ns=500_000_000,
+        min_overlap=5,
+        windows=2,
+        null_surrogates=0,
+    )
+    assert variants["lag_step_half"].lag_step_ns == 250_000_000
+    assert variants["windows_half"].windows == 1
+    assert variants["min_overlap_double"].min_overlap == 10
+
+
+def test_sensitivity_rows_match_the_primary_estimate_at_baseline() -> None:
+    observations = _shifted_pair(500_000_000)
+    [primary] = _lead_lag_rows(observations, SETTINGS)
+    rows = _lead_lag_sensitivity_rows(observations, SETTINGS)
+
+    assert len(rows) == 9
+    assert {row["module"] for row in rows} == {"lead_lag_sensitivity"}
+    [baseline] = [row for row in rows if row["variant"] == "baseline"]
+    assert baseline["estimated_lead_ns"] == primary["estimated_lead_ns"]
+    assert baseline["leader_exchange"] == primary["leader_exchange"]
+    assert baseline["null_surrogates"] == 0
+    for row in rows:
+        assert row["status"] in {"ok", "insufficient_data", "not_identifiable"}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"tick_bin_ns": 0},
+        {"lag_step_ns": 0},
+        {"max_lag_ns": -1},
+        {"lag_step_ns": 2_000_000_000},
+        {"min_overlap": 0},
+        {"windows": 0},
+        {"null_surrogates": -1},
+        {"null_surrogates": 9},
+    ],
+)
+def test_lead_lag_settings_reject_invalid_values(overrides: dict[str, int]) -> None:
+    values = {
+        "tick_bin_ns": 1,
+        "max_lag_ns": 1_000_000_000,
+        "lag_step_ns": 100_000_000,
+        "min_overlap": 30,
+        "windows": 4,
+        "null_surrogates": 20,
+    }
+    values.update(overrides)
+    with pytest.raises(ValueError):
+        LeadLagSettings(**values).validate()
 
 
 def test_price_series_uses_canonical_post_apply_observations() -> None:
@@ -89,7 +167,7 @@ def test_price_series_uses_canonical_post_apply_observations() -> None:
         _observation("gemini", 5, "100", "102", eligible=False),
     ]
 
-    series = _price_series(observations, tick_bin_ns=1)
+    series = price_series(observations, tick_bin_ns=1)
 
     assert [tick.price for tick in series[("BTC-USD", "gemini")]] == [
         Decimal("101"),

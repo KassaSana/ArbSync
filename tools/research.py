@@ -12,10 +12,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import math
 from collections import defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from itertools import combinations
 from pathlib import Path
@@ -28,19 +27,42 @@ from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager
 from arb.pricing import DepthSampler
 from arb.replay import ReplayObservation, ReplayReport, replay_frames
+from lead_lag import analyze_pair, lag_grid, lead_lag_row, price_series
+
+ESTIMATOR_REFERENCES = (
+    "Hayashi & Yoshida (2005) Bernoulli 11(2) overlap covariance; "
+    "Hoffmann, Rosenbaum & Yoshida (2013) Bernoulli 19(2) argmax |U(theta)| lag selection; "
+    "Huth & Abergel (2014) J. Empirical Finance 26 realized-variance normalization"
+)
+
+
+MIN_NULL_SURROGATES = 10
 
 
 @dataclass(frozen=True)
-class PriceTick:
-    timestamp_ns: int
-    price: Decimal
+class LeadLagSettings:
+    tick_bin_ns: int
+    max_lag_ns: int
+    lag_step_ns: int
+    min_overlap: int
+    windows: int
+    null_surrogates: int
 
-
-@dataclass(frozen=True)
-class ReturnInterval:
-    start_ns: int
-    end_ns: int
-    value: float
+    def validate(self) -> None:
+        if self.tick_bin_ns <= 0 or self.max_lag_ns < 0 or self.lag_step_ns <= 0:
+            raise ValueError("research time buckets and lag steps must be positive")
+        if self.max_lag_ns > 0 and self.lag_step_ns > self.max_lag_ns:
+            raise ValueError("lag step cannot exceed the maximum lag")
+        if self.min_overlap < 1 or self.windows < 1 or self.null_surrogates < 0:
+            raise ValueError(
+                "min overlap and windows must be positive; null surrogates cannot be negative"
+            )
+        if 0 < self.null_surrogates < MIN_NULL_SURROGATES:
+            # Two shifts per surrogate; (0 + 1) / (2n + 1) must be able to reach 0.05.
+            raise ValueError(
+                f"null surrogates must be 0 or at least {MIN_NULL_SURROGATES} so the "
+                "permutation p-value can fall to 0.05"
+            )
 
 
 def _adapter_depths(header: CaptureHeader) -> dict[str, int | None]:
@@ -171,114 +193,10 @@ def _survival_rows(episodes: Iterable[dict[str, object]]) -> list[dict[str, obje
     return rows
 
 
-def _price_series(
-    observations: Iterable[ReplayObservation], tick_bin_ns: int
-) -> dict[tuple[str, str], list[PriceTick]]:
-    latest: dict[tuple[str, str, int], PriceTick] = {}
-    for observation in observations:
-        if not observation.eligible:
-            continue
-        if observation.wall_ns <= 0:
-            continue
-        bid = Decimal(observation.best_bid_price)
-        ask = Decimal(observation.best_ask_price)
-        if bid <= 0 or ask <= 0:
-            continue
-        key = (observation.pair, observation.exchange, observation.wall_ns // tick_bin_ns)
-        latest[key] = PriceTick(observation.wall_ns, (bid + ask) / Decimal(2))
-
-    series: dict[tuple[str, str], list[PriceTick]] = defaultdict(list)
-    for (pair, exchange, _), tick in latest.items():
-        series[(pair, exchange)].append(tick)
-    for ticks in series.values():
-        ticks.sort(key=lambda tick: tick.timestamp_ns)
-    return dict(series)
-
-
-def _return_intervals(ticks: list[PriceTick]) -> list[ReturnInterval]:
-    intervals: list[ReturnInterval] = []
-    for previous, current in zip(ticks, ticks[1:]):
-        if (
-            current.timestamp_ns <= previous.timestamp_ns
-            or previous.price <= 0
-            or current.price <= 0
-        ):
-            continue
-        value = math.log(float(current.price / previous.price))
-        if math.isfinite(value):
-            intervals.append(ReturnInterval(previous.timestamp_ns, current.timestamp_ns, value))
-    return intervals
-
-
-def _hy_overlap_products(
-    left: list[ReturnInterval], right: list[ReturnInterval], lag_ns: int
-) -> tuple[float, int]:
-    """Return Hayashi-Yoshida overlap products and the number of overlaps.
-
-    Positive lag shifts the right-hand series earlier, so a positive estimated
-    lag means the left-hand venue moved first by that amount.
-    """
-    total = 0.0
-    overlaps = 0
-    right_index = 0
-    for left_interval in left:
-        while (
-            right_index < len(right)
-            and right[right_index].end_ns - lag_ns <= left_interval.start_ns
-        ):
-            right_index += 1
-        candidate = right_index
-        while candidate < len(right):
-            right_interval = right[candidate]
-            shifted_start = right_interval.start_ns - lag_ns
-            shifted_end = right_interval.end_ns - lag_ns
-            if shifted_start >= left_interval.end_ns:
-                break
-            if min(left_interval.end_ns, shifted_end) > max(left_interval.start_ns, shifted_start):
-                total += left_interval.value * right_interval.value
-                overlaps += 1
-            if shifted_end <= left_interval.end_ns:
-                candidate += 1
-            else:
-                break
-    return total, overlaps
-
-
-def _hy_correlation(
-    left: list[ReturnInterval], right: list[ReturnInterval], lag_ns: int
-) -> tuple[float | None, int]:
-    covariance, overlaps = _hy_overlap_products(left, right, lag_ns)
-    left_variance = sum(interval.value * interval.value for interval in left)
-    right_variance = sum(interval.value * interval.value for interval in right)
-    denominator = math.sqrt(left_variance * right_variance)
-    if denominator == 0 or not math.isfinite(denominator):
-        return None, overlaps
-    return covariance / denominator, overlaps
-
-
-def _correlation_interval(correlation: float, overlaps: int) -> tuple[float, float]:
-    """Approximate a 95% Fisher confidence interval.
-
-    Overlapping asynchronous returns are not independent, so this interval is
-    deliberately labelled approximate in the research documentation.
-    """
-    if overlaps <= 3:
-        return -1.0, 1.0
-    bounded = max(-0.999999, min(0.999999, correlation))
-    margin = 1.96 / math.sqrt(overlaps - 3)
-    lower = -1.0 if correlation <= -1.0 else math.tanh(math.atanh(bounded) - margin)
-    upper = 1.0 if correlation >= 1.0 else math.tanh(math.atanh(bounded) + margin)
-    return max(-1.0, lower), min(1.0, upper)
-
-
 def _lead_lag_rows(
-    observations: Iterable[ReplayObservation],
-    *,
-    tick_bin_ns: int,
-    max_lag_ns: int,
-    lag_step_ns: int,
+    observations: Iterable[ReplayObservation], settings: LeadLagSettings
 ) -> list[dict[str, object]]:
-    series = _price_series(observations, tick_bin_ns)
+    series = price_series(observations, settings.tick_bin_ns)
     grouped: dict[str, list[str]] = defaultdict(list)
     for pair, exchange in series:
         grouped[pair].append(exchange)
@@ -287,46 +205,70 @@ def _lead_lag_rows(
     for pair in sorted(grouped):
         exchanges = sorted(set(grouped[pair]))
         for left_exchange, right_exchange in combinations(exchanges, 2):
-            left_returns = _return_intervals(series[(pair, left_exchange)])
-            right_returns = _return_intervals(series[(pair, right_exchange)])
-            estimates: list[tuple[float, int, int]] = []
-            for lag_ns in range(-max_lag_ns, max_lag_ns + 1, lag_step_ns):
-                correlation, overlaps = _hy_correlation(left_returns, right_returns, lag_ns)
-                if correlation is not None:
-                    estimates.append((correlation, lag_ns, overlaps))
-            if not estimates:
-                rows.append(
-                    {
-                        "module": "lead_lag",
-                        "pair": pair,
-                        "left_exchange": left_exchange,
-                        "right_exchange": right_exchange,
-                        "status": "insufficient_data",
-                        "reason": "no non-constant overlapping return series",
-                    }
-                )
-                continue
-            correlation, lag_ns, overlaps = max(
-                estimates, key=lambda item: (item[0], -abs(item[1]))
+            analysis = analyze_pair(
+                series[(pair, left_exchange)],
+                series[(pair, right_exchange)],
+                max_lag_ns=settings.max_lag_ns,
+                lag_step_ns=settings.lag_step_ns,
+                min_overlap=settings.min_overlap,
+                windows=settings.windows,
+                null_surrogates=settings.null_surrogates,
             )
-            low, high = _correlation_interval(correlation, overlaps)
-            if lag_ns >= 0:
-                leader, follower, lead_ns = left_exchange, right_exchange, lag_ns
-            else:
-                leader, follower, lead_ns = right_exchange, left_exchange, -lag_ns
+            rows.append(
+                lead_lag_row(
+                    pair,
+                    left_exchange,
+                    right_exchange,
+                    analysis,
+                    min_overlap=settings.min_overlap,
+                )
+            )
+    return rows
+
+
+def _sensitivity_variants(settings: LeadLagSettings) -> list[tuple[str, LeadLagSettings]]:
+    """One-at-a-time half and double variants of each knob, null surrogates disabled."""
+    base = replace(settings, null_surrogates=0)
+    variants = [("baseline", base)]
+    for name, field in (
+        ("tick_bin", "tick_bin_ns"),
+        ("lag_step", "lag_step_ns"),
+        ("windows", "windows"),
+        ("min_overlap", "min_overlap"),
+    ):
+        current = getattr(base, field)
+        for label, value in (("half", max(1, current // 2)), ("double", current * 2)):
+            candidate = replace(base, **{field: value})
+            if field == "lag_step_ns" and base.max_lag_ns > 0 and value > base.max_lag_ns:
+                continue
+            variants.append((f"{name}_{label}", candidate))
+    return variants
+
+
+def _lead_lag_sensitivity_rows(
+    observations: list[ReplayObservation], settings: LeadLagSettings
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for variant, candidate in _sensitivity_variants(settings):
+        for row in _lead_lag_rows(observations, candidate):
             rows.append(
                 {
-                    "module": "lead_lag",
-                    "pair": pair,
-                    "leader_exchange": leader,
-                    "follower_exchange": follower,
-                    "estimated_lead_ns": lead_ns,
-                    "estimated_lead_ms": lead_ns / 1_000_000,
-                    "hayashi_yoshida_correlation": correlation,
-                    "correlation_ci_95_low": low,
-                    "correlation_ci_95_high": high,
-                    "overlap_count": overlaps,
-                    "status": "ok",
+                    "module": "lead_lag_sensitivity",
+                    "variant": variant,
+                    "tick_bin_ns": candidate.tick_bin_ns,
+                    "lag_step_ns": candidate.lag_step_ns,
+                    "windows": candidate.windows,
+                    "min_overlap": candidate.min_overlap,
+                    "null_surrogates": 0,
+                    "pair": row["pair"],
+                    "left_exchange": row["left_exchange"],
+                    "right_exchange": row["right_exchange"],
+                    "status": row["status"],
+                    "reason": row["reason"],
+                    "leader_exchange": row.get("leader_exchange"),
+                    "estimated_lead_ns": row.get("estimated_lead_ns"),
+                    "hayashi_yoshida_correlation": row["hayashi_yoshida_correlation"],
+                    "window_agreement_fraction": row["window_agreement_fraction"],
                 }
             )
     return rows
@@ -339,33 +281,57 @@ def analyze_capture(
     tick_bin_ns: int = 250_000_000,
     max_lag_ns: int = 1_000_000_000,
     lag_step_ns: int = 100_000_000,
+    min_overlap: int = 30,
+    windows: int = 4,
+    null_surrogates: int = 20,
+    sensitivity: bool = True,
 ) -> dict[str, object]:
     """Build all file-backed research datasets from one replay report."""
-    if tick_bin_ns <= 0 or max_lag_ns < 0 or lag_step_ns <= 0:
-        raise ValueError("research time buckets and lag steps must be positive")
-    episodes = _canonical_episode_rows(report)
-    survival = _survival_rows(episodes)
-    fill_rates = [{"module": "venue_fill_rate", **row} for row in sampler.tracker.rows()]
-    lead_lag = _lead_lag_rows(
-        report.observations,
+    settings = LeadLagSettings(
         tick_bin_ns=tick_bin_ns,
         max_lag_ns=max_lag_ns,
         lag_step_ns=lag_step_ns,
+        min_overlap=min_overlap,
+        windows=windows,
+        null_surrogates=null_surrogates,
+    )
+    settings.validate()
+    episodes = _canonical_episode_rows(report)
+    survival = _survival_rows(episodes)
+    fill_rates = [{"module": "venue_fill_rate", **row} for row in sampler.tracker.rows()]
+    lead_lag = _lead_lag_rows(report.observations, settings)
+    lead_lag_sensitivity = (
+        _lead_lag_sensitivity_rows(report.observations, settings) if sensitivity else []
     )
     return {
         "episodes": episodes,
         "survival": survival,
         "fill_rates": fill_rates,
         "lead_lag": lead_lag,
+        "lead_lag_sensitivity": lead_lag_sensitivity,
         "measurement": {
             "price_series_source": "canonical_post_apply_observations",
             "replay_observation_version": 1,
             "estimator": "Hayashi-Yoshida asynchronous return correlation",
+            "estimator_references": ESTIMATOR_REFERENCES,
+            "lag_selection": "argmax |U(theta)| over a symmetric grid; ties resolve to the smallest |theta|",
             "tick_bin_ns": tick_bin_ns,
             "lag_step_ns": lag_step_ns,
             "max_lag_ns": max_lag_ns,
+            "grid_max_lag_ns": lag_grid(max_lag_ns, lag_step_ns).max_lag_ns,
+            "min_overlap": min_overlap,
+            "windows": windows,
+            "null_surrogates": null_surrogates,
             "measurement_floor_ns": max(tick_bin_ns, lag_step_ns),
-            "confidence_interval": "approximate 95% Fisher transform; overlap dependence remains",
+            "uncertainty": (
+                "no confidence interval; window stability and a shifted-surrogate null "
+                "for lag-grid selection are reported instead"
+            ),
+            "sensitivity": (
+                "one-at-a-time half and double of tick bin, lag step, windows, and min overlap"
+                if sensitivity
+                else "disabled"
+            ),
             "clock_skew_warning": "local receive timestamps include network path and exchange clock effects",
         },
     }
@@ -388,6 +354,10 @@ async def run_research(
     tick_bin_ns: int,
     max_lag_ns: int,
     lag_step_ns: int,
+    min_overlap: int = 30,
+    windows: int = 4,
+    null_surrogates: int = 20,
+    sensitivity: bool = True,
     allow_lossy: bool = False,
 ) -> dict[str, object]:
     header, frames = read_capture(capture, allow_lossy=allow_lossy)
@@ -398,29 +368,26 @@ async def run_research(
         tick_bin_ns=tick_bin_ns,
         max_lag_ns=max_lag_ns,
         lag_step_ns=lag_step_ns,
+        min_overlap=min_overlap,
+        windows=windows,
+        null_surrogates=null_surrogates,
+        sensitivity=sensitivity,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "episodes": "episodes.jsonl",
+        "survival": "survival_by_notional.jsonl",
+        "fill_rates": "venue_fill_rates.jsonl",
+        "lead_lag": "lead_lag.jsonl",
+        "lead_lag_sensitivity": "lead_lag_sensitivity.jsonl",
+    }
     counts = {
-        "episodes": _write_jsonl(
-            output_dir / "episodes.jsonl",
-            cast(list[dict[str, object]], datasets["episodes"]),
-        ),
-        "survival": _write_jsonl(
-            output_dir / "survival_by_notional.jsonl",
-            cast(list[dict[str, object]], datasets["survival"]),
-        ),
-        "fill_rates": _write_jsonl(
-            output_dir / "venue_fill_rates.jsonl",
-            cast(list[dict[str, object]], datasets["fill_rates"]),
-        ),
-        "lead_lag": _write_jsonl(
-            output_dir / "lead_lag.jsonl",
-            cast(list[dict[str, object]], datasets["lead_lag"]),
-        ),
+        name: _write_jsonl(output_dir / filename, cast(list[dict[str, object]], datasets[name]))
+        for name, filename in files.items()
     }
     metadata: dict[str, object] = {
         "format": "arbsync-research",
-        "version": 1,
+        "version": 2,
         "capture": str(capture),
         "replay_digest": replay_report.digest,
         "snapshots_consumed": replay_report.snapshots_consumed,
@@ -445,6 +412,26 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-lag-ms", type=float, default=1000.0)
     parser.add_argument("--lag-step-ms", type=float, default=100.0)
     parser.add_argument(
+        "--min-overlap",
+        type=int,
+        default=30,
+        help="lags with fewer overlapping return pairs never enter lag selection",
+    )
+    parser.add_argument(
+        "--windows", type=int, default=4, help="equal time windows for leader stability"
+    )
+    parser.add_argument(
+        "--null-surrogates",
+        type=int,
+        default=20,
+        help="displacement surrogates per sign for the grid-selection null; 0 disables",
+    )
+    parser.add_argument(
+        "--no-sensitivity",
+        action="store_true",
+        help="skip the one-at-a-time lead/lag sensitivity dataset",
+    )
+    parser.add_argument(
         "--allow-lossy",
         action="store_true",
         help="analyze captures that declare dropped frames and record that override",
@@ -454,19 +441,30 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _parser().parse_args()
-    values = (args.tick_bin_ms, args.max_lag_ms, args.lag_step_ms)
-    if args.tick_bin_ms <= 0 or args.max_lag_ms < 0 or args.lag_step_ms <= 0:
-        raise SystemExit(
-            "tick-bin-ms and lag-step-ms must be positive; max-lag-ms cannot be negative"
-        )
+    settings = LeadLagSettings(
+        tick_bin_ns=int(args.tick_bin_ms * 1_000_000),
+        max_lag_ns=int(args.max_lag_ms * 1_000_000),
+        lag_step_ns=int(args.lag_step_ms * 1_000_000),
+        min_overlap=args.min_overlap,
+        windows=args.windows,
+        null_surrogates=args.null_surrogates,
+    )
+    try:
+        settings.validate()
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     metadata = asyncio.run(
         run_research(
             args.capture,
             load_config(args.config),
             args.output_dir,
-            tick_bin_ns=int(values[0] * 1_000_000),
-            max_lag_ns=int(values[1] * 1_000_000),
-            lag_step_ns=int(values[2] * 1_000_000),
+            tick_bin_ns=settings.tick_bin_ns,
+            max_lag_ns=settings.max_lag_ns,
+            lag_step_ns=settings.lag_step_ns,
+            min_overlap=settings.min_overlap,
+            windows=settings.windows,
+            null_surrogates=settings.null_surrogates,
+            sensitivity=not args.no_sensitivity,
             allow_lossy=args.allow_lossy,
         )
     )
