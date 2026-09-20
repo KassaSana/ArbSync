@@ -233,8 +233,13 @@ class OrderBookManager:
             best_ask_size=best_ask.size,
             sequence=book.sequence,
             timestamp_ns=book.last_timestamp_ns,
+            received_monotonic_ns=book.last_received_monotonic_ns,
         )
         return book.cached_top
+
+    def now_monotonic_ns(self) -> int:
+        """The manager's monotonic clock, so age arithmetic outside it uses the same source."""
+        return self._clock()
 
     def eligibility(
         self, exchange: str, pair: str, now_monotonic_ns: int | None = None

@@ -470,3 +470,27 @@ def test_eligible_books_matches_per_venue_eligibility_sweep() -> None:
     manager.set_exchange_connected("binance", False)
     assert manager.eligible_books("BTC-USD", 1_000) == sweep("BTC-USD")
     assert len(manager.eligible_books("BTC-USD", 1_000)) == 2
+
+
+def test_top_of_book_carries_receipt_time_of_the_event_that_produced_it() -> None:
+    now = [1_000]
+    manager = OrderBookManager(max_age_seconds=1.0, clock=lambda: now[0])
+    manager.apply(
+        event(kind=EventKind.SNAPSHOT, sequence=1, bids=[("100", "1")], asks=[("101", "1")]),
+        received_monotonic_ns=1_000,
+    )
+    assert manager.top_of_book("gemini", "BTC-USD").received_monotonic_ns == 1_000
+    # A delta touching a deep level still stamps the top, because the top is the
+    # canonical state after that event; age is measured from the last accepted event.
+    manager.apply(
+        event(kind=EventKind.DELTA, sequence=2, bids=[("90", "1")], asks=[]),
+        received_monotonic_ns=1_500,
+    )
+    top = manager.top_of_book("gemini", "BTC-USD")
+    assert top.received_monotonic_ns == 1_500
+    assert top.best_bid_price == Decimal("100")
+    assert "received_monotonic_ns" not in top.as_payload()
+    # The eligibility path returns the same stamped top.
+    now[0] = 2_000
+    assert manager.eligible_top_of_book("gemini", "BTC-USD", now[0]).received_monotonic_ns == 1_500
+    assert manager.now_monotonic_ns() == 2_000

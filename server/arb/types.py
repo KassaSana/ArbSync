@@ -50,6 +50,11 @@ class TopOfBook:
     best_ask_size: Decimal
     sequence: int
     timestamp_ns: int
+    # Local monotonic receipt time of the accepted event that produced this top.
+    # It is the freshness authority for route-leg age diagnostics; `timestamp_ns`
+    # is the exchange's clock and never is. Deliberately absent from the wire
+    # payload so the WebSocket shape and the replay digest are unchanged.
+    received_monotonic_ns: int | None = None
 
     def as_payload(self) -> dict[str, object]:
         return {
