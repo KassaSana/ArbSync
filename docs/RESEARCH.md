@@ -76,7 +76,13 @@ state the tick of the capture it rests on.
   peak profit per quote asset. USD and USDT totals are never added together.
 
 No gate is applied. The sensitivity table exists so a cutoff can be argued from a
-faithful capture; the decision is recorded in this section once the evidence is in.
+faithful capture. The first such analysis, on a lossless 45-minute three-venue capture
+recorded 2026-09-20, found 132 episodes with zero fee survivors at every notional, one
+`book_ineligible` close, no episode opening with a leg older than 5 s, and an open rate
+per comparison that did not trend with age or skew; at open the older leg's age equals
+the skew because detection runs on the updating leg's event. The pre-stated rule for
+proposing a gate was not met, so none is adopted. Datasets and the decision record are
+in [`artifacts/research/arb-040/`](../artifacts/research/arb-040/README.md).
 
 ## Lead/lag method and limits
 

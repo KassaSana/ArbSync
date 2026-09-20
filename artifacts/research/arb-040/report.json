@@ -1,0 +1,56 @@
+{
+  "allow_lossy": false,
+  "capture": "var\\capture-arb040-2026-09-20_165459.jsonl.gz",
+  "capture_integrity": "lossless",
+  "capture_provenance": "complete",
+  "dataset_counts": {
+    "age_skew_bands": 11,
+    "age_skew_gate_sensitivity": 9,
+    "episodes": 132,
+    "fill_rates": 216,
+    "lead_lag": 27,
+    "lead_lag_sensitivity": 0,
+    "route_leg_ages": 132,
+    "survival": 4
+  },
+  "format": "arbsync-research",
+  "measurement": {
+    "age_bands_ms": [
+      100,
+      500,
+      1000,
+      5000,
+      15000
+    ],
+    "age_dimension": "older leg's local monotonic receipt age at episode open",
+    "age_skew_note": "ages are local receipt ages, never exchange clocks; connection state and sequence continuity stay in close_reason and the lifecycle trace, and no route gate is applied",
+    "clock_skew_warning": "local receive timestamps include network path and exchange clock effects",
+    "estimator": "Hayashi-Yoshida asynchronous return correlation",
+    "estimator_references": "Hayashi & Yoshida (2005) Bernoulli 11(2) overlap covariance; Hoffmann, Rosenbaum & Yoshida (2013) Bernoulli 19(2) argmax |U(theta)| lag selection; Huth & Abergel (2014) J. Empirical Finance 26 realized-variance normalization",
+    "grid_max_lag_ns": 1000000000,
+    "lag_selection": "argmax |U(theta)| over a symmetric grid; ties resolve to the smallest |theta|",
+    "lag_step_ns": 100000000,
+    "max_lag_ns": 1000000000,
+    "measurement_floor_ns": 250000000,
+    "min_overlap": 30,
+    "null_surrogates": 0,
+    "price_series_source": "canonical_post_apply_observations",
+    "replay_observation_version": 1,
+    "sensitivity": "disabled",
+    "skew_bands_ms": [
+      50,
+      250,
+      1000,
+      5000
+    ],
+    "skew_dimension": "absolute difference of leg receipt ages at episode open",
+    "tick_bin_ns": 250000000,
+    "uncertainty": "no confidence interval; window stability and a shifted-surrogate null for lag-grid selection are reported instead",
+    "windows": 4
+  },
+  "observation_count": 306893,
+  "replay_digest": "d01772b7dda9f6b74b8927c9eb460efcdfe4d2ce23a9f1890935f9ae62d4b9be",
+  "snapshots_consumed": 9,
+  "transition_count": 306893,
+  "version": 3
+}

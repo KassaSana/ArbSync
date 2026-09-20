@@ -1064,7 +1064,7 @@ and a Hypothesis property pins the overlap sweep to brute force. A one-at-a-time
 sensitivity dataset is written per run; the committed 150-second capture analyses in
 about 27 seconds.
 
-### [ ] ARB-040 — Measure absolute age and cross-venue receipt skew before gating routes
+### [x] ARB-040 — Measure absolute age and cross-venue receipt skew before gating routes
 
 - Priority: P1
 - Estimate: 12–20 hours
@@ -1075,6 +1075,19 @@ a just-updated book with another book near the configured age limit. Relative re
 is useful evidence of asynchronous inputs, but it does not prove the quieter book is wrong,
 and equal-age books can both be too old. A guessed hard cutoff would encode policy before
 the data establishes one.
+
+Resolution (2026-09-20): `TopOfBook` carries the local receipt time, and the detector
+reports each compared route's leg ages and absolute skew through an observer at
+evaluation (research only), open, peak, and close, without gating. Research writes
+`route_leg_ages.jsonl`, `age_skew_bands.jsonl`, and `age_skew_gate_sensitivity.jsonl`
+on two separate dimensions with configurable band edges; live, two histograms record
+leg ages and skew at episode open and `/api/pricing/depth` routes carry
+`buy_age_ms`/`sell_age_ms`/`age_skew_ms`. A lossless 45-minute capture yielded 132
+episodes, zero fee survivors at every notional, no leg older than 5 s at open, and no
+trend in open rate with age or skew, so the pre-stated rule for a default gate was not
+met and none is adopted; evidence is in `artifacts/research/arb-040/`. Resolution is
+bounded by the ~15.6 ms Windows monotonic tick, and at open the older leg's age equals
+the skew by construction.
 
 Acceptance criteria:
 
