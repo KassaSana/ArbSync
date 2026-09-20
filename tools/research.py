@@ -18,8 +18,17 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from itertools import combinations
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
+from age_skew import (
+    DEFAULT_AGE_EDGES_MS,
+    DEFAULT_SKEW_EDGES_MS,
+    AgeSkewBands,
+    AgeSkewRecorder,
+    age_skew_band_rows,
+    gate_sensitivity_rows,
+    route_leg_age_rows,
+)
 from arb.adapters import ADAPTER_TYPES
 from arb.capture import CaptureFrame, CaptureHeader, read_capture
 from arb.config import AppConfig, load_config
@@ -27,6 +36,7 @@ from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager
 from arb.pricing import DepthSampler
 from arb.replay import ReplayObservation, ReplayReport, replay_frames
+from episode_stats import survival_by_notional
 from lead_lag import analyze_pair, lag_grid, lead_lag_row, price_series
 
 ESTIMATOR_REFERENCES = (
@@ -80,8 +90,10 @@ async def replay_for_research(
     header: CaptureHeader,
     frames: list[CaptureFrame],
     config: AppConfig,
-) -> tuple[ReplayReport, DepthSampler]:
+    bands: AgeSkewBands | None = None,
+) -> tuple[ReplayReport, DepthSampler, AgeSkewRecorder]:
     """Replay one capture with the configured depth and fee assumptions."""
+    recorder = AgeSkewRecorder(bands if bands is not None else default_bands())
     book_manager = OrderBookManager(max_age_seconds=config.order_books.max_age_seconds)
     exchanges = set(header.exchanges)
     fees = {
@@ -97,6 +109,8 @@ async def replay_for_research(
     detector = ArbitrageDetector(
         threshold_pct=Decimal(str(config.detector.threshold_pct)),
         ledger_factory=sampler.ledgers_for_route,
+        route_observer=recorder.record,
+        observe_evaluations=True,
     )
     report = await replay_frames(
         header,
@@ -113,7 +127,14 @@ async def replay_for_research(
         last_wall_ns = max(frame.wall_ns for frame in frames)
         last_mono_ns = max(frame.mono_ns for frame in frames)
         report.opportunities.extend(detector.close_all(last_wall_ns, last_mono_ns))
-    return report, sampler
+    return report, sampler, recorder
+
+
+def default_bands() -> AgeSkewBands:
+    return AgeSkewBands(
+        age_edges_ns=tuple(edge * 1_000_000 for edge in DEFAULT_AGE_EDGES_MS),
+        skew_edges_ns=tuple(edge * 1_000_000 for edge in DEFAULT_SKEW_EDGES_MS),
+    )
 
 
 def _canonical_episode_rows(report: ReplayReport) -> list[dict[str, object]]:
@@ -138,59 +159,7 @@ def _canonical_episode_rows(report: ReplayReport) -> list[dict[str, object]]:
 
 
 def _survival_rows(episodes: Iterable[dict[str, object]]) -> list[dict[str, object]]:
-    totals: dict[str, dict[str, Any]] = {}
-    for episode in episodes:
-        quote_asset = str(episode["quote_asset"])
-        ledgers = episode.get("pricing_ledgers", [])
-        if not isinstance(ledgers, list):
-            continue
-        for ledger in ledgers:
-            if not isinstance(ledger, dict) or "notional" not in ledger:
-                continue
-            notional = str(ledger["notional"])
-            entry = totals.setdefault(
-                notional,
-                {
-                    "notional": notional,
-                    "observations": 0,
-                    "priced": 0,
-                    "insufficient_depth": 0,
-                    "survivors": 0,
-                    "net_profit_by_quote": {},
-                },
-            )
-            entry["observations"] += 1
-            net_literal = ledger.get("net_executable_spread_pct")
-            insufficient = bool(ledger.get("insufficient_depth")) or net_literal is None
-            if insufficient:
-                entry["insufficient_depth"] += 1
-                continue
-            entry["priced"] += 1
-            net = Decimal(str(net_literal))
-            if net <= 0:
-                continue
-            entry["survivors"] += 1
-            profits = entry["net_profit_by_quote"]
-            assert isinstance(profits, dict)
-            profits[quote_asset] = str(
-                Decimal(str(profits.get(quote_asset, "0"))) + Decimal(notional) * net / Decimal(100)
-            )
-
-    rows: list[dict[str, object]] = []
-    for notional in sorted(totals, key=Decimal):
-        entry = totals[notional]
-        observations = int(entry["observations"])
-        priced = int(entry["priced"])
-        survivors = int(entry["survivors"])
-        rows.append(
-            {
-                "module": "survival_by_notional",
-                **entry,
-                "fee_survival_rate": survivors / priced if priced else None,
-                "executable_size_survival_rate": survivors / observations if observations else None,
-            }
-        )
-    return rows
+    return [{"module": "survival_by_notional", **row} for row in survival_by_notional(episodes)]
 
 
 def _lead_lag_rows(
@@ -277,6 +246,7 @@ def _lead_lag_sensitivity_rows(
 def analyze_capture(
     report: ReplayReport,
     sampler: DepthSampler,
+    recorder: AgeSkewRecorder,
     *,
     tick_bin_ns: int = 250_000_000,
     max_lag_ns: int = 1_000_000_000,
@@ -303,14 +273,27 @@ def analyze_capture(
     lead_lag_sensitivity = (
         _lead_lag_sensitivity_rows(report.observations, settings) if sensitivity else []
     )
+    bands = recorder.bands
     return {
         "episodes": episodes,
         "survival": survival,
         "fill_rates": fill_rates,
         "lead_lag": lead_lag,
         "lead_lag_sensitivity": lead_lag_sensitivity,
+        "route_leg_ages": route_leg_age_rows(recorder, episodes),
+        "age_skew_bands": age_skew_band_rows(recorder, episodes),
+        "age_skew_gate_sensitivity": gate_sensitivity_rows(recorder, episodes),
         "measurement": {
             "price_series_source": "canonical_post_apply_observations",
+            "age_bands_ms": [edge // 1_000_000 for edge in bands.age_edges_ns],
+            "skew_bands_ms": [edge // 1_000_000 for edge in bands.skew_edges_ns],
+            "age_dimension": "older leg's local monotonic receipt age at episode open",
+            "skew_dimension": "absolute difference of leg receipt ages at episode open",
+            "age_skew_note": (
+                "ages are local receipt ages, never exchange clocks; connection state and "
+                "sequence continuity stay in close_reason and the lifecycle trace, and no "
+                "route gate is applied"
+            ),
             "replay_observation_version": 1,
             "estimator": "Hayashi-Yoshida asynchronous return correlation",
             "estimator_references": ESTIMATOR_REFERENCES,
@@ -359,12 +342,14 @@ async def run_research(
     null_surrogates: int = 20,
     sensitivity: bool = True,
     allow_lossy: bool = False,
+    bands: AgeSkewBands | None = None,
 ) -> dict[str, object]:
     header, frames = read_capture(capture, allow_lossy=allow_lossy)
-    replay_report, sampler = await replay_for_research(header, frames, config)
+    replay_report, sampler, recorder = await replay_for_research(header, frames, config, bands)
     datasets = analyze_capture(
         replay_report,
         sampler,
+        recorder,
         tick_bin_ns=tick_bin_ns,
         max_lag_ns=max_lag_ns,
         lag_step_ns=lag_step_ns,
@@ -380,6 +365,9 @@ async def run_research(
         "fill_rates": "venue_fill_rates.jsonl",
         "lead_lag": "lead_lag.jsonl",
         "lead_lag_sensitivity": "lead_lag_sensitivity.jsonl",
+        "route_leg_ages": "route_leg_ages.jsonl",
+        "age_skew_bands": "age_skew_bands.jsonl",
+        "age_skew_gate_sensitivity": "age_skew_gate_sensitivity.jsonl",
     }
     counts = {
         name: _write_jsonl(output_dir / filename, cast(list[dict[str, object]], datasets[name]))
@@ -387,7 +375,7 @@ async def run_research(
     }
     metadata: dict[str, object] = {
         "format": "arbsync-research",
-        "version": 2,
+        "version": 3,
         "capture": str(capture),
         "replay_digest": replay_report.digest,
         "snapshots_consumed": replay_report.snapshots_consumed,
@@ -432,6 +420,18 @@ def _parser() -> argparse.ArgumentParser:
         help="skip the one-at-a-time lead/lag sensitivity dataset",
     )
     parser.add_argument(
+        "--age-bands-ms",
+        type=_edges_ms,
+        default=DEFAULT_AGE_EDGES_MS,
+        help="upper edges for the older-leg receipt age bands, e.g. 100,500,1000",
+    )
+    parser.add_argument(
+        "--skew-bands-ms",
+        type=_edges_ms,
+        default=DEFAULT_SKEW_EDGES_MS,
+        help="upper edges for the leg receipt skew bands, e.g. 50,250,1000",
+    )
+    parser.add_argument(
         "--allow-lossy",
         action="store_true",
         help="analyze captures that declare dropped frames and record that override",
@@ -439,8 +439,19 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _edges_ms(text: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in text.split(",") if part.strip())
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("band edges must be comma-separated integers") from error
+
+
 def main() -> None:
     args = _parser().parse_args()
+    bands = AgeSkewBands(
+        age_edges_ns=tuple(edge * 1_000_000 for edge in args.age_bands_ms),
+        skew_edges_ns=tuple(edge * 1_000_000 for edge in args.skew_bands_ms),
+    )
     settings = LeadLagSettings(
         tick_bin_ns=int(args.tick_bin_ms * 1_000_000),
         max_lag_ns=int(args.max_lag_ms * 1_000_000),
@@ -451,6 +462,7 @@ def main() -> None:
     )
     try:
         settings.validate()
+        bands.validate()
     except ValueError as error:
         raise SystemExit(str(error)) from error
     metadata = asyncio.run(
@@ -466,6 +478,7 @@ def main() -> None:
             null_surrogates=settings.null_surrogates,
             sensitivity=not args.no_sensitivity,
             allow_lossy=args.allow_lossy,
+            bands=bands,
         )
     )
     print(json.dumps(metadata, indent=2, sort_keys=True))
