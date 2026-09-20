@@ -117,6 +117,9 @@ const pricing: DepthPricing = {
       fee_impact_pct: "-1",
       net_executable_spread_pct: "1",
       insufficient_depth: false,
+      buy_age_ms: 30,
+      sell_age_ms: 45,
+      age_skew_ms: 15,
     },
     {
       pair: "BTC-USD",
@@ -133,6 +136,9 @@ const pricing: DepthPricing = {
       fee_impact_pct: null,
       net_executable_spread_pct: null,
       insufficient_depth: true,
+      buy_age_ms: 45,
+      sell_age_ms: 30,
+      age_skew_ms: 15,
     },
   ],
 };

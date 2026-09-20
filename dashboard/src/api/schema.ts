@@ -27,10 +27,20 @@ export type DepthQuote = {
   subscribed_depth_levels: number | null;
 };
 
+/**
+ * `*_age_ms` are each leg's local receipt age on the backend's monotonic
+ * clock when the route was priced, and `age_skew_ms` their absolute
+ * difference. They are diagnostics of asynchronous inputs, not freshness
+ * verdicts, and never gate a route; null means the backend had no receipt
+ * time for that leg.
+ */
 export type ExecutableRoute = PricingLedger & {
   pair: string;
   buy_exchange: string;
   sell_exchange: string;
+  buy_age_ms: number | null;
+  sell_age_ms: number | null;
+  age_skew_ms: number | null;
 };
 
 export type DepthPricing = {
@@ -358,6 +368,21 @@ function decodeExecutableRoute(
     pair: text(field(source, "pair", location), `${location}.pair`),
     buy_exchange: text(field(source, "buy_exchange", location), `${location}.buy_exchange`),
     sell_exchange: text(field(source, "sell_exchange", location), `${location}.sell_exchange`),
+    buy_age_ms: nullable(
+      field(source, "buy_age_ms", location),
+      `${location}.buy_age_ms`,
+      nonnegativeNumber,
+    ),
+    sell_age_ms: nullable(
+      field(source, "sell_age_ms", location),
+      `${location}.sell_age_ms`,
+      nonnegativeNumber,
+    ),
+    age_skew_ms: nullable(
+      field(source, "age_skew_ms", location),
+      `${location}.age_skew_ms`,
+      nonnegativeNumber,
+    ),
     ...decodePricingLedger(source, location),
   };
 }

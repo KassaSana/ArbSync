@@ -200,6 +200,8 @@ def test_metrics_endpoint_exposes_prometheus_payload() -> None:
     assert response.status_code == 200
     assert "arb_ws_clients" in response.text
     assert "arb_ws_sender_failures_total" in response.text
+    assert "arb_route_open_leg_age_seconds" in response.text
+    assert "arb_route_open_age_skew_seconds" in response.text
 
 
 def test_adapter_status_returns_runtime_fields() -> None:
@@ -825,3 +827,8 @@ def test_depth_endpoint_includes_fee_aware_route_ledgers(tmp_path: Path) -> None
     assert Decimal(route["net_executable_spread_pct"]) < Decimal(
         route["gross_executable_spread_pct"]
     )
+    # ARB-040: each route reports its legs' local receipt ages and their skew as
+    # diagnostics; the books were applied on the manager's real clock just now.
+    for key in ("buy_age_ms", "sell_age_ms", "age_skew_ms"):
+        assert isinstance(route[key], int) and route[key] >= 0
+    assert route["age_skew_ms"] == abs(route["buy_age_ms"] - route["sell_age_ms"])

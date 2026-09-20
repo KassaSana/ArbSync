@@ -399,3 +399,13 @@ async def test_start_pipeline_initializes_store_before_any_task_runs(
     ]
     await main.shutdown_pipeline(pipeline, tasks)
     assert pipeline.supervisor.failures() == []
+
+
+def test_build_pipeline_observes_route_open_ages_without_evaluation_events(
+    tmp_path: Path,
+) -> None:
+    pipeline = main.build_pipeline(make_config(tmp_path), adapter_types=(StubAdapter,))
+
+    assert pipeline.detector._route_observer is main.observe_route_open
+    # Live ingestion never pays for per-evaluation events; only research opts in.
+    assert pipeline.detector._observe_evaluations is False

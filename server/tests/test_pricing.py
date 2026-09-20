@@ -505,3 +505,47 @@ def test_sampler_observes_eligible_books_and_counts_ineligible_ones() -> None:
     assert rows[("binance", "100", "buy")]["subscribed_depth_levels"] == 5000
     assert sampler.quote("binance", "BTC-USD", 0) == []
     assert len(sampler.quote_pair("BTC-USD", 0)) == 4  # gemini only: 2 notionals x 2 sides
+
+
+def test_sampler_route_prices_carry_leg_receipt_ages_from_the_manager_clock() -> None:
+    from arb.orderbook import OrderBookManager
+    from arb.pricing import DepthSampler
+
+    now = [10_000_000_000]
+    manager = OrderBookManager(max_age_seconds=30.0, clock=lambda: now[0])
+    manager.apply(
+        snapshot("gemini", [("1", "1")], [("100", "1")]),
+        received_monotonic_ns=9_400_000_000,
+    )
+    manager.apply(
+        snapshot("coinbase", [("150", "1")], [("999", "1")]),
+        received_monotonic_ns=9_950_000_000,
+    )
+    sampler = DepthSampler(
+        manager,
+        [Decimal("100")],
+        {"gemini": None, "coinbase": None},
+        {"gemini": Decimal("0"), "coinbase": Decimal("0")},
+        interval_seconds=5.0,
+    )
+
+    # No explicit instant: the manager's clock is the age reference.
+    routes = {(r.buy_exchange, r.sell_exchange): r for r in sampler.route_prices("BTC-USD")}
+    forward = routes[("gemini", "coinbase")]
+    assert (forward.leg_ages.buy_age_ns, forward.leg_ages.sell_age_ns) == (
+        600_000_000,
+        50_000_000,
+    )
+    assert forward.leg_ages.skew_ns == 550_000_000
+    reverse = routes[("coinbase", "gemini")]
+    assert reverse.leg_ages.skew_ns == 550_000_000
+    payload = forward.as_payload()
+    assert (payload["buy_age_ms"], payload["sell_age_ms"], payload["age_skew_ms"]) == (
+        600,
+        50,
+        550,
+    )
+
+    # An explicit instant is honoured instead.
+    later = sampler.route_prices("BTC-USD", 11_000_000_000)
+    assert {r.leg_ages.buy_age_ns for r in later if r.buy_exchange == "gemini"} == {1_600_000_000}

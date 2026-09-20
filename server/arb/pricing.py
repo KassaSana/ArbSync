@@ -24,8 +24,9 @@ from decimal import Decimal
 from fractions import Fraction
 from typing import Literal
 
+from arb.detector import leg_ages
 from arb.orderbook import OrderBookManager
-from arb.types import PriceLevel, PricingLedger, TopOfBook
+from arb.types import PriceLevel, PricingLedger, RouteLegAges, TopOfBook
 
 Side = Literal["buy", "sell"]
 
@@ -258,6 +259,9 @@ class ExecutableRoutePrice:
     buy_exchange: str
     sell_exchange: str
     ledger: PricingLedger
+    # Local receipt ages of the two books this price was walked from, and
+    # their absolute difference. Diagnostics only; both books were eligible.
+    leg_ages: RouteLegAges
 
     def as_payload(self) -> dict[str, object]:
         return {
@@ -265,6 +269,7 @@ class ExecutableRoutePrice:
             "buy_exchange": self.buy_exchange,
             "sell_exchange": self.sell_exchange,
             **self.ledger.as_payload(),
+            **self.leg_ages.as_payload(),
         }
 
 
@@ -459,12 +464,13 @@ class DepthSampler:
         acquired base on the sell venue, so proceeds, spreads, fees, and depth
         sufficiency describe one matched quantity.
         """
+        now = self.book_manager.now_monotonic_ns() if now_monotonic_ns is None else now_monotonic_ns
         books: dict[str, tuple[list[PriceLevel], list[PriceLevel]]] = {}
         tops: dict[str, TopOfBook] = {}
         for exchange, known_pair in self.book_manager.known_pairs():
             if known_pair != pair:
                 continue
-            sides = self.book_manager.depth_levels(exchange, pair, now_monotonic_ns)
+            sides = self.book_manager.depth_levels(exchange, pair, now)
             top = self.book_manager.top_of_book(exchange, pair)
             if sides is not None and top is not None:
                 books[exchange] = sides
@@ -479,6 +485,7 @@ class DepthSampler:
                     or sell_exchange not in self.taker_fees_pct
                 ):
                     continue
+                ages = leg_ages(tops[buy_exchange], tops[sell_exchange], now)
                 for notional in self.notionals:
                     buy_fill, sell_fill = matched_route_fills(
                         books[buy_exchange][1], books[sell_exchange][0], notional
@@ -488,6 +495,7 @@ class DepthSampler:
                             pair=pair,
                             buy_exchange=buy_exchange,
                             sell_exchange=sell_exchange,
+                            leg_ages=ages,
                             ledger=pricing_ledger(
                                 notional=notional,
                                 buy_top=tops[buy_exchange],

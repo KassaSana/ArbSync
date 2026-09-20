@@ -118,6 +118,9 @@ const depthPricing = {
       fee_impact_pct: "-1",
       net_executable_spread_pct: "1",
       insufficient_depth: false,
+      buy_age_ms: 120,
+      sell_age_ms: 40,
+      age_skew_ms: 80,
     },
   ],
 };
@@ -187,6 +190,26 @@ describe("network payload schemas", () => {
     ],
   ])("accepts a valid %s response", (_name, decode, payload) => {
     expect(() => decode(payload)).not.toThrow();
+  });
+
+  it("keeps route leg ages nullable and rejects negative or missing ones", () => {
+    const [route] = depthPricing.routes;
+    const withNulls = {
+      ...depthPricing,
+      routes: [{ ...route, buy_age_ms: null, sell_age_ms: null, age_skew_ms: null }],
+    };
+    expect(decodeDepthPricing(withNulls).routes[0].age_skew_ms).toBeNull();
+    expect(decodeDepthPricing(depthPricing).routes[0]).toMatchObject({
+      buy_age_ms: 120,
+      sell_age_ms: 40,
+      age_skew_ms: 80,
+    });
+    const negative = { ...depthPricing, routes: [{ ...route, age_skew_ms: -1 }] };
+    expect(() => decodeDepthPricing(negative)).toThrow(PayloadValidationError);
+    const withoutBuyAge: Record<string, unknown> = { ...route };
+    delete withoutBuyAge.buy_age_ms;
+    const missing = { ...depthPricing, routes: [withoutBuyAge] };
+    expect(() => decodeDepthPricing(missing)).toThrow(PayloadValidationError);
   });
 
   it("accepts every valid live message type", () => {

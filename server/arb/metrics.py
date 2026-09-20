@@ -5,6 +5,8 @@ from functools import cache
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
+from arb.types import RouteAgeEvent
+
 events_ingested_total = Counter("arb_events_ingested_total", "Market events ingested", ["exchange"])
 book_updates_total = Counter(
     "arb_book_updates_total", "Accepted order book updates", ["exchange", "pair"]
@@ -20,6 +22,22 @@ book_staleness_seconds = Gauge(
 )
 book_eligible = Gauge(
     "arb_book_eligible", "Whether an order book is eligible for detection", ["exchange", "pair"]
+)
+# Route-leg age diagnostics at episode open, on the local monotonic clock.
+# Observed, not gating: eligibility stays a per-book decision. Buckets span
+# sub-tick receipt differences up to the default 30 s book age limit and beyond.
+_AGE_BUCKETS = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0)
+route_open_leg_age_seconds = Histogram(
+    "arb_route_open_leg_age_seconds",
+    "Receipt age of each leg's book when a route episode opened",
+    ["pair", "exchange", "leg"],
+    buckets=_AGE_BUCKETS,
+)
+route_open_age_skew_seconds = Histogram(
+    "arb_route_open_age_skew_seconds",
+    "Absolute difference between the two legs' receipt ages when a route episode opened",
+    ["pair", "buy_exchange", "sell_exchange"],
+    buckets=_AGE_BUCKETS,
 )
 adapter_reconnects_total = Counter(
     "arb_adapter_reconnects_total", "Adapter reconnect attempts", ["exchange", "reason"]
@@ -119,6 +137,38 @@ def book_metrics(exchange: str, pair: str) -> BookMetrics:
 @cache
 def opportunity_counter(pair: str) -> Counter:
     return opportunities_total.labels(pair=pair)
+
+
+@dataclass(frozen=True)
+class RouteMetrics:
+    buy_age: Histogram
+    sell_age: Histogram
+    skew: Histogram
+
+
+@cache
+def route_metrics(pair: str, buy_exchange: str, sell_exchange: str) -> RouteMetrics:
+    return RouteMetrics(
+        buy_age=route_open_leg_age_seconds.labels(pair=pair, exchange=buy_exchange, leg="buy"),
+        sell_age=route_open_leg_age_seconds.labels(pair=pair, exchange=sell_exchange, leg="sell"),
+        skew=route_open_age_skew_seconds.labels(
+            pair=pair, buy_exchange=buy_exchange, sell_exchange=sell_exchange
+        ),
+    )
+
+
+def observe_route_open(event: RouteAgeEvent) -> None:
+    """Record leg ages for an episode that just opened; other event kinds are ignored."""
+    if event.kind != "open":
+        return
+    metrics = route_metrics(event.pair, event.buy_exchange, event.sell_exchange)
+    ages = event.ages
+    if ages.buy_age_ns is not None:
+        metrics.buy_age.observe(ages.buy_age_ns / 1e9)
+    if ages.sell_age_ns is not None:
+        metrics.sell_age.observe(ages.sell_age_ns / 1e9)
+    if ages.skew_ns is not None:
+        metrics.skew.observe(ages.skew_ns / 1e9)
 
 
 def render_metrics() -> tuple[bytes, str]:

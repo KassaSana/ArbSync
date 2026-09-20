@@ -29,6 +29,7 @@ from arb.metrics import (
     background_task_failures_total,
     book_metrics,
     detection_latency_seconds,
+    observe_route_open,
     opportunity_counter,
 )
 from arb.orderbook import OrderBookManager
@@ -371,6 +372,7 @@ def build_pipeline(
     detector = ArbitrageDetector(
         threshold_pct=Decimal(str(config.detector.threshold_pct)),
         ledger_factory=depth_sampler.ledgers_for_route,
+        route_observer=observe_route_open,
     )
     eligibility_publisher = BookEligibilityPublisher(
         book_manager,
