@@ -74,10 +74,6 @@ class FeeSchedule:
     def taker(self, exchange: str) -> Decimal:
         return self.taker_pct[exchange]
 
-    def route_fee_pct(self, buy_exchange: str, sell_exchange: str) -> Decimal:
-        """Percentage points a round trip pays: one taker fee on each leg."""
-        return self.taker_pct[buy_exchange] + self.taker_pct[sell_exchange]
-
 
 @dataclass(frozen=True)
 class ReconciliationConfig:

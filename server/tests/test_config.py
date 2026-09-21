@@ -494,7 +494,6 @@ def test_fee_schedule_keeps_config_literals_exact(tmp_path: Path) -> None:
         "binance": Decimal("0.6"),
     }
     assert config.fees.maker_pct == {"gemini": Decimal("0.2")}
-    assert config.fees.route_fee_pct("gemini", "coinbase") == Decimal("1.0")
 
 
 def test_fee_schedule_is_required_and_must_cover_every_exchange(tmp_path: Path) -> None:
@@ -546,4 +545,6 @@ def test_zero_fee_is_an_explicit_choice_not_a_default(tmp_path: Path) -> None:
         + "binance = { taker_pct = 0 }\n"
     )
 
-    assert load_config(path).fees.route_fee_pct("gemini", "binance") == Decimal("0")
+    loaded = load_config(path)
+    assert loaded.fees.taker("gemini") == Decimal("0")
+    assert loaded.fees.taker("binance") == Decimal("0")
