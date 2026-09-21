@@ -89,7 +89,6 @@ def dimension_value(dimension: Dimension, ages: RouteLegAges) -> int | None:
 class EpisodeAges:
     key: EpisodeKey
     open_ages: RouteLegAges
-    open_monotonic_ns: int
     peak_ages: RouteLegAges | None = None
     close_ages: RouteLegAges | None = None
     close_reason: EpisodeCloseReason | None = None
@@ -131,9 +130,7 @@ class AgeSkewRecorder:
         assert event.start_ns is not None
         key: EpisodeKey = (event.start_ns, *route)
         if event.kind == "open":
-            record = EpisodeAges(
-                key=key, open_ages=event.ages, open_monotonic_ns=event.monotonic_ns
-            )
+            record = EpisodeAges(key=key, open_ages=event.ages)
             record.note_skew(event.ages)
             self.episodes[key] = record
             self._open_routes[route] = key
