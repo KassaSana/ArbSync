@@ -34,6 +34,7 @@ from arb.metrics import (
 )
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
+from arb.ports import EpisodeSink
 from arb.pricing import DepthSampler
 from arb.reconcile import SnapshotReconciler
 from arb.types import (
@@ -83,7 +84,7 @@ class BookEligibilityPublisher:
         self,
         book_manager: OrderBookManager,
         detector: ArbitrageDetector,
-        store: OpportunityStore,
+        store: EpisodeSink,
         broadcaster: LiveBroadcaster,
         tracked_pairs: Sequence[tuple[str, str]],
         *,
@@ -192,7 +193,7 @@ async def process_market_event(
     *,
     book_manager: OrderBookManager,
     detector: ArbitrageDetector,
-    store: OpportunityStore,
+    store: EpisodeSink,
     broadcaster: LiveBroadcaster,
     detected_at_ns: int | None = None,
     now_monotonic_ns: int | None = None,
@@ -267,7 +268,7 @@ async def process_market_event(
 
 
 async def deliver_episodes(
-    episodes: list[OpportunityEpisode], *, store: OpportunityStore, broadcaster: LiveBroadcaster
+    episodes: list[OpportunityEpisode], *, store: EpisodeSink, broadcaster: LiveBroadcaster
 ) -> None:
     """Persist and publish episode open and close events in order."""
     for episode in episodes:
@@ -282,7 +283,7 @@ async def consume_adapter(
     *,
     book_manager: OrderBookManager,
     detector: ArbitrageDetector,
-    store: OpportunityStore,
+    store: EpisodeSink,
     broadcaster: LiveBroadcaster,
     eligibility_publisher: BookEligibilityPublisher | None = None,
     on_book_update: Callable[[str, str], None] | None = None,

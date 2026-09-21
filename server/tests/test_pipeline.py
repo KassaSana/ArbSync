@@ -188,7 +188,7 @@ async def test_slow_browser_does_not_block_detection() -> None:
     manager.apply(snapshot("binance", "105", "106"))
     store = Mock(enqueue=AsyncMock())
     broadcaster = main.LiveBroadcaster(queue_maxsize=1)
-    await broadcaster.connect(SlowWebSocket())  # type: ignore[arg-type]
+    await broadcaster.connect(SlowWebSocket())
 
     await asyncio.wait_for(
         main.process_market_event(
@@ -307,7 +307,7 @@ async def test_consumer_prefers_single_pair_resync() -> None:
         async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
             raise NotImplementedError
 
-        async def connect(self):  # type: ignore[override]
+        async def connect(self):
             yield invalid
 
         def request_pair_resync(self, pair: str) -> bool:

@@ -229,7 +229,7 @@ async def test_age_expiry_without_market_event_propagates_only_affected_transiti
 
     pipeline = main.build_pipeline(make_config(tmp_path), adapter_types=(StubAdapter,))
     client = Client()
-    await pipeline.broadcaster.connect(client)  # type: ignore[arg-type]
+    await pipeline.broadcaster.connect(client)
     now = 0
     pipeline.book_manager._clock = lambda: now
     pipeline.book_manager.apply(snapshot("stub", "BTC-USD"), received_monotonic_ns=0)
@@ -280,7 +280,7 @@ async def test_age_expiry_without_market_event_propagates_only_affected_transiti
     [closed] = [message for message in client.sent if message["type"] == "opportunity"]
     assert closed["payload"]["close_reason"] == "book_ineligible"
     assert pipeline.store.unflushed_count == 1
-    await pipeline.broadcaster.disconnect(client)  # type: ignore[arg-type]
+    await pipeline.broadcaster.disconnect(client)
     await pipeline.broadcaster.aclose()
 
 

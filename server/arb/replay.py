@@ -49,7 +49,7 @@ import time
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from arb.adapters import ADAPTER_TYPES
 from arb.adapters.base import ExchangeAdapter, SnapshotRequest, request_scoped_resync
@@ -405,7 +405,7 @@ class _Replay:
             for pair in adapter.expected_pairs()
         ]
         self.publisher = BookEligibilityPublisher(
-            book_manager, detector, cast("OpportunityStore", store), broadcaster, tracked
+            book_manager, detector, store, broadcaster, tracked
         )
         self._heap: list[tuple[int, int, int, str, Any]] = []
         self._sequence = len(frames)
@@ -586,7 +586,7 @@ class _Replay:
             stamped,
             book_manager=self.manager,
             detector=self.detector,
-            store=cast("OpportunityStore", self.store),
+            store=self.store,
             broadcaster=self.broadcaster,
             detected_at_ns=wall_ns if self.recorded else None,
             now_monotonic_ns=self._now_ns(),

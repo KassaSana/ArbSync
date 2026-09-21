@@ -15,8 +15,9 @@ from typing import Any
 import httpx
 import structlog
 
-from arb.capture import CaptureWriter, SnapshotProvenance
+from arb.capture import SnapshotProvenance
 from arb.metrics import adapter_reconnects_total
+from arb.ports import CaptureSink
 from arb.types import MarketEvent, PriceLevel
 
 logger = structlog.get_logger(__name__)
@@ -107,9 +108,9 @@ class ExchangeAdapter(abc.ABC):
             contextvars.ContextVar("snapshot_context", default=None)
         )
         self._client: httpx.AsyncClient | None = None
-        self._capture_sink: CaptureWriter | None = None
+        self._capture_sink: CaptureSink | None = None
 
-    def set_capture_sink(self, sink: CaptureWriter | None) -> None:
+    def set_capture_sink(self, sink: CaptureSink | None) -> None:
         """Attach the capture writer that receives exact inbound traffic.
 
         The sink's record calls never block, so capturing cannot slow down
@@ -126,16 +127,14 @@ class ExchangeAdapter(abc.ABC):
         if connected:
             self.connection_generation += 1
         if self._capture_sink is not None:
-            record_connection = getattr(self._capture_sink, "record_connection", None)
-            if callable(record_connection):
-                record_connection(
-                    self.name,
-                    connected,
-                    self.connection_generation,
-                    wall_ns=time.time_ns(),
-                    mono_ns=time.monotonic_ns(),
-                    reason=self.last_error,
-                )
+            self._capture_sink.record_connection(
+                self.name,
+                connected,
+                self.connection_generation,
+                wall_ns=time.time_ns(),
+                mono_ns=time.monotonic_ns(),
+                reason=self.last_error,
+            )
         if self._connection_state_callback is not None:
             result = self._connection_state_callback(self.name, connected)
             if isawaitable(result):

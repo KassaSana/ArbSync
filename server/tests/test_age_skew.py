@@ -346,7 +346,7 @@ def test_fixture_replay_records_ages_for_every_episode_and_evaluation() -> None:
     gate_rows = datasets["age_skew_gate_sensitivity"]
     assert isinstance(gate_rows, list)
     for row in gate_rows:
-        assert row["episodes_retained"] + row["episodes_rejected"] == len(episodes)  # type: ignore[operator]
+        assert row["episodes_retained"] + row["episodes_rejected"] == len(episodes)
     measurement = datasets["measurement"]
     assert isinstance(measurement, dict)
     assert measurement["age_bands_ms"] == [100, 1_000]

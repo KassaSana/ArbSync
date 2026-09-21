@@ -90,7 +90,7 @@ GEMINI_MESSAGE = (
 async def test_base_stream_events_records_exact_raw_text() -> None:
     adapter = GeminiAdapter(["btcusd"])
     sink = RecordingSink()
-    adapter.set_capture_sink(sink)  # type: ignore[arg-type]
+    adapter.set_capture_sink(sink)
 
     events = [event async for event in adapter.stream_events(FakeSocket([GEMINI_MESSAGE]))]
 
@@ -119,7 +119,7 @@ async def test_base_stream_events_without_sink_still_yields() -> None:
 async def test_snapshot_fetch_records_url_and_payload() -> None:
     adapter = GeminiAdapter(["btcusd"])
     sink = RecordingSink()
-    adapter.set_capture_sink(sink)  # type: ignore[arg-type]
+    adapter.set_capture_sink(sink)
     payload = {"bids": [], "asks": []}
 
     class FakeResponse:
@@ -154,7 +154,7 @@ async def test_snapshot_fetch_records_url_and_payload() -> None:
 async def test_connection_boundaries_are_captured_with_generations() -> None:
     adapter = GeminiAdapter(["btcusd"])
     sink = RecordingSink()
-    adapter.set_capture_sink(sink)  # type: ignore[arg-type]
+    adapter.set_capture_sink(sink)
 
     await adapter._report_connection_state(True)
     await adapter._report_connection_state(False)
@@ -170,7 +170,7 @@ async def test_connection_boundaries_are_captured_with_generations() -> None:
 async def test_binance_loop_records_each_message_once() -> None:
     adapter = BinanceAdapter(["BTCUSDT"])
     sink = RecordingSink()
-    adapter.set_capture_sink(sink)  # type: ignore[arg-type]
+    adapter.set_capture_sink(sink)
 
     async def snapshot_at_100(
         self: BinanceAdapter, pair: str, trigger_sequence: int

@@ -5,10 +5,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import structlog
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocketDisconnect
 from websockets.exceptions import ConnectionClosed
 
 from arb.metrics import ws_client_queue_overflows_total, ws_clients, ws_sender_failures_total
+from arb.ports import LiveSocket
 from arb.types import BookEligibility, LiveMessage
 
 logger = structlog.get_logger(__name__)
@@ -46,7 +47,7 @@ class LiveBroadcaster:
             raise ValueError("queue_maxsize must be positive")
         if coalesce_interval < 0:
             raise ValueError("coalesce_interval must not be negative")
-        self._clients: dict[WebSocket, _ClientConnection] = {}
+        self._clients: dict[LiveSocket, _ClientConnection] = {}
         self._queue_maxsize = queue_maxsize
         self._lock = asyncio.Lock()
         self._stream_sequence = 0
@@ -59,7 +60,7 @@ class LiveBroadcaster:
 
     async def connect(
         self,
-        websocket: WebSocket,
+        websocket: LiveSocket,
         initial_state: Callable[[], LiveMessage] | None = None,
     ) -> None:
         await websocket.accept()
@@ -77,7 +78,7 @@ class LiveBroadcaster:
             # from it on the grounds that an earlier client already saw it.
             self._last_sent.clear()
 
-    async def disconnect(self, websocket: WebSocket) -> None:
+    async def disconnect(self, websocket: LiveSocket) -> None:
         async with self._lock:
             connection = self._clients.pop(websocket, None)
             ws_clients.set(len(self._clients))
@@ -200,7 +201,7 @@ class LiveBroadcaster:
         await self.flush()
 
     async def _deliver(self, messages: list[LiveMessage]) -> None:
-        dropped: list[tuple[WebSocket, _ClientConnection]] = []
+        dropped: list[tuple[LiveSocket, _ClientConnection]] = []
         async with self._lock:
             if not self._clients:
                 return
@@ -228,7 +229,7 @@ class LiveBroadcaster:
         and must not be replayed after it. Existing clients still need those
         entries, while entries queued after connection go to every client.
         """
-        dropped: list[tuple[WebSocket, _ClientConnection]] = []
+        dropped: list[tuple[LiveSocket, _ClientConnection]] = []
         async with self._lock:
             if not self._clients:
                 return
@@ -255,7 +256,7 @@ class LiveBroadcaster:
         self._pending_generation += 1
         return _PendingMessage(self._pending_generation, message)
 
-    async def _send_messages(self, websocket: WebSocket, connection: _ClientConnection) -> None:
+    async def _send_messages(self, websocket: LiveSocket, connection: _ClientConnection) -> None:
         message_type = "unknown"
         stream_sequence: int | None = None
         try:
@@ -286,7 +287,7 @@ class LiveBroadcaster:
                     ws_clients.set(len(self._clients))
 
     @staticmethod
-    async def _close_slow_client(websocket: WebSocket) -> None:
+    async def _close_slow_client(websocket: LiveSocket) -> None:
         try:
             await websocket.close(code=1013, reason="outgoing queue full")
         except Exception:

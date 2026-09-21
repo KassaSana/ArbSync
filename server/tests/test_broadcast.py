@@ -53,8 +53,8 @@ class _RecordingSocket:
 async def test_broadcaster_sends_to_all_clients() -> None:
     broadcaster = LiveBroadcaster()
     a, b = FakeWebSocket(), FakeWebSocket()
-    await broadcaster.connect(a)  # type: ignore[arg-type]
-    await broadcaster.connect(b)  # type: ignore[arg-type]
+    await broadcaster.connect(a)
+    await broadcaster.connect(b)
     await broadcaster.broadcast(LiveMessage(type="opportunity", payload={"pair": "BTC-USD"}))
     await asyncio.sleep(0)
     assert a.sent == [
@@ -75,8 +75,8 @@ async def test_expected_disconnect_quietly_removes_client(monkeypatch: pytest.Mo
     monkeypatch.setattr(broadcast_module, "logger", test_logger)
     broadcaster = LiveBroadcaster()
     healthy, dead = FakeWebSocket(), FakeWebSocket(send_error=WebSocketDisconnect())
-    await broadcaster.connect(healthy)  # type: ignore[arg-type]
-    await broadcaster.connect(dead)  # type: ignore[arg-type]
+    await broadcaster.connect(healthy)
+    await broadcaster.connect(dead)
     dead_sender = broadcaster._clients[dead].sender_task
     assert dead_sender is not None
     await broadcaster.broadcast(LiveMessage(type="top_of_book", payload={"x": 1}))
@@ -90,7 +90,7 @@ async def test_expected_disconnect_quietly_removes_client(monkeypatch: pytest.Mo
     await broadcaster.broadcast(LiveMessage(type="top_of_book", payload={"x": 2}))
     await asyncio.sleep(0)
     assert len(healthy.sent) == 2
-    await broadcaster.disconnect(healthy)  # type: ignore[arg-type]
+    await broadcaster.disconnect(healthy)
 
 
 @pytest.mark.asyncio
@@ -103,7 +103,7 @@ async def test_closed_websockets_connection_is_an_expected_departure(
     monkeypatch.setattr(broadcast_module, "logger", test_logger)
     broadcaster = LiveBroadcaster()
     socket = FakeWebSocket(send_error=ConnectionClosed(None, None))
-    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.connect(socket)
     sender = broadcaster._clients[socket].sender_task
     assert sender is not None
 
@@ -130,7 +130,7 @@ async def test_serialization_failure_is_counted_and_logged_without_payload(
     broadcaster = LiveBroadcaster()
     socket = SerializingSocket()
     socket.client = SimpleNamespace(host="127.0.0.1", port=54321)
-    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.connect(socket)
     sender = broadcaster._clients[socket].sender_task
     assert sender is not None
 
@@ -159,11 +159,11 @@ async def test_sender_cancellation_cleans_up_without_failure(
     monkeypatch.setattr(broadcast_module, "logger", test_logger)
     broadcaster = LiveBroadcaster()
     socket = FakeWebSocket()
-    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.connect(socket)
     sender = broadcaster._clients[socket].sender_task
     assert sender is not None
 
-    await broadcaster.disconnect(socket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(socket)
 
     assert socket not in broadcaster._clients
     assert sender.cancelled()
@@ -183,7 +183,7 @@ async def test_initial_state_is_ordered_before_live_updates() -> None:
     broadcaster = LiveBroadcaster()
     websocket = FakeWebSocket()
     await broadcaster.connect(
-        websocket,  # type: ignore[arg-type]
+        websocket,
         lambda: LiveMessage(type="state_snapshot", payload={"books": []}),
     )
     await broadcaster.broadcast(LiveMessage(type="top_of_book", payload={"sequence": 2}))
@@ -205,7 +205,7 @@ async def test_pending_update_before_connect_is_cut_off_by_snapshot() -> None:
     websocket = FakeWebSocket()
 
     await broadcaster.connect(
-        websocket,  # type: ignore[arg-type]
+        websocket,
         lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 2}]}),
     )
     await broadcaster.flush()
@@ -214,7 +214,7 @@ async def test_pending_update_before_connect_is_cut_off_by_snapshot() -> None:
     assert [(message["type"], message["payload"]) for message in websocket.sent] == [
         ("state_snapshot", {"books": [{"sequence": 2}]})
     ]
-    await broadcaster.disconnect(websocket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(websocket)
     await broadcaster.aclose()
 
 
@@ -233,7 +233,7 @@ async def test_update_queued_during_accept_is_cut_off_by_later_snapshot() -> Non
     websocket = PausedAcceptSocket()
     connecting = asyncio.create_task(
         broadcaster.connect(
-            websocket,  # type: ignore[arg-type]
+            websocket,
             lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 2}]}),
         )
     )
@@ -247,7 +247,7 @@ async def test_update_queued_during_accept_is_cut_off_by_later_snapshot() -> Non
     await asyncio.sleep(0)
 
     assert [message["type"] for message in websocket.sent] == ["state_snapshot"]
-    await broadcaster.disconnect(websocket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(websocket)
     await broadcaster.aclose()
 
 
@@ -256,7 +256,7 @@ async def test_update_immediately_after_snapshot_is_delivered() -> None:
     broadcaster = LiveBroadcaster(coalesce_interval=60)
     websocket = FakeWebSocket()
     await broadcaster.connect(
-        websocket,  # type: ignore[arg-type]
+        websocket,
         lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 1}]}),
     )
 
@@ -271,7 +271,7 @@ async def test_update_immediately_after_snapshot_is_delivered() -> None:
         "top_of_book",
     ]
     assert [message["payload"].get("sequence") for message in websocket.sent] == [None, 2]
-    await broadcaster.disconnect(websocket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(websocket)
     await broadcaster.aclose()
 
 
@@ -290,7 +290,7 @@ async def test_slow_new_client_keeps_snapshot_cutoff_and_post_snapshot_update() 
     )
     websocket = SlowSocket()
     await broadcaster.connect(
-        websocket,  # type: ignore[arg-type]
+        websocket,
         lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 2}]}),
     )
     await asyncio.sleep(0)
@@ -308,7 +308,7 @@ async def test_slow_new_client_keeps_snapshot_cutoff_and_post_snapshot_update() 
     ]
     assert websocket.sent[-1]["payload"]["sequence"] == 3
     assert websocket.closed is False
-    await broadcaster.disconnect(websocket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(websocket)
     await broadcaster.aclose()
 
 
@@ -317,14 +317,14 @@ async def test_clients_connecting_at_different_times_get_distinct_pending_cutoff
     broadcaster = LiveBroadcaster(coalesce_interval=60)
     first, second = FakeWebSocket(), FakeWebSocket()
     await broadcaster.connect(
-        first,  # type: ignore[arg-type]
+        first,
         lambda: LiveMessage("state_snapshot", {"books": []}),
     )
     await broadcaster.broadcast_book(
         "gemini", "BTC-USD", LiveMessage("top_of_book", {"sequence": 1})
     )
     await broadcaster.connect(
-        second,  # type: ignore[arg-type]
+        second,
         lambda: LiveMessage("state_snapshot", {"books": [{"sequence": 1}]}),
     )
     await broadcaster.flush()
@@ -335,8 +335,8 @@ async def test_clients_connecting_at_different_times_get_distinct_pending_cutoff
         "top_of_book",
     ]
     assert [message["type"] for message in second.sent] == ["state_snapshot"]
-    await broadcaster.disconnect(first)  # type: ignore[arg-type]
-    await broadcaster.disconnect(second)  # type: ignore[arg-type]
+    await broadcaster.disconnect(first)
+    await broadcaster.disconnect(second)
     await broadcaster.aclose()
 
 
@@ -355,7 +355,7 @@ async def test_slow_client_queue_overflow_does_not_block_broadcast(
 
     broadcaster = LiveBroadcaster(queue_maxsize=1)
     slow = SlowWebSocket()
-    await broadcaster.connect(slow)  # type: ignore[arg-type]
+    await broadcaster.connect(slow)
     await broadcaster.broadcast(LiveMessage(type="top_of_book", payload={"sequence": 1}))
     await asyncio.sleep(0)
     await broadcaster.broadcast(LiveMessage(type="top_of_book", payload={"sequence": 2}))
@@ -376,7 +376,7 @@ async def test_slow_client_queue_overflow_does_not_block_broadcast(
 async def test_coalescing_keeps_only_the_newest_update_per_book() -> None:
     broadcaster = LiveBroadcaster()
     socket = _RecordingSocket()
-    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.connect(socket)
 
     def quote(price: int, sequence: int) -> LiveMessage:
         return LiveMessage(
@@ -398,7 +398,7 @@ async def test_coalescing_keeps_only_the_newest_update_per_book() -> None:
 
     assert [payload["payload"]["sequence"] for payload in socket.sent] == [4, 99]
     await broadcaster.aclose()
-    await broadcaster.disconnect(socket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(socket)
 
 
 @pytest.mark.asyncio
@@ -406,7 +406,7 @@ async def test_immediate_book_update_discards_superseded_queued_update() -> None
     """A disconnect must not be followed by a stale update showing the book live."""
     broadcaster = LiveBroadcaster()
     socket = _RecordingSocket()
-    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.connect(socket)
 
     await broadcaster.broadcast_book(
         "gemini", "BTC-USD", LiveMessage("book_status", {"eligible": True})
@@ -419,7 +419,7 @@ async def test_immediate_book_update_discards_superseded_queued_update() -> None
 
     assert [payload["payload"]["eligible"] for payload in socket.sent] == [False]
     await broadcaster.aclose()
-    await broadcaster.disconnect(socket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(socket)
 
 
 @pytest.mark.asyncio
@@ -429,7 +429,7 @@ async def test_pipeline_gap_invalidates_before_a_pending_quote_can_flush() -> No
 
     broadcaster = LiveBroadcaster(coalesce_interval=60)
     socket = _RecordingSocket()
-    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.connect(socket)
     manager = OrderBookManager()
     detector = ArbitrageDetector(Decimal("0.1"))
     store = OpportunityStore(":memory:")
@@ -456,7 +456,7 @@ async def test_pipeline_gap_invalidates_before_a_pending_quote_can_flush() -> No
     assert socket.sent[0]["payload"]["eligible"] is False
     assert manager.top_of_book("gemini", "BTC-USD") is None
     await broadcaster.aclose()
-    await broadcaster.disconnect(socket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(socket)
 
 
 @pytest.mark.asyncio
@@ -467,7 +467,7 @@ async def test_gap_storm_sends_one_invalidation_not_one_per_refused_event() -> N
 
     broadcaster = LiveBroadcaster()
     socket = _RecordingSocket()
-    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.connect(socket)
     manager = OrderBookManager()
     detector = ArbitrageDetector(Decimal("0.1"))
     store = OpportunityStore(":memory:")
@@ -516,7 +516,7 @@ async def test_gap_storm_sends_one_invalidation_not_one_per_refused_event() -> N
     assert manager.top_of_book("gemini", "BTC-USD").best_bid_price == Decimal("150")
 
     await broadcaster.aclose()
-    await broadcaster.disconnect(socket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(socket)
 
 
 def test_status_display_signature_matches_payload_based_signature() -> None:
@@ -548,7 +548,7 @@ async def test_aclose_is_terminal_for_the_flush_loop() -> None:
     """A coalesced message after aclose must not respawn the flush loop."""
     broadcaster = LiveBroadcaster(coalesce_interval=60)
     socket = _RecordingSocket()
-    await broadcaster.connect(socket)  # type: ignore[arg-type]
+    await broadcaster.connect(socket)
     await broadcaster.broadcast_book(
         "gemini", "BTC-USD", LiveMessage("top_of_book", {"best_bid_price": "1"})
     )
@@ -565,4 +565,4 @@ async def test_aclose_is_terminal_for_the_flush_loop() -> None:
     await broadcaster.flush()
     await asyncio.sleep(0)
     assert [payload["payload"]["best_bid_price"] for payload in socket.sent] == ["1", "2"]
-    await broadcaster.disconnect(socket)  # type: ignore[arg-type]
+    await broadcaster.disconnect(socket)

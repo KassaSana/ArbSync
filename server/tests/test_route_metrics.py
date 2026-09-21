@@ -77,7 +77,7 @@ def test_route_open_skips_unknown_ages_and_other_event_kinds() -> None:
     for kind in ("evaluated", "peak", "close"):
         observe_route_open(
             RouteAgeEvent(
-                kind=kind,  # type: ignore[arg-type]
+                kind=kind,
                 pair="LTC-USD",
                 buy_exchange="gemini",
                 sell_exchange="coinbase",
