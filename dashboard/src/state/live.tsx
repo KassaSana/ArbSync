@@ -37,6 +37,11 @@ import { Async, failed, loading, ready } from "../lib/async";
  */
 export type TrackedBookStatus = BookStatus & { receivedAtMs: number };
 
+export type TrackedDepthPricing = DepthPricing & {
+  receivedAtMs: number;
+  generation: number;
+};
+
 function track(statuses: Iterable<BookStatus>, receivedAtMs: number): TrackedBookStatus[] {
   return [...statuses].map((status) => ({ ...status, receivedAtMs }));
 }
@@ -58,7 +63,7 @@ type LiveValue = {
   stats: Async<Stats>;
   pairs: Async<PairRecord[]>;
   adapters: Async<AdapterStatus[]>;
-  depthPricing: Async<DepthPricing>;
+  depthPricing: Async<TrackedDepthPricing>;
   refreshStats: () => void;
   refreshOpportunities: () => void;
   refreshAdapters: () => void;
@@ -70,7 +75,7 @@ const LiveContext = createContext<LiveValue | null>(null);
 
 const ADAPTER_POLL_MS = 5_000;
 const STATS_POLL_MS = 30_000;
-const DEPTH_PRICING_POLL_MS = 5_000;
+export const DEPTH_PRICING_POLL_MS = 5_000;
 const MAX_FEED_ROWS = 50;
 
 function bookKey(entry: { exchange: string; pair: string }): string {
@@ -117,7 +122,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [stats, setStats] = useState<Async<Stats>>(loading);
   const [pairs, setPairs] = useState<Async<PairRecord[]>>(loading);
   const [adapters, setAdapters] = useState<Async<AdapterStatus[]>>(loading);
-  const [depthPricing, setDepthPricing] = useState<Async<DepthPricing>>(loading);
+  const [depthPricing, setDepthPricing] = useState<Async<TrackedDepthPricing>>(loading);
+  const depthPricingGeneration = useRef(0);
+  const lastAppliedDepthPricingGeneration = useRef(0);
   const [lastTickAt, setLastTickAt] = useState<number | null>(null);
   const [invalidFrameCount, setInvalidFrameCount] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -157,9 +164,22 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshDepthPricing = useCallback(() => {
+    const generation = ++depthPricingGeneration.current;
     fetchDepthPricing()
-      .then((data) => setDepthPricing(ready(data)))
-      .catch((error: unknown) => setDepthPricing(failed(error)));
+      .then((data) => {
+        if (generation <= lastAppliedDepthPricingGeneration.current) {
+          return;
+        }
+        lastAppliedDepthPricingGeneration.current = generation;
+        setDepthPricing(ready({ ...data, receivedAtMs: Date.now(), generation }));
+      })
+      .catch((error: unknown) => {
+        if (generation <= lastAppliedDepthPricingGeneration.current) {
+          return;
+        }
+        lastAppliedDepthPricingGeneration.current = generation;
+        setDepthPricing(failed(error));
+      });
   }, []);
 
   useEffect(() => {

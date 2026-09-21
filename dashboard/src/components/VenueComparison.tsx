@@ -1,6 +1,5 @@
 import { useState } from "react";
 import type {
-  DepthPricing,
   DepthQuote,
   ExecutableRoute,
   Opportunity,
@@ -8,16 +7,22 @@ import type {
 } from "../api/client";
 import { Async } from "../lib/async";
 import { age, nsToMs, price } from "../lib/format";
-import { TrackedBookStatus } from "../state/live";
+import {
+  contributingAgeMs,
+  DEPTH_PRICING_POLL_MS,
+  TrackedBookStatus,
+  TrackedDepthPricing,
+} from "../state/live";
 import { Panel } from "./Panel";
 import { Placeholder } from "./Placeholder";
 
 type Props = {
   pairs: PairRecord[];
   statuses: Record<string, TrackedBookStatus>;
-  pricing: Async<DepthPricing>;
+  pricing: Async<TrackedDepthPricing>;
   opportunities: Async<Opportunity[]>;
   nowMs: number;
+  feedLive: boolean;
   onRetry: () => void;
 };
 
@@ -38,7 +43,7 @@ type ComparisonRow = {
   cheapestBuy: VenueRow | null;
   bestSell: VenueRow | null;
   route: ExecutableRoute | null;
-  routeState: "available" | "insufficient" | "unavailable";
+  routeState: "available" | "insufficient" | "unavailable" | "stale";
   lifetime: { label: "current" | "most recent" | "unknown" | "unavailable"; value: string };
 };
 
@@ -50,11 +55,19 @@ function quoteKey(quote: Pick<DepthQuote, "exchange" | "pair" | "side" | "notion
   return `${quote.exchange}:${quote.pair}:${quote.side}:${quote.notional}`;
 }
 
+export function legEligible(status: TrackedBookStatus | undefined, nowMs: number): boolean {
+  return (
+    status === undefined ||
+    (status.eligible !== false && contributingAgeMs(status, nowMs) <= status.max_age_ms)
+  );
+}
+
 function sideView(
   quote: DepthQuote | undefined,
   status: TrackedBookStatus | undefined,
+  nowMs: number,
 ): SideView {
-  if (quote === undefined || status?.eligible === false) {
+  if (quote === undefined || !legEligible(status, nowMs)) {
     return { quote: null, state: "unavailable" };
   }
   return {
@@ -109,9 +122,21 @@ function routeSelection(
   routes: ExecutableRoute[],
   pair: string,
   notional: string,
+  statuses: Record<string, TrackedBookStatus>,
+  nowMs: number,
+  feedLive: boolean,
+  receivedAtMs: number,
 ): Pick<ComparisonRow, "route" | "routeState"> {
+  if (!feedLive) {
+    return { route: null, routeState: "unavailable" };
+  }
+
   const candidates = routes.filter(
-    (route) => route.pair === pair && route.notional === notional,
+    (route) =>
+      route.pair === pair &&
+      route.notional === notional &&
+      legEligible(statuses[bookKey(route.buy_exchange, pair)], nowMs) &&
+      legEligible(statuses[bookKey(route.sell_exchange, pair)], nowMs),
   );
   const executable = candidates.filter(
     (route) =>
@@ -130,6 +155,9 @@ function routeSelection(
         ? candidate
         : current;
     });
+    if (nowMs - receivedAtMs > 2 * DEPTH_PRICING_POLL_MS) {
+      return { route: best, routeState: "stale" };
+    }
     return { route: best, routeState: "available" };
   }
   return {
@@ -141,10 +169,11 @@ function routeSelection(
 function buildRows(
   pairs: PairRecord[],
   statuses: Record<string, TrackedBookStatus>,
-  pricing: DepthPricing,
+  pricing: TrackedDepthPricing,
   opportunities: Async<Opportunity[]>,
   nowMs: number,
   notional: string,
+  feedLive: boolean,
 ): ComparisonRow[] {
   const venuesByPair = new Map<string, string[]>();
   for (const record of pairs) {
@@ -165,14 +194,24 @@ function buildRows(
           buy: sideView(
             quoteMap.get(`${exchange}:${pair}:buy:${notional}`),
             status,
+            nowMs,
           ),
           sell: sideView(
             quoteMap.get(`${exchange}:${pair}:sell:${notional}`),
             status,
+            nowMs,
           ),
         };
       });
-      const route = routeSelection(pricing.routes, pair, notional);
+      const route = routeSelection(
+        pricing.routes,
+        pair,
+        notional,
+        statuses,
+        nowMs,
+        feedLive,
+        pricing.receivedAtMs,
+      );
       return {
         pair,
         venues,
@@ -214,6 +253,9 @@ function spreadCell(value: string | null | undefined, state: ComparisonRow["rout
   if (state === "insufficient") {
     return "insufficient depth";
   }
+  if (state === "stale") {
+    return "pricing stale";
+  }
   if (state === "unavailable" || value === null || value === undefined) {
     return "unavailable";
   }
@@ -226,6 +268,7 @@ export function VenueComparison({
   pricing,
   opportunities,
   nowMs,
+  feedLive,
   onRetry,
 }: Props) {
   const [selectedNotional, setSelectedNotional] = useState<string | null>(null);
@@ -265,7 +308,15 @@ export function VenueComparison({
     selectedNotional !== null && pricing.data.notionals.includes(selectedNotional)
       ? selectedNotional
       : pricing.data.notionals[0];
-  const rows = buildRows(pairs, statuses, pricing.data, opportunities, nowMs, notional);
+  const rows = buildRows(
+    pairs,
+    statuses,
+    pricing.data,
+    opportunities,
+    nowMs,
+    notional,
+    feedLive,
+  );
   return (
     <Panel
       title="Venue comparison"
@@ -297,27 +348,22 @@ export function VenueComparison({
             <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 border-b border-line-soft bg-raised/40 px-3 py-2 text-xs">
               <h3 className="font-medium text-ink">{row.pair}</h3>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-ink-2">
-                <span>
-                  Cheapest buy: <strong className="text-ink">{row.cheapestBuy?.exchange ?? "unavailable"}</strong>
-                </span>
-                <span>
-                  Best sell: <strong className="text-ink">{row.bestSell?.exchange ?? "unavailable"}</strong>
-                </span>
-                <span>
-                  Gross: {spreadCell(row.route?.gross_executable_spread_pct, row.routeState)}
-                </span>
-                <span>
-                  Net: {spreadCell(row.route?.net_executable_spread_pct, row.routeState)}
-                </span>
-                <span>
-                  {row.lifetime.label === "unavailable" ? "Lifetime" : `${row.lifetime.label} lifetime`}: {row.lifetime.value}
-                </span>
+                {row.routeState === "available" && row.route !== null ? (
+                  <span>
+                    Route: buy {row.route.buy_exchange} → sell {row.route.sell_exchange} · Gross {spreadCell(row.route.gross_executable_spread_pct, row.routeState)} · Net {spreadCell(row.route.net_executable_spread_pct, row.routeState)} · priced {age(Math.max(0, nowMs - pricing.data.receivedAtMs))} ago
+                  </span>
+                ) : (
+                  <span>
+                    Route: {row.routeState === "insufficient" ? "insufficient depth" : row.routeState === "stale" ? "pricing stale" : "unavailable"}
+                  </span>
+                )}
+                <span>Pair lifetime: {row.lifetime.value}</span>
               </div>
             </header>
             <div className="overflow-x-auto">
               <table className="min-w-full border-collapse text-xs">
                 <caption className="sr-only">
-                  Executable buy and sell prices and depth by venue for {row.pair} at {notional} quote units.
+                  Executable buy and sell prices and depth by venue for {row.pair} at {notional} quote units. Independent per-side best; not necessarily the displayed route.
                 </caption>
                 <thead>
                   <tr className="border-b border-line-soft text-left text-micro text-ink-3">
@@ -334,10 +380,10 @@ export function VenueComparison({
                       <th scope="row" className="px-3 py-1.5 text-left font-medium text-ink">
                         {venue.exchange}
                         {row.cheapestBuy?.exchange === venue.exchange ? (
-                          <span className="ml-2 text-micro text-signal">cheapest buy</span>
+                          <span className="ml-2 text-micro text-signal" title="independent per-side best; not necessarily the displayed route">cheapest buy</span>
                         ) : null}
                         {row.bestSell?.exchange === venue.exchange ? (
-                          <span className="ml-2 text-micro text-signal">best sell</span>
+                          <span className="ml-2 text-micro text-signal" title="independent per-side best; not necessarily the displayed route">best sell</span>
                         ) : null}
                       </th>
                       <td className="num px-3 py-1.5 text-right text-ink-2">{priceCell(venue.buy)}</td>

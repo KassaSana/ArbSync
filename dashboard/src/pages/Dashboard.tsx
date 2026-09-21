@@ -94,6 +94,7 @@ export default function Dashboard() {
           pricing={live.depthPricing}
           opportunities={live.opportunities}
           nowMs={live.nowMs}
+          feedLive={live.feedLive}
           onRetry={live.refreshDepthPricing}
         />
       </ErrorBoundary>

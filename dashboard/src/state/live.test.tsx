@@ -107,8 +107,16 @@ function Probe() {
           ? live.pairs.data.map((p) => `${p.exchange}:${p.pair}`).join(",") || "(empty)"
           : live.pairs.state}
       </span>
+      <span data-testid="pricing">
+        {live.depthPricing.state === "ready"
+          ? `${live.depthPricing.data.generation}:${live.depthPricing.data.notionals.join(",")}`
+          : live.depthPricing.state}
+      </span>
       <button type="button" onClick={live.refreshPairs}>
         refresh pairs
+      </button>
+      <button type="button" onClick={live.refreshDepthPricing}>
+        refresh pricing
       </button>
     </div>
   );
@@ -356,6 +364,49 @@ describe("live state", () => {
     await waitFor(() =>
       expect(screen.getByTestId("pairs")).toHaveTextContent("gemini:BTC-USD"),
     );
+  });
+
+  it("discards out-of-order depth pricing responses and keeps generation monotone", async () => {
+    const pending: Array<(response: unknown) => void> = [];
+    const payload = (notional: string) => ({ notionals: [notional], quotes: [], routes: [] });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string) => {
+        if (input.includes("/api/pricing/depth")) {
+          return new Promise((resolve) => pending.push(resolve));
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => (input.includes("/api/stats") ? {} : []),
+          text: async () => "",
+        });
+      }),
+    );
+
+    render(
+      <LiveProvider>
+        <Probe />
+      </LiveProvider>,
+    );
+    await waitFor(() => expect(pending).toHaveLength(1));
+
+    screen.getByRole("button", { name: "refresh pricing" }).click();
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    pending[1]?.({
+      ok: true,
+      json: async () => payload("200"),
+      text: async () => "",
+    });
+    await waitFor(() => expect(screen.getByTestId("pricing")).toHaveTextContent("2:200"));
+
+    pending[0]?.({
+      ok: true,
+      json: async () => payload("100"),
+      text: async () => "",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByTestId("pricing")).toHaveTextContent("2:200");
   });
 
   it("rebuilds state from the snapshot delivered after a reconnect", async () => {
