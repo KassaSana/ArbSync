@@ -1,0 +1,84 @@
+{
+  "payload": {
+    "books": [
+      {
+        "best_ask_price": "100",
+        "best_ask_size": "20",
+        "best_bid_price": "99",
+        "best_bid_size": "20",
+        "exchange": "gemini",
+        "pair": "BTC-USD",
+        "sequence": 7,
+        "timestamp_ns": "1719999998000000000"
+      },
+      {
+        "best_ask_price": "3001",
+        "best_ask_size": "0.5",
+        "best_bid_price": "3000",
+        "best_bid_size": "0.5",
+        "exchange": "gemini",
+        "pair": "ETH-USD",
+        "sequence": 7,
+        "timestamp_ns": "1719999998000000000"
+      },
+      {
+        "best_ask_price": "103",
+        "best_ask_size": "20",
+        "best_bid_price": "102",
+        "best_bid_size": "20",
+        "exchange": "coinbase",
+        "pair": "BTC-USD",
+        "sequence": 7,
+        "timestamp_ns": "1719999998000000000"
+      }
+    ],
+    "statuses": [
+      {
+        "age_ms": 250,
+        "connected": true,
+        "continuous": true,
+        "eligible": true,
+        "exchange": "gemini",
+        "initialized": true,
+        "max_age_ms": 30000,
+        "pair": "BTC-USD",
+        "reason": null
+      },
+      {
+        "age_ms": 0,
+        "connected": true,
+        "continuous": true,
+        "eligible": true,
+        "exchange": "gemini",
+        "initialized": true,
+        "max_age_ms": 30000,
+        "pair": "ETH-USD",
+        "reason": null
+      },
+      {
+        "age_ms": 40,
+        "connected": true,
+        "continuous": true,
+        "eligible": true,
+        "exchange": "coinbase",
+        "initialized": true,
+        "max_age_ms": 30000,
+        "pair": "BTC-USD",
+        "reason": null
+      },
+      {
+        "age_ms": null,
+        "connected": true,
+        "continuous": false,
+        "eligible": false,
+        "exchange": "coinbase",
+        "initialized": false,
+        "max_age_ms": 30000,
+        "pair": "ETH-USD",
+        "reason": "missing"
+      }
+    ]
+  },
+  "stream_sequence": 1,
+  "type": "state_snapshot"
+}

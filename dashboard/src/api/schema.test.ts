@@ -13,6 +13,68 @@ import {
   PayloadValidationError,
 } from "./schema";
 
+// What the backend actually sends, written by
+// `server/tests/test_wire_fixtures.py`. A key renamed on either side fails
+// here or there instead of only in the browser.
+const wireFixtures = import.meta.glob<unknown>("../../../server/tests/fixtures/wire/*.json", {
+  eager: true,
+  import: "default",
+});
+
+const wireDecoders: Record<string, (value: unknown) => unknown> = {
+  opportunities_recent: decodeOpportunities,
+  stats: decodeStats,
+  pairs: decodePairs,
+  adapters: decodeAdapterStatuses,
+  book_status: decodeBookStatuses,
+  pricing_depth: decodeDepthPricing,
+  system_overview: decodeSystemOverview,
+  system_stats: decodeWindowStats,
+  system_timeseries: decodeTimeseries,
+  live_state_snapshot: decodeLiveEnvelope,
+  live_top_of_book: decodeLiveEnvelope,
+  live_book_status: decodeLiveEnvelope,
+  live_opportunity: decodeLiveEnvelope,
+  live_opportunity_close: decodeLiveEnvelope,
+};
+
+const fixtureName = (path: string): string => path.replace(/^.*\//, "").replace(/\.json$/, "");
+
+describe("backend wire fixtures", () => {
+  it("exist for exactly the payloads the dashboard decodes", () => {
+    expect(Object.keys(wireFixtures).map(fixtureName).sort()).toEqual(
+      Object.keys(wireDecoders).sort(),
+    );
+  });
+
+  it.each(Object.entries(wireFixtures).map(([path, value]) => [fixtureName(path), value]))(
+    "%s decodes",
+    (name, value) => {
+      const decode = wireDecoders[name];
+      expect(decode).toBeDefined();
+      expect(() => decode(value)).not.toThrow();
+    },
+  );
+
+  it("cover every close reason and both ledger shapes", () => {
+    const recent = decodeOpportunities(wireFixtures["../../../server/tests/fixtures/wire/opportunities_recent.json"]);
+    expect(new Set(recent.map((row) => row.close_reason))).toEqual(
+      new Set([null, "spread_closed", "orphaned"]),
+    );
+    expect(recent.some((row) => row.pricing_ledgers.length > 0)).toBe(true);
+    expect(recent.some((row) => row.pricing_ledgers.length === 0)).toBe(true);
+  });
+
+  it("carry a live envelope of every message type", () => {
+    const types = Object.entries(wireFixtures)
+      .filter(([path]) => fixtureName(path).startsWith("live_"))
+      .map(([, value]) => decodeLiveEnvelope(value).type);
+    expect(new Set(types)).toEqual(
+      new Set(["state_snapshot", "top_of_book", "book_status", "opportunity"]),
+    );
+  });
+});
+
 const opportunity = {
   start_ns: "1720000000000000000",
   end_ns: null,

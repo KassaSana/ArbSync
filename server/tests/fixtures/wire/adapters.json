@@ -1,0 +1,10 @@
+[
+  {
+    "connected": true,
+    "exchange": "gemini",
+    "gap_count": 2,
+    "last_error": "connection reset",
+    "last_message_age_ms": 3000,
+    "reconnect_count": 1
+  }
+]

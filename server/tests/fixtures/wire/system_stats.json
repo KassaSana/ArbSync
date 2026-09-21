@@ -1,0 +1,20 @@
+{
+  "count": 3,
+  "lifetime": {
+    "closed_count": 1,
+    "max_seconds": 45.0,
+    "p50_seconds": 45.0,
+    "p90_seconds": 45.0
+  },
+  "max_spread_pct": "3.0",
+  "mean_spread_pct": "2.1366666666666667",
+  "peak_minute": {
+    "count": 1,
+    "minute_start_ns": "1719999960000000000"
+  },
+  "theoretical_profit_by_quote": {
+    "USD": "9.69"
+  },
+  "top_pair": "BTC-USD",
+  "window": "1h"
+}

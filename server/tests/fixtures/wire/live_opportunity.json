@@ -1,0 +1,38 @@
+{
+  "payload": {
+    "buy_exchange": "gemini",
+    "buy_price": "100",
+    "close_reason": null,
+    "close_spread_pct": null,
+    "duration_ns": null,
+    "end_ns": null,
+    "max_size": "1",
+    "pair": "BTC-USD",
+    "peak_profit": "3",
+    "peak_size": "1",
+    "peak_spread_pct": "3",
+    "pricing_ledgers": [
+      {
+        "buy_taker_fee_pct": "0.4",
+        "buy_vwap": "100",
+        "depth_impact_pct": "0.00",
+        "fee_impact_pct": "-1.006",
+        "gross_executable_spread_pct": "2.00",
+        "insufficient_depth": false,
+        "net_executable_spread_pct": "0.994",
+        "notional": "1000",
+        "sell_taker_fee_pct": "0.6",
+        "sell_vwap": "102",
+        "top_of_book_spread_pct": "2.00"
+      }
+    ],
+    "quote_asset": "USD",
+    "sell_exchange": "coinbase",
+    "sell_price": "103",
+    "spread_pct": "3",
+    "start_ns": "1719999970000000000",
+    "theoretical_profit": "3"
+  },
+  "stream_sequence": 3,
+  "type": "opportunity"
+}

@@ -32,6 +32,12 @@ npm run test
 npm run build
 ```
 
+The backend and dashboard share golden wire fixtures in `server/tests/fixtures/wire/`:
+pytest asserts they match what the API emits, and the dashboard tests run them through
+every decoder. After an intentional wire change, regenerate them with
+`uv run pytest server/tests/test_wire_fixtures.py --update-wire-fixtures`, re-run
+`npm run test`, and commit the updated JSON with the change.
+
 These commands work in PowerShell and Unix shells. Optional local hooks are installed
 with `uv run pre-commit install` from the repository root. For documentation-only
 changes, check links, commands, and formatting; artificial behavior tests are unnecessary.

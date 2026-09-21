@@ -1,0 +1,15 @@
+{
+  "payload": {
+    "age_ms": null,
+    "connected": true,
+    "continuous": false,
+    "eligible": false,
+    "exchange": "coinbase",
+    "initialized": false,
+    "max_age_ms": 30000,
+    "pair": "ETH-USD",
+    "reason": "missing"
+  },
+  "stream_sequence": 2,
+  "type": "book_status"
+}

@@ -1,0 +1,21 @@
+{
+  "bucket_seconds": 60,
+  "points": [
+    {
+      "bucket_start_ns": "1719999360000000000",
+      "count": 1,
+      "max_spread_pct": "3.0"
+    },
+    {
+      "bucket_start_ns": "1719999660000000000",
+      "count": 1,
+      "max_spread_pct": "0.41"
+    },
+    {
+      "bucket_start_ns": "1719999960000000000",
+      "count": 1,
+      "max_spread_pct": "3.0"
+    }
+  ],
+  "window": "1h"
+}

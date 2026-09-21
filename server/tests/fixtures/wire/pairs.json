@@ -1,0 +1,18 @@
+[
+  {
+    "exchange": "coinbase",
+    "pair": "BTC-USD"
+  },
+  {
+    "exchange": "coinbase",
+    "pair": "ETH-USD"
+  },
+  {
+    "exchange": "gemini",
+    "pair": "BTC-USD"
+  },
+  {
+    "exchange": "gemini",
+    "pair": "ETH-USD"
+  }
+]

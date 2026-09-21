@@ -1,0 +1,17 @@
+{
+  "all_time_count": 3,
+  "all_time_lifetime": {
+    "closed_count": 1,
+    "max_seconds": 45.0,
+    "p50_seconds": 45.0,
+    "p90_seconds": 45.0
+  },
+  "all_time_max_spread_pct": "3.0",
+  "all_time_peak_minute": {
+    "count": 1,
+    "minute_start_ns": "1719999960000000000"
+  },
+  "open_count": 1,
+  "started_at_ns": "1719999910000000000",
+  "uptime_seconds": 90
+}

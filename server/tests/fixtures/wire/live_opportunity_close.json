@@ -1,0 +1,24 @@
+{
+  "payload": {
+    "buy_exchange": "coinbase",
+    "buy_price": "3000.5",
+    "close_reason": "spread_closed",
+    "close_spread_pct": "-0.02",
+    "duration_ns": "45000000000",
+    "end_ns": "1719999745000000000",
+    "max_size": "0.25",
+    "pair": "ETH-USD",
+    "peak_profit": "3.69",
+    "peak_size": "0.3",
+    "peak_spread_pct": "0.41",
+    "pricing_ledgers": [],
+    "quote_asset": "USD",
+    "sell_exchange": "gemini",
+    "sell_price": "3010.25",
+    "spread_pct": "0.3249",
+    "start_ns": "1719999700000000000",
+    "theoretical_profit": "2.4375"
+  },
+  "stream_sequence": 4,
+  "type": "opportunity"
+}

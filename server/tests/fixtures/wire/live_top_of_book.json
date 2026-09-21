@@ -1,0 +1,14 @@
+{
+  "payload": {
+    "best_ask_price": "100",
+    "best_ask_size": "20",
+    "best_bid_price": "99",
+    "best_bid_size": "20",
+    "exchange": "gemini",
+    "pair": "BTC-USD",
+    "sequence": 7,
+    "timestamp_ns": "1719999998000000000"
+  },
+  "stream_sequence": 1,
+  "type": "top_of_book"
+}
