@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from collections.abc import Callable, Coroutine, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from math import isfinite
 from pathlib import Path
@@ -332,11 +332,29 @@ class Pipeline:
 
 @dataclass(frozen=True)
 class PipelineTasks:
+    """The running tasks of a pipeline, grouped by what shutdown must do to them.
+
+    Everything except `persistence` is a producer: it may enqueue into the
+    store or broadcaster, so shutdown cancels it before those close. Serve
+    mode runs adapters and the reconciler; replay-serve mode runs one replay
+    task instead and leaves the others unset.
+    """
+
     persistence: asyncio.Task[object]
-    reconciler: asyncio.Task[object]
-    adapters: list[asyncio.Task[object]]
+    reconciler: asyncio.Task[object] | None = None
+    adapters: list[asyncio.Task[object]] = field(default_factory=list)
     depth_sampler: asyncio.Task[object] | None = None
     eligibility_monitor: asyncio.Task[object] | None = None
+    replay: asyncio.Task[object] | None = None
+
+    def producers(self) -> list[asyncio.Task[object]]:
+        """Every task that can still enqueue work, adapters first."""
+        background = [
+            task
+            for task in (self.reconciler, self.depth_sampler, self.eligibility_monitor, self.replay)
+            if task is not None
+        ]
+        return [*self.adapters, *background]
 
 
 def build_pipeline(
@@ -466,24 +484,18 @@ async def start_pipeline(pipeline: Pipeline) -> PipelineTasks:
 async def shutdown_pipeline(pipeline: Pipeline, tasks: PipelineTasks) -> None:
     """Stop producers before consumers so nothing enqueues into a closed component.
 
-    Adapters and the reconciler are cancelled and awaited first: cancellation only
-    lands at their next await, and their teardown publishes final disconnected
-    statuses. The broadcaster then closes and flushes those, then the adapters'
-    shared REST pool closes, then the store. The persistence task is awaited last
-    so it can drain what the adapters enqueued before cancellation.
+    Producers (adapters, the reconciler, or a replay feed) are cancelled and
+    awaited first: cancellation only lands at their next await, and their
+    teardown publishes final disconnected statuses. The broadcaster then closes
+    and flushes those, then the adapters' shared REST pool closes, then the
+    store. The persistence task is awaited last so it can drain what the
+    producers enqueued before cancellation.
     """
     pipeline.supervisor.stop()
-    for task in tasks.adapters:
+    producers = tasks.producers()
+    for task in producers:
         task.cancel()
-    tasks.reconciler.cancel()
-    background = [tasks.reconciler]
-    if tasks.depth_sampler is not None:
-        tasks.depth_sampler.cancel()
-        background.append(tasks.depth_sampler)
-    if tasks.eligibility_monitor is not None:
-        tasks.eligibility_monitor.cancel()
-        background.append(tasks.eligibility_monitor)
-    await asyncio.gather(*tasks.adapters, *background, return_exceptions=True)
+    await asyncio.gather(*producers, return_exceptions=True)
     # Nothing can open an episode once the adapters are gone; close the ones
     # still standing so storage never holds an episode with no end.
     await deliver_episodes(
@@ -586,27 +598,16 @@ async def run_replay_serve(
     config = load_config(config_path)
     pipeline = build_pipeline(config)
     await pipeline.store.initialize()
-    persistence_task = pipeline.supervisor.create("persistence", pipeline.store.run())
-    replay_task = pipeline.supervisor.create(
-        "replay", feed_replay_into_pipeline(pipeline, capture_path, speed)
+    tasks = PipelineTasks(
+        persistence=pipeline.supervisor.create("persistence", pipeline.store.run()),
+        replay=pipeline.supervisor.create(
+            "replay", feed_replay_into_pipeline(pipeline, capture_path, speed)
+        ),
     )
     try:
         await _serve_app(pipeline)
     finally:
-        pipeline.supervisor.stop()
-        replay_task.cancel()
-        await asyncio.gather(replay_task, return_exceptions=True)
-        await deliver_episodes(
-            pipeline.detector.close_all(time.time_ns()),
-            store=pipeline.store,
-            broadcaster=pipeline.broadcaster,
-        )
-        await pipeline.broadcaster.aclose()
-        await asyncio.gather(
-            *(adapter.aclose() for adapter in pipeline.adapters), return_exceptions=True
-        )
-        await pipeline.store.close()
-        await persistence_task
+        await shutdown_pipeline(pipeline, tasks)
     for failure in pipeline.supervisor.failures():
         logger.error("replay_background_failure", **failure)
 

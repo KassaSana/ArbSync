@@ -23,7 +23,15 @@ from arb.config import (
 )
 from arb.detector import ArbitrageDetector
 from arb.metrics import observe_route_open
-from arb.types import BookEligibility, EventKind, LiveMessage, MarketEvent, PriceLevel
+from arb.types import (
+    BookEligibility,
+    EventKind,
+    LiveMessage,
+    MarketEvent,
+    OpportunityEpisode,
+    PriceLevel,
+    TopOfBook,
+)
 
 
 class StubAdapter(ExchangeAdapter):
@@ -347,8 +355,113 @@ async def test_shutdown_stops_producers_before_consumers_and_drains_persistence(
         "store.close",
         "persistence.drained",
     ]
-    assert all(task.done() for task in (tasks.persistence, tasks.reconciler, *tasks.adapters))
+    assert all(task.done() for task in (tasks.persistence, *tasks.producers()))
     # Cancellation during an orderly shutdown is not a background failure.
+    assert supervisor.failures() == []
+
+
+@pytest.mark.asyncio
+async def test_replay_serve_shutdown_follows_the_same_order_with_a_replay_producer() -> None:
+    """Replay-serve runs one replay task in place of adapters; it must not keep
+    a second, hand-rolled shutdown sequence that can drift from the live one."""
+    log: list[str] = []
+    store_closed = asyncio.Event()
+
+    class FakeStore:
+        async def enqueue(self, episode: OpportunityEpisode) -> bool:
+            log.append(f"store.enqueue:{episode.close_reason}")
+            return True
+
+        async def close(self) -> None:
+            log.append("store.close")
+            store_closed.set()
+
+    class FakeAdapter:
+        async def aclose(self) -> None:
+            log.append("adapter.aclose")
+
+    class FakeBroadcaster:
+        async def broadcast(self, message: LiveMessage) -> None:
+            log.append(f"broadcast:{message.type}")
+
+        async def aclose(self) -> None:
+            log.append("broadcaster.aclose")
+
+    async def replay_feed() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            log.append("replay.cancelled")
+            raise
+
+    async def persistence_worker() -> None:
+        await store_closed.wait()
+        log.append("persistence.drained")
+
+    detector = ArbitrageDetector(Decimal("0.1"))
+    detector.detect_for_pair(
+        "BTC-USD",
+        [
+            TopOfBook(
+                "gemini",
+                "BTC-USD",
+                Decimal("100"),
+                Decimal("1"),
+                Decimal("101"),
+                Decimal("1"),
+                1,
+                1,
+            ),
+            TopOfBook(
+                "coinbase",
+                "BTC-USD",
+                Decimal("103"),
+                Decimal("1"),
+                Decimal("104"),
+                Decimal("1"),
+                1,
+                1,
+            ),
+        ],
+        1,
+    )
+    assert len(detector.open_episodes()) == 1
+
+    supervisor = main.BackgroundTaskSupervisor()
+    tasks = main.PipelineTasks(
+        persistence=supervisor.create("persistence", persistence_worker()),
+        replay=supervisor.create("replay", replay_feed()),
+    )
+    await asyncio.sleep(0)
+    pipeline: Any = main.Pipeline(
+        config=None,  # type: ignore[arg-type]
+        started_at_ns=0,
+        book_manager=None,  # type: ignore[arg-type]
+        detector=detector,
+        store=FakeStore(),  # type: ignore[arg-type]
+        adapters=[FakeAdapter()],  # type: ignore[list-item]
+        expected_pairs=[],
+        broadcaster=FakeBroadcaster(),  # type: ignore[arg-type]
+        eligibility_publisher=None,  # type: ignore[arg-type]
+        supervisor=supervisor,
+        reconciler=None,  # type: ignore[arg-type]
+        depth_sampler=None,  # type: ignore[arg-type]
+        app=None,  # type: ignore[arg-type]
+    )
+
+    await main.shutdown_pipeline(pipeline, tasks)
+
+    assert log == [
+        "replay.cancelled",
+        "store.enqueue:shutdown",
+        "broadcast:opportunity",
+        "broadcaster.aclose",
+        "adapter.aclose",
+        "store.close",
+        "persistence.drained",
+    ]
+    assert detector.open_episodes() == []
+    assert tasks.producers() == [tasks.replay]
     assert supervisor.failures() == []
 
 
@@ -380,6 +493,7 @@ async def test_start_pipeline_initializes_store_before_any_task_runs(
 
     assert log[0] == "store.initialize"
     assert set(log[1:]) == {"consume:stub", "reconciler.run"}
+    assert tasks.reconciler is not None
     assert tasks.depth_sampler is not None
     assert tasks.eligibility_monitor is not None
     assert [
