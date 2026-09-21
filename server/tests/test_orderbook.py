@@ -42,8 +42,8 @@ def test_snapshot_initializes_book() -> None:
         )
     )
     assert result.accepted is True
-    assert manager.best_bid("gemini", "BTC-USD") == Decimal("100")
-    assert manager.best_ask("gemini", "BTC-USD") == Decimal("101")
+    assert top(manager).best_bid_price == Decimal("100")
+    assert top(manager).best_ask_price == Decimal("101")
 
 
 def test_incomplete_snapshot_clears_chain_and_cannot_be_healed_by_delta() -> None:
@@ -60,7 +60,7 @@ def test_incomplete_snapshot_clears_chain_and_cannot_be_healed_by_delta() -> Non
     assert result.reason == "snapshot_incomplete"
     assert result.stale is True
     assert result.requires_resync is True
-    assert manager.best_bid("gemini", "BTC-USD") is None
+    assert manager.top_of_book("gemini", "BTC-USD") is None
     assert manager.eligibility("gemini", "BTC-USD").reason == "uninitialized"
 
     delta = manager.apply(event(kind=EventKind.DELTA, sequence=21, bids=[], asks=[("101", "1")]))
@@ -99,7 +99,7 @@ def test_delta_updates_best_levels() -> None:
         event(kind=EventKind.DELTA, sequence=11, bids=[("100.5", "1.5")], asks=[])
     )
     assert result.accepted is True
-    assert manager.best_bid("gemini", "BTC-USD") == Decimal("100.5")
+    assert top(manager).best_bid_price == Decimal("100.5")
 
 
 def test_size_zero_removes_level() -> None:
@@ -113,7 +113,7 @@ def test_size_zero_removes_level() -> None:
         )
     )
     manager.apply(event(kind=EventKind.DELTA, sequence=11, bids=[("100", "0")], asks=[]))
-    assert manager.best_bid("gemini", "BTC-USD") == Decimal("99")
+    assert top(manager).best_bid_price == Decimal("99")
 
 
 def test_out_of_order_delta_is_rejected() -> None:
@@ -229,8 +229,8 @@ def test_recovery_after_gap_with_new_snapshot() -> None:
     )
     assert result.accepted is True
     assert manager.eligibility("gemini", "BTC-USD").eligible is True
-    assert manager.best_bid("gemini", "BTC-USD") == Decimal("99")
-    assert manager.best_ask("gemini", "BTC-USD") == Decimal("100")
+    assert top(manager).best_bid_price == Decimal("99")
+    assert top(manager).best_ask_price == Decimal("100")
 
 
 def test_multiple_pairs_and_exchanges_are_isolated() -> None:
@@ -255,10 +255,10 @@ def test_multiple_pairs_and_exchanges_are_isolated() -> None:
             pair="ETH-USD",
         )
     )
-    assert manager.best_bid("gemini", "BTC-USD") == Decimal("100")
-    assert manager.best_bid("coinbase", "ETH-USD") == Decimal("200")
-    assert manager.best_ask("coinbase", "BTC-USD") is None
-    assert manager.best_bid("gemini", "ETH-USD") is None
+    assert top(manager, "gemini", "BTC-USD").best_bid_price == Decimal("100")
+    assert top(manager, "coinbase", "ETH-USD").best_bid_price == Decimal("200")
+    assert manager.top_of_book("coinbase", "BTC-USD") is None
+    assert manager.top_of_book("gemini", "ETH-USD") is None
 
 
 def test_known_pairs_returns_all_seen_keys_sorted() -> None:
@@ -327,7 +327,7 @@ def test_size_zero_in_snapshot_does_not_create_level() -> None:
             asks=[("101", "1")],
         )
     )
-    assert manager.best_bid("gemini", "BTC-USD") == Decimal("100")
+    assert top(manager).best_bid_price == Decimal("100")
     levels = manager.level_snapshot("gemini", "BTC-USD")
     assert levels is not None
     assert len(levels[0]) == 1
@@ -341,7 +341,7 @@ def test_remove_nonexistent_level_is_noop() -> None:
     # Removing a price level that doesn't exist must not crash or alter state.
     result = manager.apply(event(kind=EventKind.DELTA, sequence=2, bids=[("50", "0")], asks=[]))
     assert result.accepted is True
-    assert manager.best_bid("gemini", "BTC-USD") == Decimal("100")
+    assert top(manager).best_bid_price == Decimal("100")
 
 
 def test_book_becomes_ineligible_when_age_limit_is_exceeded() -> None:

@@ -200,20 +200,6 @@ class OrderBookManager:
             )
         return BookUpdateResult(accepted=True, top_of_book=top)
 
-    def best_bid(self, exchange: str, pair: str) -> Decimal | None:
-        book = self._books.get((exchange, pair))
-        if not book:
-            return None
-        best = book.bids.best()
-        return best.price if best else None
-
-    def best_ask(self, exchange: str, pair: str) -> Decimal | None:
-        book = self._books.get((exchange, pair))
-        if not book:
-            return None
-        best = book.asks.best()
-        return best.price if best else None
-
     def top_of_book(self, exchange: str, pair: str) -> TopOfBook | None:
         book = self._books.get((exchange, pair))
         if not book or book.stale or book.sequence is None:
