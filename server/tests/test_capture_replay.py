@@ -572,3 +572,89 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
     assert deep_large["observations"] == 4 and deep_large["filled"] == 4
     assert deep_large["ineligible_samples"] == 3
     assert deep_large["subscribed_depth_levels"] == 5000
+
+
+def _crossed_gemini_delta() -> str:
+    # A bid above the standing ask: the adapter emits the delta and the book
+    # manager rejects it, and a rejected update still changes eligibility.
+    return (
+        '{"e":"depthUpdate","s":"BTCUSD","U":2,"u":2,"E":2000,"b":[["105","1"]],"a":[["102","1"]]}'
+    )
+
+
+def _write_observer_capture(path: Path) -> None:
+    async def scenario() -> None:
+        writer = CaptureWriter(path, {"gemini": ["btcusd"]})
+        task = asyncio.create_task(writer.run())
+        assert writer.record_connection("gemini", True, 1, wall_ns=1_000, mono_ns=1_000)
+        assert writer.record_ws("gemini", _gemini_snapshot(), [], wall_ns=2_000, mono_ns=2_000)
+        assert writer.record_ws("gemini", _crossed_gemini_delta(), [], wall_ns=3_000, mono_ns=3_000)
+        assert writer.record_connection(
+            "gemini", False, 1, wall_ns=4_000, mono_ns=4_000, reason="socket closed"
+        )
+        await writer.close()
+        await task
+
+    asyncio.run(scenario())
+
+
+def test_book_observer_sees_rejected_updates_and_connection_boundaries(tmp_path: Path) -> None:
+    path = tmp_path / "capture.jsonl"
+    _write_observer_capture(path)
+
+    seen: list[tuple[str, str, int, int]] = []
+    observed = asyncio.run(
+        replay_file(
+            path,
+            book_observer=lambda exchange, pair, wall_ns, mono_ns: seen.append(
+                (exchange, pair, wall_ns, mono_ns)
+            ),
+        )
+    )
+    plain = asyncio.run(replay_file(path))
+
+    assert observed.digest == plain.digest
+    assert any(not transition.accepted for transition in observed.transitions)
+    # The initial "connected" boundary precedes any book, so it notifies
+    # nothing; the snapshot, the rejected delta, and the disconnect each do.
+    assert seen == [
+        ("gemini", "BTC-USD", 2_000, 2_000),
+        ("gemini", "BTC-USD", 3_000, 3_000),
+        ("gemini", "BTC-USD", 4_000, 4_000),
+    ]
+
+
+def test_book_observer_sees_age_expiry(tmp_path: Path) -> None:
+    second = 1_000_000_000
+    path = tmp_path / "capture.jsonl"
+
+    async def scenario() -> None:
+        writer = CaptureWriter(path, {"gemini": ["btcusd"]})
+        task = asyncio.create_task(writer.run())
+        assert writer.record_ws("gemini", _gemini_snapshot(), [], wall_ns=second, mono_ns=second)
+        assert writer.record_ws(
+            "gemini",
+            '{"e":"depthUpdate","s":"BTCUSD","U":2,"u":2,"E":2000,"b":[["101","1"]],"a":[["103","1"]]}',
+            [],
+            wall_ns=3 * second,
+            mono_ns=3 * second,
+        )
+        await writer.close()
+        await task
+
+    asyncio.run(scenario())
+    seen: list[tuple[str, str, int]] = []
+    report = asyncio.run(
+        replay_file(
+            path,
+            max_age_seconds=1.0,
+            book_observer=lambda exchange, pair, _wall_ns, mono_ns: seen.append(
+                (exchange, pair, mono_ns)
+            ),
+        )
+    )
+
+    expiries = [event for event in report.lifecycle if event.kind == "book_expired"]
+    assert expiries, "a one-second age limit must expire the book before the next update"
+    assert ("gemini", "BTC-USD", expiries[0].mono_ns) in seen
+    assert seen.index(("gemini", "BTC-USD", expiries[0].mono_ns)) == 1

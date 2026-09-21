@@ -46,6 +46,7 @@ import hashlib
 import heapq
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
@@ -61,6 +62,12 @@ from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
 from arb.pricing import DepthSampler
 from arb.types import MarketEvent, OpportunityEpisode
+
+# Offline-only hook: (exchange, pair, wall_ns, mono_ns) after a book may have
+# changed. Fired after every transition (accepted or rejected), per expiring
+# book, and per book on connection boundaries. Must not mutate books and must
+# not affect the report digest.
+BookObserver = Callable[[str, str, int, int], None]
 
 
 class ReplayError(ValueError):
@@ -384,6 +391,7 @@ class _Replay:
         broadcaster: LiveBroadcaster,
         depth_sampler: DepthSampler | None,
         clock: _VirtualClock,
+        book_observer: BookObserver | None = None,
     ) -> None:
         self.frames = frames
         self.speed = speed
@@ -395,6 +403,7 @@ class _Replay:
         self.broadcaster = broadcaster
         self.depth_sampler = depth_sampler
         self.clock = clock
+        self.book_observer = book_observer
         self.report = ReplayReport()
         strict = header.provenance == "complete"
         self.ledger = _SnapshotLedger(frames, strict=strict)
@@ -638,6 +647,12 @@ class _Replay:
                 adapter.request_reconnect()
         self._update_deadline(event.exchange, event.pair)
         self._reschedule_expiry()
+        self._notify_book(event.exchange, event.pair, wall_ns, mono_ns)
+
+    def _notify_book(self, exchange: str, pair: str, wall_ns: int, mono_ns: int) -> None:
+        """Invoke the offline book observer without affecting the digest."""
+        if self.book_observer is not None:
+            self.book_observer(exchange, pair, wall_ns, mono_ns)
 
     async def _process_ingest(
         self,
@@ -694,6 +709,9 @@ class _Replay:
                 f"generation={boundary.generation} reason={boundary.reason or ''}",
             )
         await self._publish_statuses(exchange, frame.wall_ns, frame.mono_ns)
+        for book_exchange, pair in self.manager.known_pairs():
+            if book_exchange == exchange:
+                self._notify_book(exchange, pair, frame.wall_ns, frame.mono_ns)
 
     async def _on_ws(self, index: int, frame: CaptureFrame) -> None:
         exchange = frame.exchange
@@ -787,6 +805,8 @@ class _Replay:
         for exchange, pair in list(self._deadlines):
             self._update_deadline(exchange, pair)
         self._reschedule_expiry()
+        for exchange, pair in expiring:
+            self._notify_book(exchange, pair, wall_ns, mono_ns)
 
     def _on_sample(self, interval_ns: int, mono_ns: int) -> None:
         assert self.depth_sampler is not None
@@ -840,6 +860,7 @@ async def replay_frames(
     store: OpportunityStore | None = None,
     broadcaster: LiveBroadcaster | None = None,
     depth_sampler: DepthSampler | None = None,
+    book_observer: BookObserver | None = None,
 ) -> ReplayReport:
     """Replay validated capture frames through the production pipeline.
 
@@ -851,6 +872,9 @@ async def replay_frames(
     pipeline's own monitor. `speed` paces real sleeping between scheduled
     instants on either timeline; `None` replays as fast as possible. The
     digest is only comparable across runs on the recorded timeline.
+
+    `book_observer` is an offline-only hook called after every transition and
+    lifecycle boundary that can change a book. It never affects the report.
     """
     if speed is not None and speed <= 0:
         raise ReplayError(f"replay speed must be greater than zero; got {speed!r}")
@@ -880,6 +904,7 @@ async def replay_frames(
             broadcaster=active_broadcaster,
             depth_sampler=depth_sampler,
             clock=clock,
+            book_observer=book_observer,
         )
         report = await replay.run()
         # The capture ended with these spreads still standing. Closing them
@@ -910,6 +935,7 @@ async def replay_file(
     max_age_seconds: float = 30.0,
     speed: float | None = None,
     timeline: Literal["recorded", "live"] = "recorded",
+    book_observer: BookObserver | None = None,
 ) -> ReplayReport:
     """Read, validate, and replay one capture file."""
     header, frames = read_capture(path)
@@ -920,6 +946,7 @@ async def replay_file(
         max_age_seconds=max_age_seconds,
         speed=speed,
         timeline=timeline,
+        book_observer=book_observer,
     )
 
 
@@ -927,6 +954,7 @@ __all__ = [
     "REPLAY_LIFECYCLE_VERSION",
     "REPLAY_OBSERVATION_VERSION",
     "SYNC_SNAPSHOT_PURPOSES",
+    "BookObserver",
     "ReplayError",
     "ReplayLifecycleEvent",
     "ReplayObservation",
