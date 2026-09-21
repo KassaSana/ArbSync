@@ -129,35 +129,6 @@ def walk_levels(levels: Iterable[PriceLevel], notional: Decimal) -> DepthFill:
     )
 
 
-def walk_levels_for_base(levels: Iterable[PriceLevel], base_qty: Decimal) -> DepthFill:
-    """Consume `levels` in the order given until `base_qty` of base is filled.
-
-    Callers pass bids descending for a sell. The last level is taken partially
-    so the fill sells exactly `base_qty`. Quote proceeds are `filled_notional`.
-    """
-    if base_qty <= 0:
-        raise ValueError("base quantity must be positive")
-    raw = _walk_base(levels, Fraction(base_qty))
-    filled_notional = _to_decimal(raw.filled_notional)
-    if raw.insufficient_depth:
-        return DepthFill(
-            notional=filled_notional,
-            vwap=None,
-            filled_notional=filled_notional,
-            filled_base=_to_decimal(raw.filled_base),
-            levels_used=raw.levels_used,
-            insufficient_depth=True,
-        )
-    return DepthFill(
-        notional=filled_notional,
-        vwap=_to_decimal(raw.filled_notional / raw.filled_base),
-        filled_notional=filled_notional,
-        filled_base=_to_decimal(raw.filled_base),
-        levels_used=raw.levels_used,
-        insufficient_depth=False,
-    )
-
-
 def matched_route_fills(
     asks: Iterable[PriceLevel],
     bids: Iterable[PriceLevel],

@@ -10,7 +10,6 @@ from arb.pricing import (
     price_book,
     pricing_ledger,
     walk_levels,
-    walk_levels_for_base,
 )
 from arb.types import MarketEvent, PriceLevel, TopOfBook
 from hypothesis import given, settings
@@ -142,15 +141,18 @@ def _route_tops() -> tuple[TopOfBook, TopOfBook]:
     )
 
 
-def test_walk_for_base_takes_a_partial_last_level() -> None:
-    bids = levels(("150", "1"), ("90", "2"))
-    fill = walk_levels_for_base(bids, Decimal("2.5"))
+def test_matched_route_sell_leg_takes_a_partial_last_level() -> None:
+    # A $250 buy at $100 acquires exactly 2.5 base; the sell leg then walks
+    # the same bids the removed base-quantity wrapper used to walk directly.
+    _, sell_fill = matched_route_fills(
+        levels(("100", "10")), levels(("150", "1"), ("90", "2")), Decimal("250")
+    )
 
-    assert fill.insufficient_depth is False
-    assert fill.filled_base == Decimal("2.5")
-    assert fill.filled_notional == Decimal("285")
-    assert fill.vwap == Decimal("114")
-    assert fill.levels_used == 2
+    assert sell_fill.insufficient_depth is False
+    assert sell_fill.filled_base == Decimal("2.5")
+    assert sell_fill.filled_notional == Decimal("285")
+    assert sell_fill.vwap == Decimal("114")
+    assert sell_fill.levels_used == 2
 
 
 def test_matched_route_uses_asymmetric_prices_on_one_base_quantity() -> None:
