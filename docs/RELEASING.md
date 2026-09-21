@@ -40,7 +40,7 @@ cannot substitute for a Unix-like runner when only Windows has been exercised.
   The backend suite includes an installed-wheel check from outside the checkout.
 - [ ] Run `npm ci`, typecheck, lint, tests, and build from `dashboard/`.
 - [ ] Run the installed `arbsync --help`, example generation, and missing-config checks;
-  run the capture/replay commands and both documented benchmark commands. Smoke-test backend
+  run the capture/replay commands and a short `tools/profile_pipeline.py` run. Smoke-test backend
   startup and the dashboard dev proxy with a disposable database. Stop their processes
   when the checks finish; live-network availability is separate evidence.
 - [ ] Run the same automated checks on Windows and a Unix-like CI runner for this commit.

@@ -26,7 +26,7 @@ minutes without an account.
 - Bounded persistence and dashboard queues so slow consumers do not block ingestion
 - FastAPI REST, WebSocket, health, readiness, and Prometheus interfaces
 - A React/TypeScript dashboard for spreads, feed health, opportunities, and statistics
-- Fixture replay, property-based tests, synthetic benchmarks, and live-soak tooling
+- Fixture replay, property-based tests, a connected-dashboard performance harness, and live-soak tooling
 
 The default configuration tracks 9 assets on all 3 exchanges in USD: 27 exchange/pair
 subscriptions forming 9 three-venue markets. See [`config.toml`](config.toml) for the
@@ -302,25 +302,13 @@ provenance. Offline research
 can explicitly opt into a lossy artifact with `--allow-lossy`, which is recorded
 in its report metadata.
 
-The committed synthetic results are a September 8 baseline from before episode tracking
-and depth/fee ledgers. They are hardware-specific, do not represent the cost of the current
-full opportunity path, and do not represent live exchange or network performance.
-
-| Path | p50 | p95 | Throughput |
-| --- | ---: | ---: | ---: |
-| Detector only | 3.42 us | 3.88 us | 16,454,491 evaluations/min |
-| Synthetic ingest-to-detection | 16.00 us | 17.33 us | 1,920,581 events/min |
-
-Reproduce them from the repository root:
-
-```powershell
-uv run python tools/benchmark.py
-uv run python tools/bench_e2e.py --iterations 10000
-```
-
-See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for methodology and
-[`artifacts/benchmarks/results.json`](artifacts/benchmarks/results.json) for the
-committed raw results.
+Performance evidence comes from the connected-dashboard harness
+(`tools/profile_pipeline.py`), which drives the production adapters, handler, broadcaster,
+SQLite writer, and a production-built dashboard in headless Chrome under modeled local
+load. It is hardware-specific and does not represent live exchange or network
+performance. See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for methodology and the
+committed reports under
+[`artifacts/benchmarks/performance/`](artifacts/benchmarks/performance/).
 The live observer is documented there as well. The committed long-duration evidence is a
 four-hour uninterrupted live soak from 2026-09-16, reviewed in
 [`docs/VALIDATION.md`](docs/VALIDATION.md#live-soak-2026-09-16).

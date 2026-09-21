@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Removed
+
+- The detector microbenchmark and synthetic websocket benchmark (`tools/benchmark.py`,
+  `tools/bench_e2e.py`) and their `artifacts/benchmarks/results.json`. Their committed
+  figures predated episodes and depth/fee ledgers; `tools/profile_pipeline.py` is the
+  performance harness.
+
 ### Correctness
 
 - Accept crash-recovered episodes with `close_reason="orphaned"` on the API and

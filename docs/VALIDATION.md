@@ -106,8 +106,8 @@ uv 0.12.10, and npm 11.17.0, and on hosted runners:
   (307 tests each), which is the evidence for those classifiers in `pyproject.toml`.
 - `tools/check_release.py --require-clean` passed; the synthetic replay, both documented
   benchmarks, and the installed `arbsync` help, example generation, overwrite refusal,
-  and missing-configuration paths behaved as documented. Re-running the benchmarks
-  rewrites `artifacts/benchmarks/results.json`; the committed values are the citation.
+  and missing-configuration paths behaved as documented. (The two synthetic benchmark
+  scripts and their `results.json` were retired on 2026-09-21; see `BENCHMARKS.md`.)
 - A clean checkout built `arbsync-0.1.0-py3-none-any.whl` and
   `arbsync-0.1.0.tar.gz`; the checker's `checks.json` records their
   contents and SHA-256 hashes, which the annotated release tag repeats.
@@ -128,15 +128,6 @@ Documentation corrections found during this pass were committed after the candid
 commit above, so the tagged release commit is later; its own hosted CI run and rebuilt
 artifact hashes are recorded in the release notes and tag message.
 
-## Synthetic performance
-
-The committed detector and ingest-to-detection measurements are documented in
-[`BENCHMARKS.md`](BENCHMARKS.md), with raw values in
-[`../artifacts/benchmarks/results.json`](../artifacts/benchmarks/results.json).
-
-These measurements are local and synthetic. They do not include internet latency or
-prove sustained behavior against live exchanges.
-
 ## Connected-dashboard performance
 
 A burst investigation dated 2026-09-08 measured the production ingestion path with
@@ -144,7 +135,7 @@ a real headless browser running the built dashboard, at 110, 1,100 and 5,500
 events/s. Method, full results and limits are in
 [`../artifacts/benchmarks/performance/README.md`](../artifacts/benchmarks/performance/README.md).
 
-This closed a gap the earlier synthetic figures concealed. Detector-only timing
+This closed a gap the earlier, since-retired synthetic figures concealed. Detector-only timing
 had not shown that, under bursts above the current rate, the baseline dropped
 persistence rows (9,062–9,104 per run at 5,500/s) and evicted the dashboard when
 its outgoing queue filled. Both are now zero at every measured rate, stored rows
