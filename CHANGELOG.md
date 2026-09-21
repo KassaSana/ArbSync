@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- Keep venue-comparison route economics coherent with canonical book eligibility and
+  live-feed state, reject out-of-order pricing responses, and label stale cached pricing
+  instead of presenting it as current route economics.
+
 ### Removed
 
 - The detector microbenchmark and synthetic websocket benchmark (`tools/benchmark.py`,

@@ -278,8 +278,13 @@ state while reconnecting.
 
 The current opportunity table displays episode peak spread and theoretical peak profit,
 the first configured notional's stored net executable spread, and episode lifetime. The
-separate venue-comparison view described by ARB-034 is not implemented; complete depth
-quotes and all configured notionals are available through `/api/pricing/depth`.
+venue-comparison panel polls `/api/pricing/depth` for executable quotes and route
+economics at each configured notional. It displays independent per-side best badges,
+while its selected route is gated by the canonical eligibility of both legs, local age
+expiry, and the live-feed state. A disconnected, stale, incomplete, or crossed leg makes
+the route unavailable; an old pricing response is shown as pricing stale rather than as
+current economics. Route labels name the exact buy and sell venues that produced the
+displayed gross and net values, while pair lifetime remains aggregated across routes.
 
 ## Observability and failure behavior
 
