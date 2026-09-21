@@ -243,6 +243,31 @@ class ExecutableRoutePrice:
         }
 
 
+def executable_spread_pcts(
+    *,
+    cost: Decimal,
+    proceeds: Decimal,
+    buy_taker_fee_pct: Decimal,
+    sell_taker_fee_pct: Decimal,
+) -> tuple[Decimal, Decimal]:
+    """Gross and net executable spread percent from matched-route cost and proceeds.
+
+    `cost` is the quote spent on the buy leg and `proceeds` the quote received
+    for the same base on the sell leg. Offline research re-nets recorded fills
+    under alternative fee schedules through this same arithmetic.
+    """
+    gross = (proceeds - cost) / cost * 100
+    net = (
+        (
+            proceeds * (Decimal(1) - sell_taker_fee_pct / 100)
+            - cost * (Decimal(1) + buy_taker_fee_pct / 100)
+        )
+        / cost
+        * 100
+    )
+    return gross, net
+
+
 def pricing_ledger(
     *,
     notional: Decimal,
@@ -276,14 +301,11 @@ def pricing_ledger(
         )
     cost = buy_fill.filled_notional
     proceeds = sell_fill.filled_notional
-    gross = (proceeds - cost) / cost * 100
-    net = (
-        (
-            proceeds * (Decimal(1) - sell_taker_fee_pct / 100)
-            - cost * (Decimal(1) + buy_taker_fee_pct / 100)
-        )
-        / cost
-        * 100
+    gross, net = executable_spread_pcts(
+        cost=cost,
+        proceeds=proceeds,
+        buy_taker_fee_pct=buy_taker_fee_pct,
+        sell_taker_fee_pct=sell_taker_fee_pct,
     )
     return PricingLedger(
         notional=notional,
