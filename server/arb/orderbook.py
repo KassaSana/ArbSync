@@ -293,11 +293,6 @@ class OrderBookManager:
         )
         return status, top if status.eligible else None
 
-    def eligible_top_of_book(
-        self, exchange: str, pair: str, now_monotonic_ns: int | None = None
-    ) -> TopOfBook | None:
-        return self._evaluate(exchange, pair, now_monotonic_ns)[1]
-
     def eligible_books(
         self,
         pair: str,

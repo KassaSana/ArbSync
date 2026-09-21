@@ -362,7 +362,7 @@ def test_book_becomes_ineligible_when_age_limit_is_exceeded() -> None:
     status = manager.eligibility("gemini", "BTC-USD", now[0])
     assert status.eligible is False
     assert status.reason == "too_old"
-    assert manager.eligible_top_of_book("gemini", "BTC-USD", now[0]) is None
+    assert manager._evaluate("gemini", "BTC-USD", now[0])[1] is None
 
 
 def test_disconnect_invalidates_book_until_new_snapshot() -> None:
@@ -462,7 +462,7 @@ def test_eligible_books_matches_per_venue_eligibility_sweep() -> None:
             top
             for exchange, book_pair in sorted(manager._books)
             if book_pair == pair
-            if (top := manager.eligible_top_of_book(exchange, pair, 1_000)) is not None
+            if (top := manager._evaluate(exchange, pair, 1_000)[1]) is not None
         ]
         return found if len(found) >= 2 else []
 
@@ -504,6 +504,6 @@ def test_top_of_book_carries_receipt_time_of_the_event_that_produced_it() -> Non
     assert "received_monotonic_ns" not in stamped.as_payload()
     # The eligibility path returns the same stamped top.
     now[0] = 2_000
-    eligible = manager.eligible_top_of_book("gemini", "BTC-USD", now[0])
+    eligible = manager._evaluate("gemini", "BTC-USD", now[0])[1]
     assert eligible is not None and eligible.received_monotonic_ns == 1_500
     assert manager.now_monotonic_ns() == 2_000
