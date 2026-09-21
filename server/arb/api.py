@@ -14,7 +14,7 @@ from arb.adapters.base import ExchangeAdapter
 from arb.broadcast import LiveBroadcaster
 from arb.metrics import book_metrics, render_metrics
 from arb.orderbook import OrderBookManager
-from arb.persistence import OpportunityStore
+from arb.persistence import OpportunityStore, WindowStats
 from arb.pricing import DepthSampler
 from arb.types import LiveMessage
 
@@ -77,7 +77,7 @@ def create_app(
         ]
 
     @app.get("/api/stats")
-    async def stats(window: Window = "1h") -> dict[str, object]:
+    async def stats(window: Window = "1h") -> WindowStats:
         return await store.stats(window_to_ns(window))
 
     @app.get("/api/system/overview")

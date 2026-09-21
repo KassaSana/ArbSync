@@ -6,13 +6,30 @@ import time
 from collections.abc import Iterable
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 import aiosqlite
 import structlog
 
 from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
 from arb.types import OpportunityEpisode
+
+
+class WindowStats(TypedDict):
+    """Aggregate over episodes that started inside a window.
+
+    Spreads and profits are decimal strings; `count` is exact.
+    """
+
+    count: int
+    max_spread_pct: str
+    theoretical_profit_by_quote: dict[str, str]
+
+
+class ExtendedWindowStats(WindowStats):
+    mean_spread_pct: str
+    top_pair: str | None
+
 
 logger = structlog.get_logger(__name__)
 
@@ -458,7 +475,7 @@ class OpportunityStore:
             counts[pair] = counts.get(pair, 0) + int(count)
         return counts
 
-    async def stats(self, window_ns: int) -> dict[str, Any]:
+    async def stats(self, window_ns: int) -> WindowStats:
         cutoff_ns = time.time_ns() - window_ns
         async with aiosqlite.connect(self.db_path) as db:
             count, max_spread, _spread, profits = await self._windowed_totals(db, cutoff_ns)
@@ -471,7 +488,7 @@ class OpportunityStore:
             },
         }
 
-    async def extended_stats(self, window_ns: int | None) -> dict[str, Any]:
+    async def extended_stats(self, window_ns: int | None) -> ExtendedWindowStats:
         cutoff_ns = 0 if window_ns is None else time.time_ns() - window_ns
         async with aiosqlite.connect(self.db_path) as db:
             count, max_spread, sum_spread, profits = await self._windowed_totals(db, cutoff_ns)
