@@ -326,7 +326,9 @@ def test_fixture_replay_records_ages_for_every_episode_and_evaluation() -> None:
     config = load_config("config.toml")
     config = replace(config, detector=replace(config.detector, threshold_pct=0.0))
     header, frames = read_capture(FIXTURE)
-    report, sampler, recorder = asyncio.run(replay_for_research(header, frames, config, bands()))
+    report, sampler, recorder, _ = asyncio.run(
+        replay_for_research(header, frames, config, bands(), net_intervals=False)
+    )
     episodes = _canonical_episode_rows(report)
     assert episodes, "a zero threshold must open episodes on real traffic"
     rows = route_leg_age_rows(recorder, episodes)

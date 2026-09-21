@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import gzip
+import json
 import math
 import random
+from dataclasses import replace
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from arb.config import load_config
 from arb.replay import ReplayObservation
 from lead_lag import price_series
 from research import (
@@ -14,6 +20,7 @@ from research import (
     _lead_lag_sensitivity_rows,
     _sensitivity_variants,
     _survival_rows,
+    run_research,
 )
 
 
@@ -255,3 +262,108 @@ def test_survival_profit_is_decimal_derived() -> None:
 
     net_profit = cast("dict[str, Any]", rows[0]["net_profit_by_quote"])
     assert Decimal(net_profit["USD"]) == Decimal("3.33333333333333333")
+
+
+FIXTURE = Path("server/tests/fixtures/captured/three_venue_150s_20260917.jsonl.gz")
+
+
+def _fixture_slice(destination: Path, fraction: int = 12) -> Path:
+    """The leading slice of the committed capture: enough books to price, quick to replay.
+
+    The footer is rewritten so the slice validates as a clean, lossless capture.
+    """
+    with gzip.open(FIXTURE, "rt", encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+    header, frames, footer = lines[0], lines[1:-1], json.loads(lines[-1])
+    kept = frames[: len(frames) // fraction]
+    by_kind: dict[str, int] = {}
+    for line in kept:
+        kind = json.loads(line)["kind"]
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+    footer["frame_count"] = len(kept)
+    footer["frame_counts"] = {
+        "attempted": len(kept),
+        "accepted": len(kept),
+        "flushed": len(kept),
+        "attempted_by_kind": by_kind,
+        "accepted_by_kind": by_kind,
+        "dropped": {},
+    }
+    body = "\n".join([header, *kept, json.dumps(footer)]) + "\n"
+    destination.write_text(body, encoding="utf-8", newline="\n")
+    return destination
+
+
+def _net_research(tmp_path: Path, name: str, **overrides: Any) -> dict[str, object]:
+    config = load_config("config.toml")
+    config = replace(config, detector=replace(config.detector, threshold_pct=0.0))
+    sliced = _fixture_slice(tmp_path / "slice.jsonl")
+    return asyncio.run(
+        run_research(
+            sliced,
+            config,
+            tmp_path / name,
+            tick_bin_ns=100_000_000,
+            max_lag_ns=1_000_000_000,
+            lag_step_ns=100_000_000,
+            null_surrogates=0,
+            sensitivity=False,
+            **overrides,
+        )
+    )
+
+
+def test_net_intervals_replay_deterministically_and_join_theoretical_episodes(
+    tmp_path: Path,
+) -> None:
+    first = _net_research(tmp_path, "first", write_net_signal=True)
+    second = _net_research(tmp_path, "second")
+    assert first["replay_digest"] == second["replay_digest"]
+    for name in ("net_intervals.jsonl", "net_interval_sensitivity.jsonl"):
+        assert (tmp_path / "first" / name).read_bytes() == (tmp_path / "second" / name).read_bytes()
+
+    metadata = cast(dict[str, Any], first["measurement"])["net_intervals"]
+    assert metadata["enabled"] is True
+    assert metadata["threshold_pct"] == "0"
+    assert metadata["delay_ns"] == 0
+    assert metadata["delay_grid_ms"] == [50, 250, 1000]
+    assert metadata["taker_fees_pct"] == {"binance": "0.6", "coinbase": "0.6", "gemini": "0.4"}
+    assert metadata["notionals"] == ["100", "1000", "10000", "50000"]
+    assert metadata["sensitivity_variants"] == "disabled"
+    assert metadata["signal_rows"] > 0
+    assert metadata["signal_bytes_estimate"] > metadata["signal_rows"]
+    counts = cast(dict[str, int], first["dataset_counts"])
+    assert counts["net_signal"] == metadata["signal_rows"]
+    assert counts["net_interval_sensitivity"] == 0
+
+    signal = [
+        json.loads(line)
+        for line in (tmp_path / "first" / "net_signal.jsonl").read_text().splitlines()
+    ]
+    priced = [row for row in signal if row["state"] == "priced"]
+    assert priced, "real three-venue books must price some routes"
+    assert all(
+        row["buy_cost_quote"] == row["notional"] and row["sell_proceeds_quote"] is not None
+        for row in priced
+    )
+    assert first["version"] == 4
+
+    intervals = [
+        json.loads(line)
+        for line in (tmp_path / "first" / "net_intervals.jsonl").read_text().splitlines()
+    ]
+    for row in intervals:
+        assert row["module"] == "net_interval"
+        assert row["fee_mode"] == "configured"
+        assert row["theoretical_open_at_start"] in (True, False)
+        assert Decimal(row["theoretical_coverage_fraction"]) <= 1
+        assert Decimal(row["peak_net_spread_pct"]) > 0
+
+
+def test_net_intervals_can_be_disabled(tmp_path: Path) -> None:
+    metadata = _net_research(tmp_path, "off", net_enabled=False)
+    measurement = cast(dict[str, Any], metadata["measurement"])["net_intervals"]
+    assert measurement == {"enabled": False}
+    counts = cast(dict[str, int], metadata["dataset_counts"])
+    assert counts["net_intervals"] == 0
+    assert "net_signal" not in counts

@@ -38,6 +38,14 @@ from arb.pricing import DepthSampler
 from arb.replay import ReplayObservation, ReplayReport, replay_frames
 from episode_stats import survival_by_notional
 from lead_lag import analyze_pair, lag_grid, lead_lag_row, price_series
+from net_intervals import (
+    SIGNAL_ROW_BYTES_ESTIMATE,
+    NetSignalRecorder,
+    build_net_datasets,
+    net_signal_row,
+)
+
+DEFAULT_NET_DELAYS_MS = (50, 250, 1000)
 
 ESTIMATOR_REFERENCES = (
     "Hayashi & Yoshida (2005) Bernoulli 11(2) overlap covariance; "
@@ -91,8 +99,14 @@ async def replay_for_research(
     frames: list[CaptureFrame],
     config: AppConfig,
     bands: AgeSkewBands | None = None,
-) -> tuple[ReplayReport, DepthSampler, AgeSkewRecorder]:
-    """Replay one capture with the configured depth and fee assumptions."""
+    *,
+    net_intervals: bool = True,
+) -> tuple[ReplayReport, DepthSampler, AgeSkewRecorder, NetSignalRecorder | None]:
+    """Replay one capture with the configured depth and fee assumptions.
+
+    `net_intervals` attaches the offline net-signal recorder to the replay's
+    book observer; it is returned as None when disabled.
+    """
     recorder = AgeSkewRecorder(bands if bands is not None else default_bands())
     book_manager = OrderBookManager(max_age_seconds=config.order_books.max_age_seconds)
     exchanges = set(header.exchanges)
@@ -106,6 +120,7 @@ async def replay_for_research(
         fees,
         interval_seconds=config.pricing.sample_interval_seconds,
     )
+    net_recorder = NetSignalRecorder(book_manager, sampler) if net_intervals else None
     detector = ArbitrageDetector(
         threshold_pct=Decimal(str(config.detector.threshold_pct)),
         ledger_factory=sampler.ledgers_for_route,
@@ -120,6 +135,7 @@ async def replay_for_research(
         book_manager=book_manager,
         detector=detector,
         depth_sampler=sampler,
+        book_observer=None if net_recorder is None else net_recorder.observe,
     )
     if detector.open_episodes():
         # A capture ending with a standing opportunity needs a deterministic
@@ -127,7 +143,7 @@ async def replay_for_research(
         last_wall_ns = max(frame.wall_ns for frame in frames)
         last_mono_ns = max(frame.mono_ns for frame in frames)
         report.opportunities.extend(detector.close_all(last_wall_ns, last_mono_ns))
-    return report, sampler, recorder
+    return report, sampler, recorder, net_recorder
 
 
 def default_bands() -> AgeSkewBands:
@@ -255,6 +271,13 @@ def analyze_capture(
     windows: int = 4,
     null_surrogates: int = 20,
     sensitivity: bool = True,
+    net_recorder: NetSignalRecorder | None = None,
+    net_threshold_pct: Decimal = Decimal("0"),
+    net_hysteresis_pct: Decimal = Decimal("0"),
+    net_delays_ms: tuple[int, ...] = DEFAULT_NET_DELAYS_MS,
+    detector_threshold_pct: Decimal = Decimal("0"),
+    end_mono_ns: int | None = None,
+    end_wall_ns: int | None = None,
 ) -> dict[str, object]:
     """Build all file-backed research datasets from one replay report."""
     settings = LeadLagSettings(
@@ -266,6 +289,8 @@ def analyze_capture(
         null_surrogates=null_surrogates,
     )
     settings.validate()
+    if net_threshold_pct < 0 or net_hysteresis_pct < 0 or any(d < 0 for d in net_delays_ms):
+        raise ValueError("net threshold, hysteresis, and delays must be non-negative")
     episodes = _canonical_episode_rows(report)
     survival = _survival_rows(episodes)
     fill_rates = [{"module": "venue_fill_rate", **row} for row in sampler.tracker.rows()]
@@ -274,6 +299,58 @@ def analyze_capture(
         _lead_lag_sensitivity_rows(report.observations, settings) if sensitivity else []
     )
     bands = recorder.bands
+    net_measurement: dict[str, object] = {"enabled": net_recorder is not None}
+    net_intervals: list[dict[str, object]] = []
+    net_sensitivity_rows: list[dict[str, object]] = []
+    if net_recorder is not None:
+        net_datasets = build_net_datasets(
+            net_recorder,
+            episodes,
+            threshold_pct=net_threshold_pct,
+            hysteresis_pct=net_hysteresis_pct,
+            detector_threshold_pct=detector_threshold_pct,
+            delays_ms=net_delays_ms,
+            end_mono_ns=end_mono_ns if end_mono_ns is not None else _report_end(report, "mono_ns"),
+            end_wall_ns=end_wall_ns if end_wall_ns is not None else _report_end(report, "wall_ns"),
+            sensitivity=sensitivity,
+        )
+        net_intervals = net_datasets.intervals
+        net_sensitivity_rows = net_datasets.sensitivity
+        net_measurement.update(
+            {
+                "threshold_pct": str(net_threshold_pct),
+                "hysteresis_pct": str(net_hysteresis_pct),
+                "delay_ns": 0,
+                "delay_grid_ms": list(net_delays_ms),
+                "detector_threshold_pct": str(detector_threshold_pct),
+                "taker_fees_pct": {
+                    exchange: str(fee)
+                    for exchange, fee in sorted(net_recorder.taker_fees_pct.items())
+                },
+                "notionals": [str(value) for value in net_recorder.sampler.notionals],
+                "sensitivity_variants": (
+                    [
+                        variant.name
+                        for variant in net_datasets.variants
+                        if variant.name != "baseline"
+                    ]
+                    if sensitivity
+                    else "disabled"
+                ),
+                "timing_fidelity": (
+                    "recorded local receipt timestamps; intervals open and close on the "
+                    "observation that changed the signal, so durations are bounded below by "
+                    "the capture host's monotonic clock resolution"
+                ),
+                "signal_rows": net_datasets.signal_rows,
+                "signal_bytes_estimate": net_datasets.signal_rows * SIGNAL_ROW_BYTES_ESTIMATE,
+                "note": (
+                    "per-notional net-executable intervals from matched depth and explicit "
+                    "taker fees, a separate dataset from theoretical episodes; the base "
+                    "dataset opens when net exceeds the threshold (default 0) with no delay"
+                ),
+            }
+        )
     return {
         "episodes": episodes,
         "survival": survival,
@@ -283,6 +360,8 @@ def analyze_capture(
         "route_leg_ages": route_leg_age_rows(recorder, episodes),
         "age_skew_bands": age_skew_band_rows(recorder, episodes),
         "age_skew_gate_sensitivity": gate_sensitivity_rows(recorder, episodes),
+        "net_intervals": net_intervals,
+        "net_interval_sensitivity": net_sensitivity_rows,
         "measurement": {
             "price_series_source": "canonical_post_apply_observations",
             "age_bands_ms": [edge // 1_000_000 for edge in bands.age_edges_ns],
@@ -316,8 +395,16 @@ def analyze_capture(
                 else "disabled"
             ),
             "clock_skew_warning": "local receive timestamps include network path and exchange clock effects",
+            "net_intervals": net_measurement,
         },
     }
+
+
+def _report_end(report: ReplayReport, attribute: str) -> int:
+    """Last recorded instant in a report, for callers without the capture's frames."""
+    candidates = [int(getattr(item, attribute)) for item in report.transitions]
+    candidates.extend(int(getattr(item, attribute)) for item in report.lifecycle)
+    return max(candidates, default=0)
 
 
 def _write_jsonl(path: Path, rows: Iterable[dict[str, object]]) -> int:
@@ -344,9 +431,18 @@ async def run_research(
     sensitivity: bool = True,
     allow_lossy: bool = False,
     bands: AgeSkewBands | None = None,
+    net_threshold_pct: Decimal = Decimal("0"),
+    net_hysteresis_pct: Decimal = Decimal("0"),
+    net_delays_ms: tuple[int, ...] = DEFAULT_NET_DELAYS_MS,
+    net_enabled: bool = True,
+    write_net_signal: bool = False,
 ) -> dict[str, object]:
     header, frames = read_capture(capture, allow_lossy=allow_lossy)
-    replay_report, sampler, recorder = await replay_for_research(header, frames, config, bands)
+    replay_report, sampler, recorder, net_recorder = await replay_for_research(
+        header, frames, config, bands, net_intervals=net_enabled
+    )
+    end_mono_ns = max(frame.mono_ns for frame in frames) if frames else 0
+    end_wall_ns = max(frame.wall_ns for frame in frames) if frames else 0
     datasets = analyze_capture(
         replay_report,
         sampler,
@@ -358,6 +454,13 @@ async def run_research(
         windows=windows,
         null_surrogates=null_surrogates,
         sensitivity=sensitivity,
+        net_recorder=net_recorder,
+        net_threshold_pct=net_threshold_pct,
+        net_hysteresis_pct=net_hysteresis_pct,
+        net_delays_ms=net_delays_ms,
+        detector_threshold_pct=Decimal(str(config.detector.threshold_pct)),
+        end_mono_ns=end_mono_ns,
+        end_wall_ns=end_wall_ns,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     files = {
@@ -369,14 +472,25 @@ async def run_research(
         "route_leg_ages": "route_leg_ages.jsonl",
         "age_skew_bands": "age_skew_bands.jsonl",
         "age_skew_gate_sensitivity": "age_skew_gate_sensitivity.jsonl",
+        "net_intervals": "net_intervals.jsonl",
+        "net_interval_sensitivity": "net_interval_sensitivity.jsonl",
     }
     counts = {
         name: _write_jsonl(output_dir / filename, cast(list[dict[str, object]], datasets[name]))
         for name, filename in files.items()
     }
+    if write_net_signal and net_recorder is not None:
+        counts["net_signal"] = _write_jsonl(
+            output_dir / "net_signal.jsonl",
+            (
+                net_signal_row(row)
+                for key in sorted(net_recorder.signals)
+                for row in net_recorder.signals[key]
+            ),
+        )
     metadata: dict[str, object] = {
         "format": "arbsync-research",
-        "version": 3,
+        "version": 4,
         "capture": str(capture),
         "replay_digest": replay_report.digest,
         "snapshots_consumed": replay_report.snapshots_consumed,
@@ -439,6 +553,35 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="analyze captures that declare dropped frames and record that override",
     )
+    parser.add_argument(
+        "--net-threshold-pct",
+        type=float,
+        default=0.0,
+        help="net spread percent above which an interval opens (default opens when net positive)",
+    )
+    parser.add_argument(
+        "--net-hysteresis-pct",
+        type=float,
+        default=0.0,
+        help="net spread must fall to threshold minus hysteresis to close a spread",
+    )
+    parser.add_argument(
+        "--net-delays-ms",
+        type=int,
+        nargs="+",
+        default=list(DEFAULT_NET_DELAYS_MS),
+        help="assumed-delay sensitivity grid in milliseconds; the base dataset uses no delay",
+    )
+    parser.add_argument(
+        "--no-net-intervals",
+        action="store_true",
+        help="skip net-executable interval datasets",
+    )
+    parser.add_argument(
+        "--write-net-signal",
+        action="store_true",
+        help="also write the raw change-only net signal rows",
+    )
     return parser
 
 
@@ -466,6 +609,8 @@ def main() -> None:
     try:
         settings.validate()
         bands.validate()
+        if args.net_threshold_pct < 0 or args.net_hysteresis_pct < 0 or min(args.net_delays_ms) < 0:
+            raise ValueError("net threshold, hysteresis, and delays must be non-negative")
     except ValueError as error:
         raise SystemExit(str(error)) from error
     metadata = asyncio.run(
@@ -482,6 +627,11 @@ def main() -> None:
             sensitivity=not args.no_sensitivity,
             allow_lossy=args.allow_lossy,
             bands=bands,
+            net_threshold_pct=Decimal(str(args.net_threshold_pct)),
+            net_hysteresis_pct=Decimal(str(args.net_hysteresis_pct)),
+            net_delays_ms=tuple(args.net_delays_ms),
+            net_enabled=not args.no_net_intervals,
+            write_net_signal=args.write_net_signal,
         )
     )
     print(json.dumps(metadata, indent=2, sort_keys=True))
