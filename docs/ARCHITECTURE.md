@@ -325,4 +325,4 @@ event releases that wait immediately and the unflushed count is logged.
 - [`VALIDATION.md`](VALIDATION.md) — current verification evidence and remaining gaps
 - [`BENCHMARKS.md`](BENCHMARKS.md) — benchmark, replay, profiling, and soak methodology
 - [`DEPENDENCY_LICENSES.md`](DEPENDENCY_LICENSES.md) — dependency license audit
-- [`../todolist.md`](../todolist.md) — prioritized correctness and release-readiness work
+- [`../todolist.md`](../todolist.md) — open backlog; closed tickets are archived in [`COMPLETED_TICKETS.md`](COMPLETED_TICKETS.md)

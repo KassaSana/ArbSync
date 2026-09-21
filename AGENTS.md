@@ -87,9 +87,10 @@ the remaining validation gap materially changes.
   trusting existing tests.
 - Run verification proportionate to the change and review the final diff before declaring
   the ticket complete. Keep unrelated user changes out of the ticket commit.
-- When a ticket in [`todolist.md`](todolist.md) is complete, update its checkbox from `[ ]`
-  to `[x]` in the same commit. If work is partial or blocked, leave it unchecked and record
-  the remaining gap.
+- When a ticket in [`todolist.md`](todolist.md) is complete, mark it `[x]` and move it
+  verbatim to [`docs/COMPLETED_TICKETS.md`](docs/COMPLETED_TICKETS.md) in the same commit,
+  so `todolist.md` lists only open work. If work is partial or blocked, leave it unchecked
+  and record the remaining gap.
 
 ## Subagents
 
