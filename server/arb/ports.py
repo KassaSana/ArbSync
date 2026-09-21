@@ -11,13 +11,23 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from arb.capture import SnapshotProvenance
-from arb.types import MarketEvent, OpportunityEpisode
+from arb.types import BookEligibility, LiveMessage, MarketEvent, OpportunityEpisode
 
 
 class EpisodeSink(Protocol):
     """Where opened and closed episodes go; `OpportunityStore` is the live one."""
 
     async def enqueue(self, episode: OpportunityEpisode) -> bool: ...
+
+
+class LivePublisher(Protocol):
+    """Outbound dashboard delivery as the ingest path uses it; `LiveBroadcaster` is the live one."""
+
+    async def broadcast(self, message: LiveMessage) -> None: ...
+
+    async def broadcast_book(self, exchange: str, pair: str, message: LiveMessage) -> None: ...
+
+    async def broadcast_status(self, status: BookEligibility, *, immediate: bool) -> None: ...
 
 
 class CaptureSink(Protocol):

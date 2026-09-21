@@ -20,12 +20,13 @@ class FakeWebSocket:
         self.send_error = send_error
         self.accepted = False
         self.closed = False
-        self.sent: list[dict[str, object]] = []
+        self.sent: list[dict[str, Any]] = []
+        self.client: object | None = None
 
     async def accept(self) -> None:
         self.accepted = True
 
-    async def send_json(self, payload: dict[str, object]) -> None:
+    async def send_json(self, payload: dict[str, Any]) -> None:
         if self.send_error is not None:
             raise self.send_error
         self.sent.append(payload)
@@ -120,7 +121,7 @@ async def test_serialization_failure_is_counted_and_logged_without_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class SerializingSocket(FakeWebSocket):
-        async def send_json(self, payload: dict[str, object]) -> None:
+        async def send_json(self, payload: dict[str, Any]) -> None:
             json.dumps(payload)
 
     failure_metric = Mock()
@@ -280,7 +281,7 @@ async def test_slow_new_client_keeps_snapshot_cutoff_and_post_snapshot_update() 
     release_send = asyncio.Event()
 
     class SlowSocket(FakeWebSocket):
-        async def send_json(self, payload: dict[str, object]) -> None:
+        async def send_json(self, payload: dict[str, Any]) -> None:
             await release_send.wait()
             await super().send_json(payload)
 
@@ -349,7 +350,7 @@ async def test_slow_client_queue_overflow_does_not_block_broadcast(
     release_send = asyncio.Event()
 
     class SlowWebSocket(FakeWebSocket):
-        async def send_json(self, payload: dict[str, object]) -> None:
+        async def send_json(self, payload: dict[str, Any]) -> None:
             await release_send.wait()
             await super().send_json(payload)
 
@@ -513,7 +514,8 @@ async def test_gap_storm_sends_one_invalidation_not_one_per_refused_event() -> N
     await asyncio.sleep(0)
     types = [payload["type"] for payload in socket.sent[1:]]
     assert "book_status" in types and "top_of_book" in types
-    assert manager.top_of_book("gemini", "BTC-USD").best_bid_price == Decimal("150")
+    book = manager.top_of_book("gemini", "BTC-USD")
+    assert book is not None and book.best_bid_price == Decimal("150")
 
     await broadcaster.aclose()
     await broadcaster.disconnect(socket)

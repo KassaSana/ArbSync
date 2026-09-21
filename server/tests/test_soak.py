@@ -295,7 +295,7 @@ async def test_soak_samples_metrics_and_checkpoints_failures(
         )
 
     client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
-    monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr("soak.httpx.AsyncClient", lambda **kwargs: client)
     output = tmp_path / "report.md"
     evidence = tmp_path / "raw" / "samples.jsonl"
     config = Path(__file__).resolve().parents[2] / "config.toml"
@@ -372,7 +372,7 @@ async def test_soak_fails_fast_when_sample_start_gap_exceeds_limit(
         return httpx.Response(200, json=payloads[request.url.path])
 
     client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
-    monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr("soak.httpx.AsyncClient", lambda **kwargs: client)
     output = tmp_path / "report.md"
     evidence = tmp_path / "samples.jsonl"
 
@@ -515,7 +515,7 @@ async def test_soak_attributes_backend_failures_to_host_connectivity(
         return httpx.Response(200, json=payloads[request.url.path])
 
     client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
-    monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr("soak.httpx.AsyncClient", lambda **kwargs: client)
     output = tmp_path / "report.md"
     evidence = tmp_path / "samples.jsonl"
 
@@ -571,7 +571,7 @@ async def test_soak_completes_when_host_probe_breaks(
         return httpx.Response(200, json=payloads[request.url.path])
 
     client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(respond))
-    monkeypatch.setattr(soak.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr("soak.httpx.AsyncClient", lambda **kwargs: client)
 
     report = await soak.run_soak(
         "http://test", 0, 1, None, tmp_path / "report.md", observe_websocket_delivery=False

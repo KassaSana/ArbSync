@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+import pytest
 from arb.detector import ArbitrageDetector
 from arb.types import PricingLedger, RouteAgeEvent, RouteLegAges, TopOfBook
 
@@ -449,7 +450,9 @@ def test_leg_ages_are_local_receipt_ages_and_skew_is_symmetric() -> None:
     assert straddling.as_payload() == {"buy_age_ms": 1, "sell_age_ms": 0, "age_skew_ms": 1}
 
 
-def test_live_observer_computes_ages_only_for_routes_that_open_or_are_open(monkeypatch) -> None:
+def test_live_observer_computes_ages_only_for_routes_that_open_or_are_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Without evaluation events the compared-pair loop must not compute ages."""
     calls: list[tuple[str, str]] = []
     original = RouteLegAges.between
@@ -565,7 +568,10 @@ def test_evaluated_events_cover_every_ordered_pair_only_when_enabled() -> None:
         (a.exchange, b.exchange) for a in books for b in books if a is not b
     )
     # Every evaluation carries a raw spread (negative here) and no episode identity.
-    assert all(event.spread_pct < 0 and event.start_ns is None for event in events)
+    assert all(
+        event.spread_pct is not None and event.spread_pct < 0 and event.start_ns is None
+        for event in events
+    )
     skews = {(event.buy_exchange, event.sell_exchange): event.ages.skew_ns for event in events}
     assert skews[("coinbase", "binanceus")] == 200 == skews[("binanceus", "coinbase")]
 

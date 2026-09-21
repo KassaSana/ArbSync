@@ -12,7 +12,7 @@ from arb.pricing import (
     walk_levels,
     walk_levels_for_base,
 )
-from arb.types import PriceLevel, TopOfBook
+from arb.types import MarketEvent, PriceLevel, TopOfBook
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -305,7 +305,9 @@ def test_sampler_route_prices_conserves_acquired_base_across_legs() -> None:
     assert ledger.notional == Decimal("200")
 
 
-def test_sampler_requested_route_does_not_walk_unrelated_venues(monkeypatch) -> None:
+def test_sampler_requested_route_does_not_walk_unrelated_venues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from arb.orderbook import OrderBookManager
     from arb.pricing import DepthSampler
 
@@ -327,7 +329,9 @@ def test_sampler_requested_route_does_not_walk_unrelated_venues(monkeypatch) -> 
     calls: list[str] = []
     original = manager.depth_levels
 
-    def counting_depth_levels(exchange: str, pair: str, now_monotonic_ns: int | None = None):
+    def counting_depth_levels(
+        exchange: str, pair: str, now_monotonic_ns: int | None = None
+    ) -> tuple[list[PriceLevel], list[PriceLevel]] | None:
         calls.append(exchange)
         return original(exchange, pair, now_monotonic_ns)
 
@@ -444,8 +448,10 @@ def test_fill_rate_tracker_counts_per_venue_notional_and_side() -> None:
 # --- Manager depth read and the sampler ---
 
 
-def snapshot(exchange: str, bids: list[tuple[str, str]], asks: list[tuple[str, str]]):
-    from arb.types import EventKind, MarketEvent
+def snapshot(
+    exchange: str, bids: list[tuple[str, str]], asks: list[tuple[str, str]]
+) -> MarketEvent:
+    from arb.types import EventKind
 
     return MarketEvent(
         exchange=exchange,

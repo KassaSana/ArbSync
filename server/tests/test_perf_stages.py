@@ -1,6 +1,7 @@
 import pstats
 import threading
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from perf_stages import ThreadCpuAccumulator, decimal_value, stage_for, summarize_stages
@@ -8,14 +9,14 @@ from perf_stages import ThreadCpuAccumulator, decimal_value, stage_for, summariz
 
 def test_profile_preserves_decimal_values_and_partitions_self_time() -> None:
     assert decimal_value("0.10000000000000000001") == Decimal("0.10000000000000000001")
-    stats = pstats.Stats()
+    stats: Any = pstats.Stats()
     stats.stats = {
         ("/repo/tools/perf_stages.py", 1, "decimal_value"): (1, 1, 0.2, 0.8, {}),
         ("/repo/server/arb/orderbook.py", 1, "set_level"): (1, 1, 0.3, 0.5, {}),
         ("/repo/server/arb/main.py", 1, "process_market_event"): (1, 1, 0.5, 1.0, {}),
     }
     result = summarize_stages(stats)
-    stages = result["stages"]
+    stages: dict[str, dict[str, Any]] = result["stages"]  # type: ignore[assignment]
     assert stages["decimal_conversion"]["self_seconds"] == 0.2
     assert result["total_self_seconds"] == 1.0
     assert abs(sum(stage["percent"] for stage in stages.values()) - 100) < 1e-9
@@ -25,7 +26,7 @@ def test_profile_preserves_decimal_values_and_partitions_self_time() -> None:
 
 
 def test_negative_profiler_times_are_rejected() -> None:
-    stats = pstats.Stats()
+    stats: Any = pstats.Stats()
     stats.stats = {("test.py", 1, "bad_timer"): (1, 1, -1.0, 1.0, {})}
     with pytest.raises(ValueError, match="Negative profiler"):
         summarize_stages(stats)
@@ -38,7 +39,12 @@ def test_thread_cpu_accumulator_only_measures_active_worker_calls(
     monkeypatch.setattr("perf_stages.time.thread_time_ns", lambda: next(readings))
     accumulator = ThreadCpuAccumulator()
     calls: list[int] = []
-    measured = accumulator.measure(lambda value: calls.append(value) or value * 2)
+
+    def work(value: int) -> int:
+        calls.append(value)
+        return value * 2
+
+    measured = accumulator.measure(work)
 
     assert measured(1) == 2
     accumulator.start()

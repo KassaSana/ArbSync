@@ -10,7 +10,8 @@ RESULTS_PATH = Path("artifacts/benchmarks/results.json")
 def load_results() -> dict[str, Any]:
     if not RESULTS_PATH.exists():
         return {}
-    return json.loads(RESULTS_PATH.read_text())
+    loaded: dict[str, Any] = json.loads(RESULTS_PATH.read_text())
+    return loaded
 
 
 def save_result(name: str, payload: dict[str, Any]) -> None:

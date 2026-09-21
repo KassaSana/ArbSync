@@ -18,7 +18,7 @@ Before submitting a change, run the backend commands from the repository root:
 
 ```text
 uv run pytest -q server/tests
-uv run mypy --strict server/arb
+uv run mypy --strict
 uv run ruff check server tools
 uv run ruff format --check server tools
 ```

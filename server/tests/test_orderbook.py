@@ -1,7 +1,14 @@
+from collections.abc import Iterable
 from decimal import Decimal
 
 from arb.orderbook import OrderBookManager
-from arb.types import EventKind, MarketEvent, PriceLevel
+from arb.types import EventKind, MarketEvent, PriceLevel, TopOfBook
+
+
+def top(manager: OrderBookManager, exchange: str = "gemini", pair: str = "BTC-USD") -> TopOfBook:
+    book = manager.top_of_book(exchange, pair)
+    assert book is not None
+    return book
 
 
 def event(
@@ -386,7 +393,12 @@ def test_disconnect_invalidates_book_until_new_snapshot() -> None:
 def test_cached_top_tracks_size_updates_deletions_gaps_and_recovery() -> None:
     manager = OrderBookManager(clock=lambda: 1_000)
 
-    def event(kind, sequence, bids=(), asks=()):
+    def event(
+        kind: EventKind,
+        sequence: int,
+        bids: Iterable[tuple[str, str]] = (),
+        asks: Iterable[tuple[str, str]] = (),
+    ) -> MarketEvent:
         return MarketEvent(
             "gemini",
             "BTC-USD",
@@ -398,18 +410,18 @@ def test_cached_top_tracks_size_updates_deletions_gaps_and_recovery() -> None:
         )
 
     manager.apply(event(EventKind.SNAPSHOT, 1, [("100", "1"), ("99", "2")], [("101", "3")]))
-    original = manager.top_of_book("gemini", "BTC-USD")
+    original = top(manager)
     manager.apply(event(EventKind.DELTA, 2, [("100", "4")]))
-    updated = manager.top_of_book("gemini", "BTC-USD")
+    updated = top(manager)
     assert updated.best_bid_size == Decimal("4")
     assert updated.sequence == 2
     assert original.best_bid_size == Decimal("1")
     manager.apply(event(EventKind.DELTA, 3, [("100", "0")]))
-    assert manager.top_of_book("gemini", "BTC-USD").best_bid_price == Decimal("99")
+    assert top(manager).best_bid_price == Decimal("99")
     manager.apply(event(EventKind.DELTA, 5, [("98", "1")]))
     assert manager.top_of_book("gemini", "BTC-USD") is None
     manager.apply(event(EventKind.SNAPSHOT, 10, [("90", "1")], [("91", "1")]))
-    assert manager.top_of_book("gemini", "BTC-USD").best_bid_price == Decimal("90")
+    assert top(manager).best_bid_price == Decimal("90")
     manager.set_exchange_connected("gemini", False)
     assert manager.top_of_book("gemini", "BTC-USD") is None
 
@@ -445,7 +457,7 @@ def test_eligible_books_matches_per_venue_eligibility_sweep() -> None:
         )
     )
 
-    def sweep(pair: str) -> list:
+    def sweep(pair: str) -> list[TopOfBook]:
         found = [
             top
             for exchange, book_pair in sorted(manager._books)
@@ -479,18 +491,19 @@ def test_top_of_book_carries_receipt_time_of_the_event_that_produced_it() -> Non
         event(kind=EventKind.SNAPSHOT, sequence=1, bids=[("100", "1")], asks=[("101", "1")]),
         received_monotonic_ns=1_000,
     )
-    assert manager.top_of_book("gemini", "BTC-USD").received_monotonic_ns == 1_000
+    assert top(manager).received_monotonic_ns == 1_000
     # A delta touching a deep level still stamps the top, because the top is the
     # canonical state after that event; age is measured from the last accepted event.
     manager.apply(
         event(kind=EventKind.DELTA, sequence=2, bids=[("90", "1")], asks=[]),
         received_monotonic_ns=1_500,
     )
-    top = manager.top_of_book("gemini", "BTC-USD")
-    assert top.received_monotonic_ns == 1_500
-    assert top.best_bid_price == Decimal("100")
-    assert "received_monotonic_ns" not in top.as_payload()
+    stamped = top(manager)
+    assert stamped.received_monotonic_ns == 1_500
+    assert stamped.best_bid_price == Decimal("100")
+    assert "received_monotonic_ns" not in stamped.as_payload()
     # The eligibility path returns the same stamped top.
     now[0] = 2_000
-    assert manager.eligible_top_of_book("gemini", "BTC-USD", now[0]).received_monotonic_ns == 1_500
+    eligible = manager.eligible_top_of_book("gemini", "BTC-USD", now[0])
+    assert eligible is not None and eligible.received_monotonic_ns == 1_500
     assert manager.now_monotonic_ns() == 2_000

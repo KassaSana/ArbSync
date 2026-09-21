@@ -110,7 +110,10 @@ def test_test_client_prefers_httpx2() -> None:
     """
     import starlette.testclient
 
-    assert starlette.testclient.httpx.__name__ == "httpx2"
+    # Reached through getattr on purpose: the attribute is the fallback import
+    # under test, not part of starlette's typed surface.
+    httpx_module: Any = getattr(starlette.testclient, "httpx")  # noqa: B009
+    assert httpx_module.__name__ == "httpx2"
 
 
 def test_root_describes_the_service() -> None:

@@ -90,7 +90,10 @@ def _read_commit(revision: str) -> CommitAttribution:
     ).split("\0", 4)
     if len(fields) != 5:
         raise ValueError(f"Could not read attribution for {revision}")
-    return CommitAttribution(*fields, revision=revision)
+    author_name, author_email, committer_name, committer_email, message = fields
+    return CommitAttribution(
+        author_name, author_email, committer_name, committer_email, message, revision=revision
+    )
 
 
 def _revisions_for_ci(event_name: str, payload: dict[str, Any]) -> list[str]:

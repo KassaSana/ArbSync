@@ -77,6 +77,14 @@ filterwarnings = [
 strict = true
 python_version = "3.11"
 cache_dir = "var/cache/mypy"
+mypy_path = ["server", "tools"]
+files = ["server", "tools"]
+
+# Optional perf-only dependencies: CI type-checks without installing them, and
+# psutil ships no stubs.
+[[tool.mypy.overrides]]
+module = ["psutil", "playwright.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
@@ -94,7 +102,7 @@ package-dir = {"" = "server"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-arb = ["config.example.toml"]
+arb = ["config.example.toml", "py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["server"]

@@ -120,7 +120,7 @@ async def test_snapshot_fetch_records_url_and_payload() -> None:
     adapter = GeminiAdapter(["btcusd"])
     sink = RecordingSink()
     adapter.set_capture_sink(sink)
-    payload = {"bids": [], "asks": []}
+    payload: dict[str, Any] = {"bids": [], "asks": []}
 
     class FakeResponse:
         def raise_for_status(self) -> None:
@@ -134,7 +134,7 @@ async def test_snapshot_fetch_records_url_and_payload() -> None:
             assert url.endswith("/btcusd?limit_bids=100&limit_asks=100")
             return FakeResponse()
 
-    adapter.http_client = lambda: FakeClient()  # type: ignore[method-assign]
+    adapter.http_client = lambda: FakeClient()  # type: ignore[method-assign, assignment, return-value]
     event = await adapter.fetch_snapshot_with_context("BTC-USD", 0, purpose="initial_sync")
 
     assert event.kind is EventKind.SNAPSHOT
@@ -186,7 +186,7 @@ async def test_binance_loop_records_each_message_once() -> None:
             exchange_last_sequence=100,
         )
 
-    adapter.fetch_snapshot = types.MethodType(snapshot_at_100, adapter)
+    adapter.fetch_snapshot = types.MethodType(snapshot_at_100, adapter)  # type: ignore[method-assign]
     depth = '{"s":"BTCUSDT","U":99,"u":105,"E":1,"b":[["100","2"]],"a":[]}'
     stream = adapter.stream_events(FakeSocket([depth]))
     first = await anext(stream)

@@ -14,7 +14,7 @@ from perf_feed import ASSETS, EXCHANGES, Feed, levels, market_pair
 
 
 @pytest.mark.asyncio
-async def test_burst_workload_keeps_all_books_continuous_and_exercises_opportunities():
+async def test_burst_workload_keeps_all_books_continuous_and_exercises_opportunities() -> None:
     feed = Feed(depth=20)
     adapters = {
         "gemini": GeminiAdapter([f"{a.lower()}usd" for a in ASSETS]),
@@ -70,4 +70,6 @@ async def test_sent_records_preserve_binance_quote_asset(monkeypatch: pytest.Mon
     monkeypatch.setattr("perf_feed.asyncio.sleep", AsyncMock())
     await feed.run(110, 5, record=True)
     assert {row[0] for row in feed.sent} == set(EXCHANGES)
-    assert all(row[1].endswith("-USDT" if row[0] == "binance" else "-USD") for row in feed.sent)
+    assert all(
+        str(row[1]).endswith("-USDT" if row[0] == "binance" else "-USD") for row in feed.sent
+    )

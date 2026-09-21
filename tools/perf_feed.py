@@ -8,6 +8,7 @@ import time
 from collections import defaultdict
 from decimal import Decimal
 from http import HTTPStatus
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 ASSETS = ("BTC", "ETH", "SOL", "AVAX", "LINK", "LTC", "UNI", "DOT", "AAVE")
@@ -20,7 +21,7 @@ def market_pair(exchange: str, asset: str) -> str:
     return f"{asset}-{'USDT' if exchange == 'binance' else 'USD'}"
 
 
-def levels(exchange: str, asset: str, depth: int) -> tuple[list, list]:
+def levels(exchange: str, asset: str, depth: int) -> tuple[list[list[str]], list[list[str]]]:
     # Narrow markets with one persistently crossed *cross-venue* pair. This
     # deliberately exercises opportunities and SQLite, unlike the zero-opp soak.
     center = Decimal(100 + ASSETS.index(asset) * 100)
@@ -34,12 +35,12 @@ def levels(exchange: str, asset: str, depth: int) -> tuple[list, list]:
 class Feed:
     def __init__(self, depth: int = 500) -> None:
         self.depth = depth
-        self.clients: dict = {}
-        self.sequences: dict = defaultdict(lambda: 1)
+        self.clients: dict[str, Any] = {}
+        self.sequences: dict[tuple[str, str], int] = defaultdict(lambda: 1)
         self.coinbase_sequence = 0
         self.counter = 0
-        self.asset_counters: dict = defaultdict(int)
-        self.sent: list = []
+        self.asset_counters: dict[tuple[str, str], int] = defaultdict(int)
+        self.sent: list[list[object]] = []
         self.schedule_lag_ms: list[float] = []
 
     def message(self, exchange: str, asset: str, *, snapshot: bool = False) -> tuple[str, int]:
@@ -94,7 +95,7 @@ class Feed:
             }
         return json.dumps(payload, separators=(",", ":")), sequence
 
-    async def connect(self, websocket) -> None:
+    async def connect(self, websocket: Any) -> None:
         exchange = websocket.request.path.strip("/")
         if exchange not in EXCHANGES:
             await websocket.close()
@@ -108,7 +109,7 @@ class Feed:
         self.clients[exchange] = websocket
         await websocket.wait_closed()
 
-    def http(self, connection, request):
+    def http(self, connection: Any, request: Any) -> Any:
         parsed = urlparse(request.path)
         if parsed.path != "/snapshot":
             return None

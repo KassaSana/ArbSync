@@ -1,12 +1,16 @@
 import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
 from decimal import Decimal
+from functools import partial
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from arb import main
+from arb.broadcast import LiveBroadcaster
 from arb.detector import ArbitrageDetector
 from arb.orderbook import OrderBookManager
-from arb.types import BookEligibility, EventKind, LiveMessage, MarketEvent, PriceLevel
+from arb.types import BookEligibility, EventKind, LiveMessage, MarketEvent, PriceLevel, TopOfBook
 
 
 def snapshot(exchange: str, bid: str = "100", ask: str = "101") -> MarketEvent:
@@ -19,6 +23,12 @@ def snapshot(exchange: str, bid: str = "100", ask: str = "101") -> MarketEvent:
         bids=(PriceLevel(Decimal(bid), Decimal("1")),),
         asks=(PriceLevel(Decimal(ask), Decimal("1")),),
     )
+
+
+def top_of_book(manager: OrderBookManager, exchange: str, pair: str = "BTC-USD") -> TopOfBook:
+    book = manager.top_of_book(exchange, pair)
+    assert book is not None
+    return book
 
 
 def delta(exchange: str, sequence: int, bid: str = "100") -> MarketEvent:
@@ -63,7 +73,9 @@ class RecordingBroadcaster:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("enqueue_accepted", [True, False])
-async def test_processing_order_and_payloads(monkeypatch, enqueue_accepted) -> None:
+async def test_processing_order_and_payloads(
+    monkeypatch: pytest.MonkeyPatch, enqueue_accepted: bool
+) -> None:
     manager = OrderBookManager()
     manager.apply(snapshot("coinbase", "103", "104"))
     manager.apply(snapshot("binance", "105", "106"))
@@ -97,9 +109,9 @@ async def test_processing_order_and_payloads(monkeypatch, enqueue_accepted) -> N
     # eligible_books orders venues by exchange name, so the detector sees the
     # same list regardless of which venue happened to update last.
     pair_books = [
-        manager.top_of_book(exchange, event.pair) for exchange in ("binance", "coinbase", "gemini")
+        top_of_book(manager, exchange, event.pair) for exchange in ("binance", "coinbase", "gemini")
     ]
-    event_book = manager.top_of_book(event.exchange, event.pair)
+    event_book = top_of_book(manager, event.exchange, event.pair)
     # The wrapped detector already holds these episodes open; a fresh one
     # shows what the pipeline should have been handed.
     opportunities = ArbitrageDetector(Decimal("0.1")).detect_for_pair(event.pair, pair_books, 123)
@@ -118,7 +130,7 @@ async def test_processing_order_and_payloads(monkeypatch, enqueue_accepted) -> N
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", [EventKind.DELTA, EventKind.SNAPSHOT])
-async def test_rejected_or_incomplete_event_stops_before_delivery(kind) -> None:
+async def test_rejected_or_incomplete_event_stops_before_delivery(kind: EventKind) -> None:
     event = MarketEvent("gemini", "BTC-USD", kind, 1, 1)
     detector = Mock()
     detector.close_for_book.return_value = []
@@ -146,7 +158,7 @@ async def test_rejected_or_incomplete_event_stops_before_delivery(kind) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("second_exchange", [False, True])
-async def test_no_opportunity_still_broadcasts_book(second_exchange) -> None:
+async def test_no_opportunity_still_broadcasts_book(second_exchange: bool) -> None:
     manager = OrderBookManager()
     if second_exchange:
         manager.apply(snapshot("coinbase"))
@@ -163,7 +175,7 @@ async def test_no_opportunity_still_broadcasts_book(second_exchange) -> None:
 
     store.enqueue.assert_not_awaited()
     assert (
-        LiveMessage("top_of_book", manager.top_of_book("gemini", "BTC-USD").as_payload())
+        LiveMessage("top_of_book", top_of_book(manager, "gemini", "BTC-USD").as_payload())
         in broadcaster.messages
     )
     assert len(broadcaster.messages) == 2
@@ -187,7 +199,7 @@ async def test_slow_browser_does_not_block_detection() -> None:
     manager.apply(snapshot("coinbase", "103", "104"))
     manager.apply(snapshot("binance", "105", "106"))
     store = Mock(enqueue=AsyncMock())
-    broadcaster = main.LiveBroadcaster(queue_maxsize=1)
+    broadcaster = LiveBroadcaster(queue_maxsize=1)
     await broadcaster.connect(SlowWebSocket())
 
     await asyncio.wait_for(
@@ -210,7 +222,7 @@ async def test_consumer_continues_after_rejected_event() -> None:
     rejected = MarketEvent("gemini", "BTC-USD", EventKind.DELTA, 1, 1)
     accepted = snapshot("gemini")
 
-    async def events():
+    async def events() -> AsyncIterator[MarketEvent]:
         yield rejected
         yield accepted
 
@@ -228,7 +240,7 @@ async def test_consumer_continues_after_rejected_event() -> None:
     )
 
     assert (
-        LiveMessage("top_of_book", manager.top_of_book("gemini", "BTC-USD").as_payload())
+        LiveMessage("top_of_book", top_of_book(manager, "gemini", "BTC-USD").as_payload())
         in broadcaster.messages
     )
     assert len(broadcaster.messages) == 3
@@ -246,7 +258,7 @@ async def test_consumer_requests_adapter_resync_after_invalid_snapshot() -> None
         bids=(PriceLevel(Decimal("100"), Decimal("1")),),
     )
 
-    async def events():
+    async def events() -> AsyncIterator[MarketEvent]:
         yield invalid
 
     adapter = Mock()
@@ -307,7 +319,7 @@ async def test_consumer_prefers_single_pair_resync() -> None:
         async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
             raise NotImplementedError
 
-        async def connect(self):
+        async def connect(self) -> AsyncGenerator[MarketEvent, None]:
             yield invalid
 
         def request_pair_resync(self, pair: str) -> bool:
@@ -335,7 +347,7 @@ async def test_consumer_prefers_single_pair_resync() -> None:
 
 
 @pytest.mark.asyncio
-async def test_event_receipt_time_drives_freshness(monkeypatch) -> None:
+async def test_event_receipt_time_drives_freshness(monkeypatch: pytest.MonkeyPatch) -> None:
     event = MarketEvent(
         **{
             **snapshot("gemini").__dict__,
@@ -368,7 +380,9 @@ async def test_event_receipt_time_drives_freshness(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_processing_delay_can_make_received_event_ineligible(monkeypatch) -> None:
+async def test_processing_delay_can_make_received_event_ineligible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     event = MarketEvent(
         **{
             **snapshot("gemini").__dict__,
@@ -404,7 +418,9 @@ async def test_processing_delay_can_make_received_event_ineligible(monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_background_task_supervisor_records_unexpected_failure(monkeypatch) -> None:
+async def test_background_task_supervisor_records_unexpected_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     logged = Mock()
     metric = Mock()
     monkeypatch.setattr(main, "logger", Mock(error=logged))
@@ -448,21 +464,21 @@ async def test_background_task_supervisor_ignores_shutdown_cancellation() -> Non
 @pytest.mark.asyncio
 async def test_buffered_burst_allows_dashboard_sender_to_drain() -> None:
     class Socket:
-        def __init__(self):
-            self.sent = []
+        def __init__(self) -> None:
+            self.sent: list[dict[str, Any]] = []
             self.closed = False
 
-        async def accept(self):
+        async def accept(self) -> None:
             pass
 
-        async def send_json(self, payload):
+        async def send_json(self, payload: dict[str, Any]) -> None:
             self.sent.append(payload)
 
-        async def close(self, code=1000, reason=None):
+        async def close(self, code: int = 1000, reason: str | None = None) -> None:
             self.closed = True
 
     socket = Socket()
-    broadcaster = main.LiveBroadcaster(queue_maxsize=8)
+    broadcaster = LiveBroadcaster(queue_maxsize=8)
     await broadcaster.connect(socket)
     manager = OrderBookManager()
     detector = ArbitrageDetector(Decimal("0.1"))
@@ -484,36 +500,46 @@ async def test_buffered_burst_allows_dashboard_sender_to_drain() -> None:
     types = [payload["type"] for payload in socket.sent]
     assert "top_of_book" in types and "book_status" in types
     top = [payload for payload in socket.sent if payload["type"] == "top_of_book"][-1]
-    assert top["payload"] == manager.top_of_book("gemini", "BTC-USD").as_payload()
+    assert top["payload"] == top_of_book(manager, "gemini", "BTC-USD").as_payload()
     await broadcaster.aclose()
     await broadcaster.disconnect(socket)
 
 
 @pytest.mark.asyncio
-async def test_leg_turning_ineligible_closes_its_episodes(monkeypatch) -> None:
+async def test_leg_turning_ineligible_closes_its_episodes(monkeypatch: pytest.MonkeyPatch) -> None:
     # ARB-031: an episode's lifetime ends when a leg stops being trusted, not
     # only when the spread narrows. The adapter's RESET (ARB-028) is one such
     # path: the pipeline skips detection for it, so the close must come from
     # the ineligible branch.
     from arb.types import EventKind as Kind
 
-    for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter"):
-        monkeypatch.setattr(main, name, Mock())
+    metrics = {
+        name: Mock()
+        for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter")
+    }
+    for name, mock in metrics.items():
+        monkeypatch.setattr(main, name, mock)
     manager = OrderBookManager()
     detector = ArbitrageDetector(Decimal("0.1"))
     store = Mock(enqueue=AsyncMock(return_value=True))
     broadcaster = RecordingBroadcaster()
-    kwargs = dict(book_manager=manager, detector=detector, store=store, broadcaster=broadcaster)
+    process = partial(
+        main.process_market_event,
+        book_manager=manager,
+        detector=detector,
+        store=store,
+        broadcaster=broadcaster,
+    )
 
-    await main.process_market_event(snapshot("coinbase", "103", "104"), **kwargs)
-    await main.process_market_event(snapshot("gemini", "100", "101"), **kwargs)
+    await process(snapshot("coinbase", "103", "104"))
+    await process(snapshot("gemini", "100", "101"))
     [opened] = [m for m in broadcaster.messages if m.type == "opportunity"]
     assert opened.payload["buy_exchange"] == "gemini"
     assert opened.payload["end_ns"] is None
     assert len(detector.open_episodes()) == 1
 
     reset = MarketEvent("gemini", "BTC-USD", Kind.RESET, 1, 2)
-    await main.process_market_event(reset, **kwargs)
+    await process(reset)
 
     assert detector.open_episodes() == []
     closes = [m for m in broadcaster.messages if m.type == "opportunity"][1:]
@@ -522,20 +548,27 @@ async def test_leg_turning_ineligible_closes_its_episodes(monkeypatch) -> None:
     assert closes[0].payload["start_ns"] == opened.payload["start_ns"]
     assert store.enqueue.await_count == 2
     # Only the open counted as a new opportunity.
-    assert main.opportunity_counter.call_count == 1
+    assert metrics["opportunity_counter"].call_count == 1
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sequence", [1, 0], ids=["duplicate", "older"])
-async def test_rejected_old_delta_keeps_healthy_episode_open(monkeypatch, sequence: int) -> None:
-    for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter"):
-        monkeypatch.setattr(main, name, Mock())
+async def test_rejected_old_delta_keeps_healthy_episode_open(
+    monkeypatch: pytest.MonkeyPatch, sequence: int
+) -> None:
+    metrics = {
+        name: Mock()
+        for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter")
+    }
+    for name, mock in metrics.items():
+        monkeypatch.setattr(main, name, mock)
     manager = OrderBookManager()
     detector = ArbitrageDetector(Decimal("0.1"))
     store = Mock(enqueue=AsyncMock(return_value=True))
     broadcaster = RecordingBroadcaster()
     publisher = main.BookEligibilityPublisher(manager, detector, store, broadcaster, ())
-    kwargs = dict(
+    process = partial(
+        main.process_market_event,
         book_manager=manager,
         detector=detector,
         store=store,
@@ -543,11 +576,11 @@ async def test_rejected_old_delta_keeps_healthy_episode_open(monkeypatch, sequen
         eligibility_publisher=publisher,
     )
 
-    await main.process_market_event(snapshot("coinbase", "103", "104"), **kwargs)
-    await main.process_market_event(snapshot("gemini", "100", "101"), **kwargs)
+    await process(snapshot("coinbase", "103", "104"))
+    await process(snapshot("gemini", "100", "101"))
     [opened] = detector.open_episodes()
 
-    result = await main.process_market_event(delta("gemini", sequence), **kwargs)
+    result = await process(delta("gemini", sequence))
 
     assert result.accepted is False
     assert result.reason == "out_of_order"
@@ -558,19 +591,26 @@ async def test_rejected_old_delta_keeps_healthy_episode_open(monkeypatch, sequen
         for message in broadcaster.messages
         if message.type == "opportunity"
     ] == [None]
-    assert main.book_metrics.return_value.eligible.set.call_args.args == (1,)
+    assert metrics["book_metrics"].return_value.eligible.set.call_args.args == (1,)
 
 
 @pytest.mark.asyncio
-async def test_sequence_gap_closes_episode_and_snapshot_recovery_reopens_it(monkeypatch) -> None:
-    for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter"):
-        monkeypatch.setattr(main, name, Mock())
+async def test_sequence_gap_closes_episode_and_snapshot_recovery_reopens_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metrics = {
+        name: Mock()
+        for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter")
+    }
+    for name, mock in metrics.items():
+        monkeypatch.setattr(main, name, mock)
     manager = OrderBookManager()
     detector = ArbitrageDetector(Decimal("0.1"))
     store = Mock(enqueue=AsyncMock(return_value=True))
     broadcaster = RecordingBroadcaster()
     publisher = main.BookEligibilityPublisher(manager, detector, store, broadcaster, ())
-    kwargs = dict(
+    process = partial(
+        main.process_market_event,
         book_manager=manager,
         detector=detector,
         store=store,
@@ -578,10 +618,10 @@ async def test_sequence_gap_closes_episode_and_snapshot_recovery_reopens_it(monk
         eligibility_publisher=publisher,
     )
 
-    await main.process_market_event(snapshot("coinbase", "103", "104"), **kwargs)
-    await main.process_market_event(snapshot("gemini", "100", "101"), **kwargs)
+    await process(snapshot("coinbase", "103", "104"))
+    await process(snapshot("gemini", "100", "101"))
 
-    gap = await main.process_market_event(delta("gemini", 3), **kwargs)
+    gap = await process(delta("gemini", 3))
 
     assert gap.accepted is False
     assert gap.reason == "sequence_gap"
@@ -589,29 +629,41 @@ async def test_sequence_gap_closes_episode_and_snapshot_recovery_reopens_it(monk
     assert detector.open_episodes() == []
     closed = [message for message in broadcaster.messages if message.type == "opportunity"][-1]
     assert closed.payload["close_reason"] == "book_ineligible"
-    assert main.book_metrics.return_value.eligible.set.call_args.args == (0,)
+    assert metrics["book_metrics"].return_value.eligible.set.call_args.args == (0,)
 
-    recovered = await main.process_market_event(snapshot("gemini", "100", "101"), **kwargs)
+    recovered = await process(snapshot("gemini", "100", "101"))
 
     assert recovered.accepted is True
     assert manager.eligibility("gemini", "BTC-USD").eligible is True
     assert len(detector.open_episodes()) == 1
     reopened = [message for message in broadcaster.messages if message.type == "opportunity"][-1]
     assert reopened.payload["end_ns"] is None
-    assert main.book_metrics.return_value.eligible.set.call_args.args == (1,)
+    assert metrics["book_metrics"].return_value.eligible.set.call_args.args == (1,)
 
 
 @pytest.mark.asyncio
-async def test_shutdown_closes_open_episodes_before_the_store(monkeypatch) -> None:
-    for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter"):
-        monkeypatch.setattr(main, name, Mock())
+async def test_shutdown_closes_open_episodes_before_the_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metrics = {
+        name: Mock()
+        for name in ("book_metrics", "detection_latency_seconds", "opportunity_counter")
+    }
+    for name, mock in metrics.items():
+        monkeypatch.setattr(main, name, mock)
     detector = ArbitrageDetector(Decimal("0.1"))
     manager = OrderBookManager()
     store = Mock(enqueue=AsyncMock(return_value=True))
     broadcaster = RecordingBroadcaster()
-    kwargs = dict(book_manager=manager, detector=detector, store=store, broadcaster=broadcaster)
-    await main.process_market_event(snapshot("coinbase", "103", "104"), **kwargs)
-    await main.process_market_event(snapshot("gemini", "100", "101"), **kwargs)
+    process = partial(
+        main.process_market_event,
+        book_manager=manager,
+        detector=detector,
+        store=store,
+        broadcaster=broadcaster,
+    )
+    await process(snapshot("coinbase", "103", "104"))
+    await process(snapshot("gemini", "100", "101"))
 
     await main.deliver_episodes(detector.close_all(7), store=store, broadcaster=broadcaster)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -54,7 +55,7 @@ class OneMessageSocket:
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    async def __aiter__(self):
+    async def __aiter__(self) -> AsyncIterator[str]:
         yield "{}"
 
 
@@ -66,7 +67,7 @@ def test_symbol_normalization() -> None:
 
 
 @pytest.mark.asyncio
-async def test_connect_stamps_receipt_time_before_parsing(monkeypatch) -> None:
+async def test_connect_stamps_receipt_time_before_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = ReceiptTimeAdapter(["BTC-USD"])
     socket = OneMessageSocket()
     monkeypatch.setattr(websockets, "connect", lambda *args, **kwargs: socket)

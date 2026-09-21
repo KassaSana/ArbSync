@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
 
@@ -201,7 +201,7 @@ class BinanceAdapter(ExchangeAdapter):
         self._snapshot_attempts.pop(pair, None)
         self._restart_sync(pair)
 
-    async def stream_events(self, websocket: Any) -> AsyncIterator[MarketEvent]:
+    async def stream_events(self, websocket: Any) -> AsyncGenerator[MarketEvent, None]:
         """Keep reading and buffering depth updates while snapshots are in flight.
 
         The shell owns the tasks and the clock; every sequencing decision is

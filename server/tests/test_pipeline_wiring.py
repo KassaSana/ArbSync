@@ -22,6 +22,7 @@ from arb.config import (
     ServerConfig,
 )
 from arb.detector import ArbitrageDetector
+from arb.metrics import observe_route_open
 from arb.types import BookEligibility, EventKind, LiveMessage, MarketEvent, PriceLevel
 
 
@@ -216,12 +217,12 @@ async def test_age_expiry_without_market_event_propagates_only_affected_transiti
 ) -> None:
     class Client:
         def __init__(self) -> None:
-            self.sent: list[dict[str, object]] = []
+            self.sent: list[dict[str, Any]] = []
 
         async def accept(self) -> None:
             return None
 
-        async def send_json(self, payload: dict[str, object]) -> None:
+        async def send_json(self, payload: dict[str, Any]) -> None:
             self.sent.append(payload)
 
         async def close(self, code: int = 1000, reason: str | None = None) -> None:
@@ -406,6 +407,6 @@ def test_build_pipeline_observes_route_open_ages_without_evaluation_events(
 ) -> None:
     pipeline = main.build_pipeline(make_config(tmp_path), adapter_types=(StubAdapter,))
 
-    assert pipeline.detector._route_observer is main.observe_route_open
+    assert pipeline.detector._route_observer is observe_route_open
     # Live ingestion never pays for per-evaluation events; only research opts in.
     assert pipeline.detector._observe_evaluations is False

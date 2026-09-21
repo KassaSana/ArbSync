@@ -11,6 +11,7 @@ import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 from playwright.async_api import async_playwright, expect
 
@@ -18,11 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
-async def check(url):
+async def check(url: str) -> None:
     quote = {
         "exchange": "gemini",
         "pair": "BTC-USD",
@@ -55,10 +56,10 @@ async def check(url):
         browser = await playwright.chromium.launch(channel="chrome", headless=True)
         try:
             page = await browser.new_page()
-            errors = []
+            errors: list[str] = []
             page.on("pageerror", lambda error: errors.append(str(error)))
 
-            async def route_api(route):
+            async def route_api(route: Any) -> None:
                 path = "/" + route.request.url.split("/", 3)[-1].split("?")[0]
                 await route.fulfill(json=responses[path])
 
@@ -75,12 +76,12 @@ async def check(url):
             await page.goto(url)
             await expect(page.get_by_text("Dashboard stream: connected")).to_be_visible()
 
-            async def emit(messages):
+            async def emit(messages: list[dict[str, Any]]) -> None:
                 await page.evaluate(
                     "messages => messages.forEach(m => window.testSocket.emit(m))", messages
                 )
 
-            def message(kind, payload, sequence):
+            def message(kind: str, payload: Any, sequence: int) -> dict[str, Any]:
                 return {"type": kind, "payload": payload, "stream_sequence": sequence}
 
             await emit([message("state_snapshot", {"books": [quote], "statuses": [status]}, 1)])

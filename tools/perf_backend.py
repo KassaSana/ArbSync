@@ -15,11 +15,13 @@ import os
 import pstats
 import threading
 import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
 import uvicorn
+from arb.adapters.base import ExchangeAdapter
 from arb.adapters.binance import BinanceAdapter
 from arb.adapters.coinbase import CoinbaseAdapter
 from arb.adapters.gemini import GeminiAdapter
@@ -29,7 +31,7 @@ from arb.detector import ArbitrageDetector
 from arb.main import BackgroundTaskSupervisor, process_market_event
 from arb.orderbook import OrderBookManager
 from arb.persistence import OpportunityStore
-from arb.types import LiveMessage
+from arb.types import LiveMessage, OpportunityEpisode, TopOfBook
 from fastapi.staticfiles import StaticFiles
 from perf_feed import ASSETS
 from perf_stages import (
@@ -43,7 +45,7 @@ from prometheus_client import REGISTRY
 
 @dataclass
 class EventSample:
-    key: list
+    key: list[object]
     receipt_ns: int
     detected_ns: int | None = None
 
@@ -52,13 +54,19 @@ current_sample: contextvars.ContextVar[EventSample] = contextvars.ContextVar("ev
 
 
 class TimedDetector(ArbitrageDetector):
-    def detect_for_pair(self, pair, books, timestamp_ns, monotonic_ns=None):
+    def detect_for_pair(
+        self,
+        pair: str,
+        books: list[TopOfBook],
+        timestamp_ns: int,
+        monotonic_ns: int | None = None,
+    ) -> list[OpportunityEpisode]:
         result = super().detect_for_pair(pair, books, timestamp_ns, monotonic_ns)
         current_sample.get().detected_ns = time.monotonic_ns()
         return result
 
 
-def counters() -> dict:
+def counters() -> dict[str, float]:
     names = (
         "arb_persistence_queue_drops_total",
         "arb_ws_client_queue_overflows_total",
@@ -73,7 +81,7 @@ def counters() -> dict:
     }
 
 
-async def run(args) -> None:
+async def run(args: argparse.Namespace) -> None:
     # Python 3.12's Windows monotonic_ns can tick in ~15.6 ms increments.
     # All receipt/freshness/completion timestamps in this isolated worker use
     # perf_counter_ns instead, including the manager's explicitly supplied clock.
@@ -104,26 +112,27 @@ async def run(args) -> None:
     adapters[2].snapshot_url = f"http://127.0.0.1:{args.feed_port}/snapshot"
     expected = [(adapter.name, pair) for adapter in adapters for pair in adapter.expected_pairs()]
     supervisor = BackgroundTaskSupervisor()
-    rows: list = []
-    queue_samples: list = []
-    lag_ms: list = []
+    rows: list[list[object]] = []
+    queue_samples: list[list[int]] = []
+    lag_ms: list[float] = []
     active = False
-    initial_counters: dict = {}
+    initial_counters: dict[str, float] = {}
     profiler = cProfile.Profile()
     if args.profile:
         # Keep conversion instrumentation isolated to this disposable worker.
-        from arb.adapters import binance, coinbase, gemini
+        # Every adapter decodes price levels through arb.adapters.base, so that
+        # is the module whose Decimal name the profiler must intercept.
+        from arb.adapters import base as adapter_base
 
-        for module in (binance, coinbase, gemini):
-            module.Decimal = decimal_value
+        adapter_base.Decimal = decimal_value  # type: ignore[attr-defined, assignment]
 
-    async def connection_state(exchange, connected):
+    async def connection_state(exchange: str, connected: bool) -> None:
         for status in manager.set_exchange_connected(exchange, connected):
             await broadcaster.broadcast_book_now(
                 exchange, status.pair, LiveMessage("book_status", status.as_payload())
             )
 
-    async def consume(adapter):
+    async def consume(adapter: ExchangeAdapter) -> None:
         async for event in adapter.connect():
             sample = EventSample(
                 [event.exchange, event.pair, event.exchange_last_sequence],
@@ -145,7 +154,7 @@ async def run(args) -> None:
             finally:
                 current_sample.reset(token)
 
-    async def sample_queues():
+    async def sample_queues() -> None:
         while True:
             target = time.perf_counter() + 0.05
             await asyncio.sleep(0.05)
@@ -169,7 +178,7 @@ async def run(args) -> None:
     )
 
     @app.post("/__bench/start")
-    async def start():
+    async def start() -> dict[str, bool]:
         nonlocal active, initial_counters
         if active:
             raise RuntimeError("Already measuring")
@@ -184,7 +193,7 @@ async def run(args) -> None:
         return {"started": True}
 
     @app.get("/__bench/progress")
-    async def progress():
+    async def progress() -> dict[str, int]:
         return {
             "pid": os.getpid(),
             "processed": len(rows),
@@ -193,7 +202,7 @@ async def run(args) -> None:
         }
 
     @app.post("/__bench/stop")
-    async def stop():
+    async def stop() -> dict[str, object]:
         nonlocal active
         active = False
         if args.profile:
@@ -226,7 +235,7 @@ async def run(args) -> None:
         return {"processed": len(rows), "counters": result["counters"]}
 
     @app.post("/__bench/shutdown")
-    async def shutdown():
+    async def shutdown() -> dict[str, bool]:
         server.should_exit = True
         return {"stopping": True}
 
@@ -255,7 +264,7 @@ async def run(args) -> None:
         stacks = (output / "shutdown-stacks.txt").open("w")
         faulthandler.dump_traceback_later(15, repeat=True, file=stacks, exit=False)
 
-        async def phase(name: str, awaitable) -> None:
+        async def phase(name: str, awaitable: Awaitable[object]) -> None:
             started = time.perf_counter()
             try:
                 await awaitable

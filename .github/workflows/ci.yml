@@ -40,7 +40,7 @@ jobs:
       - name: Run backend tests with coverage
         run: uv run pytest --cov=arb --cov-fail-under=85
       - name: Run mypy
-        run: uv run mypy --strict server/arb
+        run: uv run mypy --strict
       - name: Run ruff
         run: uv run ruff check server tools
       - name: Check backend formatting

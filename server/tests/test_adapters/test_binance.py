@@ -80,8 +80,8 @@ def test_binance_subsequent_deltas_are_sequential() -> None:
     assert e1[0].exchange_last_sequence == 105
 
 
-def _stub_snapshot(adapter: object, sequence: int = 1) -> None:
-    async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
+def _stub_snapshot(adapter: BinanceAdapter, sequence: int = 1) -> None:
+    async def fetch_snapshot(self: BinanceAdapter, pair: str, trigger_sequence: int) -> MarketEvent:
         return MarketEvent(
             exchange=self.name,
             pair=pair,
@@ -93,7 +93,7 @@ def _stub_snapshot(adapter: object, sequence: int = 1) -> None:
             exchange_last_sequence=sequence,
         )
 
-    adapter.fetch_snapshot = types.MethodType(fetch_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(fetch_snapshot, adapter)  # type: ignore[method-assign]
 
 
 def test_binance_subsequent_messages_dont_trigger_rest_calls() -> None:
@@ -114,7 +114,7 @@ def test_binance_subsequent_messages_dont_trigger_rest_calls() -> None:
             asks=(PriceLevel(price=Decimal("101"), size=Decimal("1")),),
         )
 
-    adapter.fetch_snapshot = types.MethodType(counting_fetch, adapter)
+    adapter.fetch_snapshot = types.MethodType(counting_fetch, adapter)  # type: ignore[method-assign]
     asyncio.run(
         adapter.parse_message('{"s":"BTCUSDT","u":101,"U":100,"E":1,"b":[["100","1"]],"a":[]}')
     )
@@ -212,7 +212,7 @@ def test_binance_initial_buffer_aligns_snapshot_and_discards_covered_updates() -
             exchange_last_sequence=100,
         )
 
-    adapter.fetch_snapshot = types.MethodType(snapshot_at_100, adapter)
+    adapter.fetch_snapshot = types.MethodType(snapshot_at_100, adapter)  # type: ignore[method-assign]
     first = asyncio.run(adapter.parse_message('{"s":"BTCUSDT","u":99,"U":95,"E":1,"b":[],"a":[]}'))
     assert [event.kind for event in first] == [EventKind.SNAPSHOT]
     second = asyncio.run(
@@ -230,9 +230,8 @@ def test_binance_gap_resyncs_pair_without_requesting_reconnect() -> None:
     from arb.metrics import adapter_pair_resyncs_total
 
     def pair_resyncs() -> float:
-        return adapter_pair_resyncs_total.labels(
-            exchange="binance", trigger="sequence_gap"
-        )._value.get()
+        counter = adapter_pair_resyncs_total.labels(exchange="binance", trigger="sequence_gap")
+        return float(counter._value.get())
 
     adapter = BinanceAdapter(["BTCUSDT"])
     asyncio.run(
@@ -281,10 +280,10 @@ async def test_binance_buffers_updates_while_snapshot_is_in_flight() -> None:
         await release_snapshot.wait()
         return binance_snapshot(100)
 
-    adapter.fetch_snapshot = types.MethodType(delayed_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(delayed_snapshot, adapter)  # type: ignore[method-assign]
     await socket.push('{"s":"BTCUSDT","U":95,"u":99,"b":[],"a":[]}')
     stream = adapter.stream_events(socket)
-    first_event = asyncio.create_task(anext(stream))
+    first_event = asyncio.ensure_future(anext(stream))
     await snapshot_started.wait()
     await socket.push('{"s":"BTCUSDT","U":99,"u":105,"b":[["100","2"]],"a":[]}')
 
@@ -316,7 +315,7 @@ async def test_binance_stops_before_buffered_delta_after_reconnect_request() -> 
     ) -> MarketEvent:
         return binance_snapshot(100)
 
-    adapter.fetch_snapshot = types.MethodType(snapshot_at_100, adapter)
+    adapter.fetch_snapshot = types.MethodType(snapshot_at_100, adapter)  # type: ignore[method-assign]
     await socket.push('{"s":"BTCUSDT","U":99,"u":105,"b":[["100","2"]],"a":[["101","1"]]}')
     stream = adapter.stream_events(socket)
 
@@ -343,9 +342,9 @@ async def test_binance_buffer_overflow_aborts_synchronization() -> None:
         await never_release.wait()
         return binance_snapshot(1)
 
-    adapter.fetch_snapshot = types.MethodType(blocked_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(blocked_snapshot, adapter)  # type: ignore[method-assign]
     stream = adapter.stream_events(socket)
-    pending = asyncio.create_task(anext(stream))
+    pending = asyncio.ensure_future(anext(stream))
     await socket.push('{"s":"BTCUSDT","U":1,"u":1,"b":[],"a":[]}')
     await snapshot_started.wait()
     await socket.push('{"s":"BTCUSDT","U":2,"u":2,"b":[],"a":[]}')
@@ -367,7 +366,7 @@ async def test_binance_snapshot_failure_aborts_synchronization() -> None:
     ) -> MarketEvent:
         raise OSError("REST unavailable")
 
-    adapter.fetch_snapshot = types.MethodType(failed_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(failed_snapshot, adapter)  # type: ignore[method-assign]
     await socket.push('{"s":"BTCUSDT","U":1,"u":1,"b":[],"a":[]}')
     stream = adapter.stream_events(socket)
     with pytest.raises(RuntimeError, match="snapshot retrieval failed"):
@@ -386,7 +385,7 @@ async def test_binance_reconnects_when_snapshot_never_catches_up() -> None:
         calls += 1
         return binance_snapshot(90)
 
-    adapter.fetch_snapshot = types.MethodType(stale_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(stale_snapshot, adapter)  # type: ignore[method-assign]
     await socket.push('{"s":"BTCUSDT","U":95,"u":105,"b":[],"a":[]}')
     stream = adapter.stream_events(socket)
 
@@ -426,7 +425,7 @@ async def test_binance_single_pair_gap_keeps_other_pair_flowing() -> None:
             exchange_last_sequence=111,
         )
 
-    adapter.fetch_snapshot = types.MethodType(fetch_btc_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(fetch_btc_snapshot, adapter)  # type: ignore[method-assign]
     socket = ControlledSocket()
     await socket.push('{"s":"BTCUSDT","U":110,"u":112,"E":1,"b":[["100","1"]],"a":[["101","1"]]}')
     await socket.push('{"s":"ETHUSDT","U":51,"u":51,"E":1,"b":[["200","1"]],"a":[["201","1"]]}')
@@ -583,9 +582,9 @@ async def test_external_resync_during_inflight_snapshot_keeps_connection() -> No
         await release_snapshot.wait()
         return binance_snapshot(3)
 
-    adapter.fetch_snapshot = types.MethodType(delayed_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(delayed_snapshot, adapter)  # type: ignore[method-assign]
     stream = adapter.stream_events(socket)
-    pending = asyncio.create_task(anext(stream))
+    pending = asyncio.ensure_future(anext(stream))
     await socket.push('{"s":"BTCUSDT","U":1,"u":5,"b":[["100","1"]],"a":[["101","1"]]}')
     await snapshot_started.wait()
 
@@ -627,7 +626,7 @@ async def test_gapped_pair_is_ineligible_while_scoped_snapshot_is_in_flight() ->
         await release_snapshot.wait()
         return binance_snapshot(111)
 
-    adapter.fetch_snapshot = types.MethodType(delayed_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(delayed_snapshot, adapter)  # type: ignore[method-assign]
     socket = ControlledSocket()
     stream = adapter.stream_events(socket)
     try:
@@ -720,7 +719,7 @@ def test_binance_retries_snapshot_that_predates_first_buffered_update() -> None:
     ) -> MarketEvent:
         return binance_snapshot(next(sequences))
 
-    adapter.fetch_snapshot = types.MethodType(advancing_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(advancing_snapshot, adapter)  # type: ignore[method-assign]
     events = asyncio.run(adapter.parse_message('{"s":"BTCUSDT","U":95,"u":105,"b":[],"a":[]}'))
     assert [event.kind for event in events] == [EventKind.SNAPSHOT, EventKind.DELTA]
     assert events[0].sequence == 100

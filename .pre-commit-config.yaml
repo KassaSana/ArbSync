@@ -26,10 +26,10 @@ repos:
 
       - id: mypy
         name: mypy
-        entry: python tools/run_backend_tool.py mypy --strict server/arb
+        entry: python tools/run_backend_tool.py mypy --strict
         language: system
         pass_filenames: false
-        files: ^(server/|pyproject\.toml)
+        files: ^(server/|tools/|pyproject\.toml)
 
       - id: dashboard-eslint
         name: dashboard-eslint

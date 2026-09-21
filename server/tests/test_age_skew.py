@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from age_skew import (
@@ -235,13 +236,15 @@ def test_band_rows_group_episodes_by_open_ages_and_summarize_outcomes() -> None:
     assert fresh["duration_ms_p50"] == 100.0 and fresh["duration_ms_p90"] == 300.0
     assert fresh["duration_ms_max"] == 300.0
     assert fresh["peak_spread_pct_p50"] == 0.4 and fresh["peak_spread_pct_p90"] == 0.6
-    assert fresh["survival_by_notional"][0]["survivors"] == 1
-    assert fresh["survival_by_notional"][0]["priced"] == 2
+    fresh_survival = cast("list[dict[str, Any]]", fresh["survival_by_notional"])
+    assert fresh_survival[0]["survivors"] == 1
+    assert fresh_survival[0]["priced"] == 2
     old = by_key[("absolute_age", 2)]
     assert (old["band_lower_ms"], old["band_upper_ms"]) == (1_000, None)
     assert old["evaluations"] == 1 and old["episodes_opened"] == 1
     assert old["duration_ms_p50"] is None, "an open episode has no lifetime yet"
-    assert old["survival_by_notional"][0]["insufficient_depth"] == 1
+    old_survival = cast("list[dict[str, Any]]", old["survival_by_notional"])
+    assert old_survival[0]["insufficient_depth"] == 1
     empty = by_key[("absolute_age", 1)]
     assert empty["evaluations"] == 0 and empty["open_rate"] is None
     # The same episodes land in different bands on the skew dimension.

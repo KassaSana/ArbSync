@@ -458,7 +458,7 @@ class OpportunityStore:
             counts[pair] = counts.get(pair, 0) + int(count)
         return counts
 
-    async def stats(self, window_ns: int) -> dict[str, object]:
+    async def stats(self, window_ns: int) -> dict[str, Any]:
         cutoff_ns = time.time_ns() - window_ns
         async with aiosqlite.connect(self.db_path) as db:
             count, max_spread, _spread, profits = await self._windowed_totals(db, cutoff_ns)
@@ -471,7 +471,7 @@ class OpportunityStore:
             },
         }
 
-    async def extended_stats(self, window_ns: int | None) -> dict[str, object]:
+    async def extended_stats(self, window_ns: int | None) -> dict[str, Any]:
         cutoff_ns = 0 if window_ns is None else time.time_ns() - window_ns
         async with aiosqlite.connect(self.db_path) as db:
             count, max_spread, sum_spread, profits = await self._windowed_totals(db, cutoff_ns)

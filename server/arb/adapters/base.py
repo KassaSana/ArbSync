@@ -6,7 +6,7 @@ import contextvars
 import json
 import random
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from inspect import isawaitable
@@ -236,7 +236,7 @@ class ExchangeAdapter(abc.ABC):
         """
         return False
 
-    async def stream_events(self, websocket: Any) -> AsyncIterator[MarketEvent]:
+    async def stream_events(self, websocket: Any) -> AsyncGenerator[MarketEvent, None]:
         """Normalize one connection's messages, preserving their receipt time."""
         async for message in websocket:
             received_monotonic_ns = time.monotonic_ns()
@@ -263,7 +263,7 @@ class ExchangeAdapter(abc.ABC):
             if self._reconnect_requested:
                 raise RuntimeError("adapter requested reconnect")
 
-    async def connect(self) -> AsyncIterator[MarketEvent]:
+    async def connect(self) -> AsyncGenerator[MarketEvent, None]:
         import websockets
 
         backoff = 1.0

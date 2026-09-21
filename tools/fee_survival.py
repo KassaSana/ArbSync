@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -164,38 +164,47 @@ def apply_scenario(
     )
 
 
+@dataclass
+class _NotionalSurvival:
+    """Running totals for one configured notional while aggregating stored rows."""
+
+    notional: str
+    priced: int = 0
+    insufficient_depth: int = 0
+    survivors: int = 0
+    net_profit_by_quote: dict[str, str] = field(default_factory=dict)
+
+    def as_row(self) -> dict[str, object]:
+        return {
+            "notional": self.notional,
+            "priced": self.priced,
+            "insufficient_depth": self.insufficient_depth,
+            "survivors": self.survivors,
+            "net_profit_by_quote": dict(self.net_profit_by_quote),
+        }
+
+
 def stored_survival(rows: list[EpisodeRow]) -> list[dict[str, object]]:
     """Aggregate stored net results by configured notional without recomputing fees."""
-    totals: dict[str, dict[str, object]] = {}
+    totals: dict[str, _NotionalSurvival] = {}
     for row in rows:
         for ledger in row.pricing_ledgers:
             notional = str(ledger["notional"])
-            entry = totals.setdefault(
-                notional,
-                {
-                    "notional": notional,
-                    "priced": 0,
-                    "insufficient_depth": 0,
-                    "survivors": 0,
-                    "net_profit_by_quote": {},
-                },
-            )
+            entry = totals.setdefault(notional, _NotionalSurvival(notional))
             net_literal = ledger.get("net_executable_spread_pct")
             if net_literal is None:
-                entry["insufficient_depth"] = int(entry["insufficient_depth"]) + 1
+                entry.insufficient_depth += 1
                 continue
-            entry["priced"] = int(entry["priced"]) + 1
+            entry.priced += 1
             net = Decimal(str(net_literal))
             if net <= 0:
                 continue
-            entry["survivors"] = int(entry["survivors"]) + 1
-            profits = entry["net_profit_by_quote"]
-            assert isinstance(profits, dict)
+            entry.survivors += 1
+            profits = entry.net_profit_by_quote
             profits[row.quote_asset] = str(
-                Decimal(str(profits.get(row.quote_asset, "0")))
-                + Decimal(notional) * net / Decimal(100)
+                Decimal(profits.get(row.quote_asset, "0")) + Decimal(notional) * net / Decimal(100)
             )
-    return [totals[key] for key in sorted(totals, key=Decimal)]
+    return [totals[key].as_row() for key in sorted(totals, key=Decimal)]
 
 
 def percentile(values: list[Decimal], fraction: float) -> Decimal:

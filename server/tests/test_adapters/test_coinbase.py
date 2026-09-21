@@ -182,8 +182,10 @@ def test_coinbase_subscribes_to_level2_and_heartbeats() -> None:
     assert [json.loads(message)["channel"] for message in sent] == ["level2", "heartbeats"]
 
 
-def _stub_snapshot(adapter: object, sequence: int = 1) -> None:
-    async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
+def _stub_snapshot(adapter: CoinbaseAdapter, sequence: int = 1) -> None:
+    async def fetch_snapshot(
+        self: CoinbaseAdapter, pair: str, trigger_sequence: int
+    ) -> MarketEvent:
         return MarketEvent(
             exchange=self.name,
             pair=pair,
@@ -195,7 +197,7 @@ def _stub_snapshot(adapter: object, sequence: int = 1) -> None:
             exchange_last_sequence=sequence,
         )
 
-    adapter.fetch_snapshot = types.MethodType(fetch_snapshot, adapter)
+    adapter.fetch_snapshot = types.MethodType(fetch_snapshot, adapter)  # type: ignore[method-assign]
 
 
 def test_coinbase_gap_waits_for_stream_snapshot_without_using_rest_sequence() -> None:

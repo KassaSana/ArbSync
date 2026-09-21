@@ -50,7 +50,7 @@ def instrument_aiosqlite_worker_cpu(accumulator: ThreadCpuAccumulator) -> None:
     """Instrument aiosqlite calls inside this disposable benchmark process."""
     from aiosqlite.core import Connection
 
-    original_execute = Connection._execute
+    original_execute: Any = Connection._execute
 
     async def measured_execute(self: Any, function: Any, *args: Any, **kwargs: Any) -> Any:
         return await original_execute(self, accumulator.measure(function), *args, **kwargs)

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -178,10 +180,12 @@ def test_version_one_capture_is_read_with_legacy_limitations(tmp_path: Path) -> 
     assert parsed_header.provenance == "legacy_v1_unavailable"
 
 
-def test_writer_failure_is_distinct_from_a_missing_footer(tmp_path: Path, monkeypatch) -> None:
+def test_writer_failure_is_distinct_from_a_missing_footer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / "failed.jsonl"
 
-    async def failing_to_thread(function, /, *args, **kwargs):
+    async def failing_to_thread(function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         if function.__name__ == "writelines":
             raise OSError("disk full")
         return function(*args, **kwargs)
@@ -212,10 +216,12 @@ def test_capture_gzip_round_trip(tmp_path: Path) -> None:
     assert frames[0].raw == '{"e":"depthUpdate"}'
 
 
-def test_capture_open_writes_and_close_run_off_event_loop(tmp_path: Path, monkeypatch) -> None:
+def test_capture_open_writes_and_close_run_off_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls: list[str] = []
 
-    async def tracked_to_thread(function, /, *args, **kwargs):
+    async def tracked_to_thread(function: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         calls.append(function.__name__)
         return function(*args, **kwargs)
 

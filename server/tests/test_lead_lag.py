@@ -144,6 +144,7 @@ def test_planted_negative_lag_names_the_right_venue_as_leader() -> None:
     _assert_recovers(analysis, -300_000_000)
     row = lead_lag_row(PAIR, "left", "right", analysis, min_overlap=30)
     assert row["leader_exchange"] == "right"
+    assert analysis.estimate.lag_ns is not None
     assert row["estimated_lead_ns"] == -analysis.estimate.lag_ns
 
 

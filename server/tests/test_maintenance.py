@@ -204,7 +204,7 @@ def test_cli_prunes_in_batches_and_reports_each_one(
     seeded_database: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pauses: list[float] = []
-    monkeypatch.setattr(maintenance.time, "sleep", pauses.append)
+    monkeypatch.setattr("arb.maintenance.time.sleep", pauses.append)
 
     maintenance.main(
         [
@@ -302,7 +302,7 @@ def test_cli_reports_committed_deletions_when_a_later_batch_fails(
         return real_prune_batch(*args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(maintenance, "prune_batch", flaky_prune_batch)
-    monkeypatch.setattr(maintenance.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("arb.maintenance.time.sleep", lambda _seconds: None)
 
     with pytest.raises(SystemExit) as excinfo:
         maintenance.main(

@@ -132,7 +132,8 @@ async def run_benchmark(iterations: int) -> dict[str, Any]:
             while processed < iterations + 3:
                 message = await websocket.recv()
                 recv_ns = time.perf_counter_ns()
-                event = parse_event(message, recv_ns)
+                text = message.decode() if isinstance(message, bytes) else message
+                event = parse_event(text, recv_ns)
                 result = manager.apply(event)
                 if result.accepted and result.top_of_book is not None:
                     pair_books = [

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import random
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 from arb.replay import ReplayObservation
@@ -74,8 +75,10 @@ def test_lead_lag_reports_the_leader_and_measurement_direction() -> None:
     assert row["leader_exchange"] == "gemini"
     assert row["follower_exchange"] == "coinbase"
     assert row["estimated_lead_ns"] == 500_000_000
-    assert row["hayashi_yoshida_correlation"] == pytest.approx(1.0)
-    assert -1.0 <= row["hayashi_yoshida_correlation"] <= 1.0
+    correlation = row["hayashi_yoshida_correlation"]
+    assert isinstance(correlation, float)
+    assert correlation == pytest.approx(1.0)
+    assert -1.0 <= correlation <= 1.0
     assert "correlation_ci_95_low" not in row
     assert row["null_surrogate_count"] == 20
     assert row["null_exceedance_fraction"] == 0.0
@@ -250,4 +253,5 @@ def test_survival_profit_is_decimal_derived() -> None:
         ]
     )
 
-    assert Decimal(rows[0]["net_profit_by_quote"]["USD"]) == Decimal("3.33333333333333333")
+    net_profit = cast("dict[str, Any]", rows[0]["net_profit_by_quote"])
+    assert Decimal(net_profit["USD"]) == Decimal("3.33333333333333333")

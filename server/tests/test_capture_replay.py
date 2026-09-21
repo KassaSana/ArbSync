@@ -4,6 +4,7 @@ import asyncio
 import json
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -310,7 +311,9 @@ def test_replay_rejects_non_positive_speed(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_market_event_honors_recorded_timestamps(monkeypatch) -> None:
+async def test_process_market_event_honors_recorded_timestamps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from arb.orderbook import OrderBookManager
     from arb.types import EventKind, MarketEvent, PriceLevel
 
@@ -490,7 +493,9 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
     base_wall = 1_700_000_000 * second
     base_mono = 9_000 * second
 
-    def frame(index: int, exchange: str, raw: str | None, payload: dict | None = None):
+    def frame(
+        index: int, exchange: str, raw: str | None, payload: dict[str, Any] | None = None
+    ) -> CaptureFrame:
         return CaptureFrame(
             exchange=exchange,
             kind="ws" if raw is not None else "snapshot",

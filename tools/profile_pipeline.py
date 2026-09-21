@@ -20,8 +20,10 @@ import subprocess
 import sys
 import time
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 import psutil
@@ -85,7 +87,7 @@ BROWSER_INIT = """() => {
 }"""
 
 
-def distribution(values) -> dict:
+def distribution(values: Iterable[float]) -> dict[str, float | int | None]:
     ordered = sorted(values)
     if not ordered:
         return {"count": 0, "mean": None, "p50": None, "p95": None, "p99": None, "max": None}
@@ -97,7 +99,16 @@ def distribution(values) -> dict:
     }
 
 
-def summarize(backend, feed, browser, resources, cdp_start, cdp_end, elapsed, database):
+def summarize(
+    backend: dict[str, Any],
+    feed: Feed,
+    browser: dict[str, Any],
+    resources: list[list[float]],
+    cdp_start: dict[str, Any],
+    cdp_end: dict[str, Any],
+    elapsed: float,
+    database: Path,
+) -> dict[str, Any]:
     sent = {(e, p, seq): ns for e, p, seq, ns in feed.sent}
     received_ms, detected_ms, completed_ms, sender_ms = [], [], [], []
     unmatched = 0
@@ -112,7 +123,7 @@ def summarize(backend, feed, browser, resources, cdp_start, cdp_end, elapsed, da
         completed_ms.append((completed - receipt) / 1e6)
         detected_ms.append((receipt - send) / 1e6)
     queues = backend["queue_samples"]
-    profiles: dict = defaultdict(list)
+    profiles: dict[str, list[float]] = defaultdict(list)
     for name, actual, _base, _commit in browser["profile"]["samples"]:
         profiles[name].append(actual)
     rows = persisted_episode_count(database)
@@ -167,9 +178,9 @@ def summarize(backend, feed, browser, resources, cdp_start, cdp_end, elapsed, da
     }
 
 
-async def resource_sampler(pid, rows, stop):
+async def resource_sampler(pid: int, rows: list[list[float]], stop: asyncio.Event) -> None:
     backend = psutil.Process(pid)
-    tracked = {}
+    tracked: dict[int, Any] = {}
     backend.cpu_percent()
     while not stop.is_set():
         cpu, rss = 0.0, 0
@@ -197,7 +208,7 @@ async def resource_sampler(pid, rows, stop):
             pass
 
 
-async def wait_ready(client, process):
+async def wait_ready(client: httpx.AsyncClient, process: subprocess.Popen[bytes]) -> None:
     for _ in range(150):
         if process.poll() is not None:
             raise RuntimeError("Backend exited; see backend.log")
@@ -217,7 +228,9 @@ async def wait_ready(client, process):
     raise RuntimeError("Backend never became ready; see backend.log")
 
 
-async def scenario(args, rate, browser, output):
+async def scenario(
+    args: argparse.Namespace, rate: int, browser: Any, output: Path
+) -> dict[str, Any]:
     output.mkdir(parents=True, exist_ok=False)
     # Allocate a fresh port by default; never talk to a pre-existing application.
     with socket.socket() as reservation:
@@ -276,7 +289,7 @@ async def scenario(args, rate, browser, output):
                 m["name"]: m["value"] for m in (await cdp.send("Performance.getMetrics"))["metrics"]
             }
             await page.evaluate("window.__arbBrowser.start()")
-            resources = []
+            resources: list[list[float]] = []
             # On Windows the venv executable can be a launcher for another PID.
             worker_pid = (await client.get("/__bench/progress")).json()["pid"]
             sampler = asyncio.create_task(resource_sampler(worker_pid, resources, stop))
@@ -366,7 +379,7 @@ async def scenario(args, rate, browser, output):
         await server.wait_closed()
 
 
-async def main(args):
+async def main(args: argparse.Namespace) -> None:
     os.chdir(ROOT)
     source_before = source_fingerprint()
     mode = "profile" if args.profile else "perf"
@@ -382,8 +395,11 @@ async def main(args):
         if args.profile:
             raise RuntimeError("--skip-build cannot confirm the build matches --profile mode")
     else:
+        node = shutil.which("node")
+        if node is None:
+            raise RuntimeError("node is required to build the dashboard")
         build = await asyncio.create_subprocess_exec(
-            shutil.which("node"),
+            node,
             "node_modules/vite/bin/vite.js",
             "build",
             "--mode",
@@ -403,7 +419,7 @@ async def main(args):
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     name = f"{args.label}-{mode}-{stamp}"
     output = root / "raw" / name
-    results = []
+    results: list[dict[str, Any]] = []
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
             channel=args.channel,
