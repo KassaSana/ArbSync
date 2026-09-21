@@ -3,7 +3,9 @@ import { WS_BASE } from "../api/client";
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting";
 
-type MessageHandler = (event: MessageEvent<string>, connectionId: number) => void;
+// The socket delivers `MessageEvent<any>`; the handler decides whether a
+// frame's data is the text it expects.
+type MessageHandler = (event: MessageEvent<unknown>, connectionId: number) => void;
 
 type WebSocketState = {
   status: ConnectionStatus;
@@ -61,7 +63,7 @@ export function useWebSocket(handler: MessageHandler): WebSocketState {
         }, STABLE_CONNECTION_MS);
       };
 
-      thisSocket.onmessage = (event) => {
+      thisSocket.onmessage = (event: MessageEvent<unknown>) => {
         if (active && socket === thisSocket && thisConnection === connectionId) {
           handlerRef.current(event, thisConnection);
         }

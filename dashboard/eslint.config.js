@@ -11,6 +11,8 @@ export default [
         ecmaVersion: "latest",
         sourceType: "module",
         ecmaFeatures: { jsx: true },
+        project: "./tsconfig.json",
+        tsconfigRootDir: import.meta.dirname,
       },
       globals: {
         document: "readonly",
@@ -27,8 +29,15 @@ export default [
       "react-hooks": reactHooks,
     },
     rules: {
-      ...tseslint.configs.recommended.rules,
+      ...tseslint.configs["recommended-type-checked"].rules,
       ...reactHooks.configs.recommended.rules,
+    },
+  },
+  {
+    // Test doubles implement async interfaces without awaiting anything.
+    files: ["src/**/*.test.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/require-await": "off",
     },
   },
 ];

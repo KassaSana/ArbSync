@@ -269,9 +269,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const lastStream = useRef({ connectionId: 0, sequence: 0 });
 
   const handleMessage = useCallback(
-    (event: MessageEvent<string>, connectionId: number) => {
+    (event: MessageEvent<unknown>, connectionId: number) => {
       let message: LiveEnvelope;
       try {
+        if (typeof event.data !== "string") {
+          throw new TypeError("live frames are JSON text");
+        }
         message = decodeLiveEnvelope(JSON.parse(event.data));
       } catch {
         setInvalidFrameCount((count) => count + 1);

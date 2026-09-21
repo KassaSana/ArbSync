@@ -6,7 +6,7 @@ import { LiveProvider, useLive } from "./live";
 class MockSocket {
   static instances: MockSocket[] = [];
   onopen: (() => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
+  onmessage: ((event: { data: unknown }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
   sent: string[] = [];
@@ -27,7 +27,7 @@ class MockSocket {
     this.onmessage?.({ data: JSON.stringify(payload) });
   }
 
-  emitRaw(data: string): void {
+  emitRaw(data: unknown): void {
     this.onmessage?.({ data });
   }
 }
@@ -261,8 +261,9 @@ describe("live state", () => {
       payload: { ...book("coinbase", "101", 1), timestamp_ns: "1.5" },
     });
     socket.emit({ type: "mystery", stream_sequence: 5, payload: {} });
+    socket.emitRaw(new ArrayBuffer(8));
 
-    await waitFor(() => expect(screen.getByTestId("invalid-frames")).toHaveTextContent("5"));
+    await waitFor(() => expect(screen.getByTestId("invalid-frames")).toHaveTextContent("6"));
     expect(screen.getByTestId("books").textContent).toBe("gemini:BTC-USD");
 
     // Invalid sequence values were quarantined, so the next valid sequence is

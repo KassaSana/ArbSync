@@ -5,7 +5,7 @@ import Dashboard from "./Dashboard";
 
 type LiveValue = ReturnType<typeof import("../state/live").useLive>;
 
-const live = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const live = vi.hoisted(() => ({ current: {} }));
 
 vi.mock("../state/live", () => ({
   useLive: () => live.current,
