@@ -14,11 +14,6 @@ class EventKind(str, Enum):
     RESET = "reset"
 
 
-class Side(str, Enum):
-    BID = "bid"
-    ASK = "ask"
-
-
 @dataclass(frozen=True)
 class PriceLevel:
     price: Decimal
@@ -34,7 +29,6 @@ class MarketEvent:
     timestamp_ns: int
     bids: tuple[PriceLevel, ...] = ()
     asks: tuple[PriceLevel, ...] = ()
-    raw_timestamp_ms: int | None = None
     exchange_first_sequence: int | None = None
     exchange_last_sequence: int | None = None
     received_monotonic_ns: int | None = None

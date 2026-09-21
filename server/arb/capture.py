@@ -153,10 +153,6 @@ class CaptureWriter:
         capture_unflushed_frames.set(0)
 
     @property
-    def dropped_reason_closed(self) -> str:
-        return "writer_closed"
-
-    @property
     def frame_count(self) -> int:
         return self._frame_count
 

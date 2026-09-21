@@ -672,12 +672,6 @@ def parse_event_counts(metrics: str) -> dict[str, int]:
     return counts
 
 
-async def fetch_event_counts(client: httpx.AsyncClient) -> dict[str, int]:
-    response = await client.get("/metrics")
-    response.raise_for_status()
-    return parse_event_counts(response.text)
-
-
 def parse_operational_counters(metrics: str) -> dict[str, int]:
     prefixes = (
         "arb_adapter_reconnects_total",
