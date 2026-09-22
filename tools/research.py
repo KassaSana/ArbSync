@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import json
 from collections import defaultdict
 from collections.abc import Iterable
@@ -127,16 +128,24 @@ async def replay_for_research(
         route_observer=recorder.record,
         observe_evaluations=True,
     )
-    report = await replay_frames(
-        header,
-        frames,
-        threshold_pct=Decimal(str(config.detector.threshold_pct)),
-        max_age_seconds=config.order_books.max_age_seconds,
-        book_manager=book_manager,
-        detector=detector,
-        depth_sampler=sampler,
-        book_observer=None if net_recorder is None else net_recorder.observe,
-    )
+    # The net signal accumulates millions of immutable, acyclic rows, and
+    # every full cyclic-GC pass rescans all of them (on the 150 s fixture the
+    # collector runs about 250 times and frees nothing). Pausing it for the
+    # replay keeps the research run linear in capture length.
+    gc.disable()
+    try:
+        report = await replay_frames(
+            header,
+            frames,
+            threshold_pct=Decimal(str(config.detector.threshold_pct)),
+            max_age_seconds=config.order_books.max_age_seconds,
+            book_manager=book_manager,
+            detector=detector,
+            depth_sampler=sampler,
+            book_observer=None if net_recorder is None else net_recorder.observe,
+        )
+    finally:
+        gc.enable()
     if detector.open_episodes():
         # A capture ending with a standing opportunity needs a deterministic
         # boundary for lifetime research, just like ordinary replay reports.

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import json
 import statistics
 import time
@@ -99,16 +100,22 @@ async def _replay(capture: Path, config_path: Path, *, with_observer: bool) -> _
         observer = timed
     resident_before = _resident_bytes()
     started_wall = time.perf_counter()
-    report = await replay_frames(
-        header,
-        frames,
-        threshold_pct=Decimal(str(config.detector.threshold_pct)),
-        max_age_seconds=config.order_books.max_age_seconds,
-        book_manager=book_manager,
-        detector=detector,
-        depth_sampler=sampler,
-        book_observer=observer,
-    )
+    # Same GC discipline as `research.replay_for_research`, so observer timings
+    # measure the walk rather than cyclic-GC rescans of the accumulated rows.
+    gc.disable()
+    try:
+        report = await replay_frames(
+            header,
+            frames,
+            threshold_pct=Decimal(str(config.detector.threshold_pct)),
+            max_age_seconds=config.order_books.max_age_seconds,
+            book_manager=book_manager,
+            detector=detector,
+            depth_sampler=sampler,
+            book_observer=observer,
+        )
+    finally:
+        gc.enable()
     wall_seconds = time.perf_counter() - started_wall
     resident_growth = _resident_bytes() - resident_before
     # The periodic sampler walk over the final books, evaluated at the last
