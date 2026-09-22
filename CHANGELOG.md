@@ -35,6 +35,15 @@
 
 ### Added
 
+- Binance.US resynchronizes a single pair over its open socket after a sequence gap or a
+  confirmed reconciliation drift instead of reconnecting the whole venue, keeping its
+  other books eligible; a full reconnect remains the bounded fallback.
+  `arb_adapter_pair_resyncs_total` counts scoped resyncs by trigger. This resolves the
+  0.1.0 known limitation of whole-stream Binance.US recovery.
+- The soak observer probes host connectivity with a bounded TCP connect alongside every
+  sample, labels each sample by host link and backend state, summarizes contiguous outage
+  windows, and records the pair-resync counter, so a host network outage is no longer
+  attributed to the backend by hand.
 - Filtered opportunity history: `GET /api/opportunities` pages stored episodes newest first
   with an opaque cursor that never repeats a row or admits rows written after the first page
   (state is read per page, so an episode closing mid-walk can leave a `state=open`
@@ -86,6 +95,14 @@
   configuration fingerprint with session and `coverage` provenance. `arbsync replay
   --serve` now samples fill rates in memory without persisting them as live buckets, and research writes `venue_fill_rate_minutes.jsonl`
   with fill-rate provenance in `report.json` (`version` 5).
+
+### Evidence
+
+- A four-hour uninterrupted live soak of the current code (2026-09-22, commit `012537c`)
+  completed with 241/241 ready samples, zero sequence gaps, zero restarts or background
+  failures, every book eligible in every sample, two Binance.US scoped pair resyncs with no
+  venue reconnect, and no net-positive stored route at any notional. It supersedes the
+  2026-09-16 soak as current evidence; see `docs/VALIDATION.md`.
 
 ### Upgrade notes
 

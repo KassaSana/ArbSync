@@ -330,8 +330,8 @@ performance. See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for methodology and 
 committed reports under
 [`artifacts/benchmarks/performance/`](artifacts/benchmarks/performance/).
 The live observer is documented there as well. The committed long-duration evidence is a
-four-hour uninterrupted live soak from 2026-09-16, reviewed in
-[`docs/VALIDATION.md`](docs/VALIDATION.md#live-soak-2026-09-16).
+four-hour uninterrupted live soak of the current code from 2026-09-22, reviewed in
+[`docs/VALIDATION.md`](docs/VALIDATION.md#live-soak-2026-09-22).
 
 ## Repository map
 
@@ -363,15 +363,15 @@ fees for each configured notional; those ledgers model measured book depth, not 
 placement. They still exclude latency, inventory constraints, transfer and withdrawal
 costs, rate limits, market movement after observation, and execution risk. ArbSync is an
 observability project, not an execution engine or trading system.
-Measured against the four-hour soak (run while Binance.US was configured for USDT, so its
-books were a separate market), none of the 246 recorded Coinbase–Gemini opportunities
-survives a retail taker fee on both legs; the observed venue price differences (p50 0.12%)
-are smaller than the venue fee differences. The analysis and the tool that reproduces it are
-in [`docs/VALIDATION.md`](docs/VALIDATION.md#fee-adjusted-survival-of-the-soaks-opportunities).
+Across the 2026-09-22 four-hour soak, none of the 497 theoretical episodes on all three
+venues had a positive stored net spread at any configured notional (best: −0.18% at 100);
+the observed venue price differences (p50 0.13%) are smaller than the venue fee differences.
+The stored-ledger analysis and the command that reproduces it are in
+[`docs/VALIDATION.md`](docs/VALIDATION.md#stored-net-survival-2026-09-22).
 
 Long-duration evidence is a single four-hour uninterrupted live soak on one workstation.
-It establishes reconnect recovery, sequence continuity, the 60-second freshness threshold,
-and the absence of short-horizon memory growth; it does not rule out slower growth or
+It establishes reconnect and scoped pair recovery, sequence continuity, the 60-second
+freshness threshold, and the absence of short-horizon memory growth; it does not rule out slower growth or
 daily-cycle effects, and it exercised a lightweight WebSocket consumer rather than real
 browser clients. The remaining gaps are listed in
 [`docs/VALIDATION.md`](docs/VALIDATION.md#remaining-validation-gap).

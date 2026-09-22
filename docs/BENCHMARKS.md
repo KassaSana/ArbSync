@@ -47,13 +47,13 @@ EXCHANGE=PCT` arguments explicitly request the older counterfactual top-of-book 
 for historical research; that output is not labelled as product pricing.
 
 ```bash
-uv run python tools/fee_survival.py --database var/arb.sqlite3   --start 2026-09-16T10:25:38Z --end 2026-09-16T14:25:38Z
+uv run python tools/fee_survival.py --database var/soak_arb045.sqlite3 --start 2026-09-22T19:35:44Z --end 2026-09-22T23:35:46Z
 ```
 
-The result for the four-hour soak is recorded in
-[VALIDATION.md](VALIDATION.md#fee-adjusted-survival-of-the-soaks-opportunities).
+The result for the 2026-09-22 four-hour soak is recorded in
+[VALIDATION.md](VALIDATION.md#stored-net-survival-2026-09-22).
 
-## 3. Live Soak Observer
+## Live soak observer
 
 On Windows, run the launcher. It starts the backend, waits for readiness, blocks
 system sleep for the duration, samples, and stops the backend on exit:
@@ -63,7 +63,9 @@ system sleep for the duration, samples, and stops the backend on exit:
 ```
 
 It defaults to a 24-hour run at a 60-second sample interval, which gives roughly 1,441
-samples. Shorter runs take `-DurationSeconds` and `-SampleSeconds`; the required bar is
+samples. The default report name always reads `soak_24h_<stamp>.md` whatever the
+duration, so pass `-Output` (for example `soak_4h_<stamp>.md`) for shorter runs, and
+`-Config` to point a run at its own database. Shorter runs take `-DurationSeconds` and `-SampleSeconds`; the required bar is
 four uninterrupted hours, so `-DurationSeconds 14400` is the shortest qualifying run.
 Sample starts may be at most twice the configured interval apart by default. A larger
 gap stops the run immediately, exits nonzero, and leaves the report marked `interrupted`;

@@ -53,6 +53,12 @@ The suite covers:
   boundaries and orphan recovery, decimal-exact depth walking, matched-route quantity,
   explicit insufficient depth, fee-aware ledgers, schema-v4 persistence, and dashboard
   rendering of peak, net, and lifetime tiers
+- fill-rate statistics: every configured book counted per sample with per-reason
+  ineligibility (missing, never-initialized, disconnected, too old), capped versus
+  full-depth shortfalls, the sample grid and missed ticks, quiet books, restarts and
+  configuration changes across a window, filtered windows equal to the reference reducer,
+  the schema v4 to v5 migration, pruning, the shutdown flush, and replay/live agreement on
+  one observation sequence
 
 CI also runs strict mypy, Ruff, frontend type checking, ESLint, the production
 dashboard build, and coverage gates: 85% over the whole backend package and 75%
@@ -246,10 +252,101 @@ load. This bounds the export's own blocking; it is not an ingestion-latency meas
 live traffic. Measured on the development workstation with SQLite 3.49.1; absolute times
 depend on storage and cache state.
 
+## Live soak (2026-09-22)
+
+A four-hour uninterrupted live soak of the current code against all 27 configured books
+completed on 2026-09-22. It is the current long-duration reliability evidence and the first
+run to cover schema-v4 depth/fee ledgers, Binance.US single-pair resynchronization
+(ARB-028), the soak host-connectivity probe (ARB-029), the research-correctness contracts of
+ARB-036 through ARB-041, and schema-v5 fill-rate buckets (ARB-042).
+
+- Report: [`soak_4h_2026-09-22_153534.md`](../artifacts/benchmarks/soak/soak_4h_2026-09-22_153534.md)
+  (raw per-sample JSONL retained locally beside it; it is ignored by Git)
+- Window: 2026-09-22 19:35:44Z to 23:35:45Z; `14400.6 s` achieved of `14400 s` requested,
+  60-second samples, status `complete`, zero excessive sample gaps
+- Backend and observer commit: `012537c1e75dd66490fa327be2db48039b640582`, clean checkout
+- Environment: Windows 11 10.0.26200, Python 3.12.10 project virtualenv, single developer
+  workstation; `tools/run_soak.ps1` launched under a Windows Scheduled Task, backend and
+  observer verified to descend from the Task Scheduler service rather than any interactive
+  or tool session
+- Configuration: the shipped `config.toml` with only `server.database_path` pointed at a
+  fresh `var/soak_arb045.sqlite3`, so every stored row belongs to this run; SHA-256
+  `7bb2f63f471b84f786004ea812d5a1988580d15c3a238a8855c5f0461fc3c7f1`. Binance.US used its
+  USD markets, so all three venues took part in detection.
+
+Results:
+
+- **Process:** no restart, no counter reset, no background-task failure, no HTTP failure.
+  RSS ranged 86.2–110.5 MiB, mean 103.5 MiB, start-to-end change **−18.3 MiB**.
+- **Readiness and eligibility:** 241 of 241 samples ready. Every configured book was
+  observed and eligible in all 241 samples, with no missing configured-book observation.
+  The oldest eligible receipt was Binance.US `DOT-USD` at 38.7 s, inside the 60-second limit.
+- **Ingestion:** 1,535,669 Coinbase, 112,388 Gemini, and 92,286 Binance.US events with
+  **zero detected sequence gaps**. 497 theoretical opportunity episodes were recorded, all
+  closed as `spread_closed`.
+- **Host connectivity:** the probe reached `1.1.1.1:443` and `8.8.8.8:443` in 241 of 241
+  samples (maximum 72 ms); no sample saw the backend unreachable, so no outage needed
+  attribution by hand.
+- **Recovery:** Binance.US repaired two confirmed `UNI-USD` drifts through
+  `arb_adapter_pair_resyncs_total{trigger="external"}` = 2 with **zero** Binance.US
+  reconnects, so its other eight books kept flowing, which is the ARB-028 behavior the
+  2026-09-16 run could not show. Gemini had six confirmed price drifts (`DOT-USD` four
+  times, `LTC-USD` twice); Gemini has no scoped resync, so each one reconnected that venue
+  and completed in 2.0–2.7 s. These six are the six `reason="RuntimeError"` Gemini
+  reconnects in the report: the label is the adapter's reconnect-request exception class,
+  not an unexplained failure. Coinbase reconnected once after `ConnectionClosedError`.
+  Unconfirmed mismatch warnings (mostly Coinbase and Gemini size-only) remained the
+  expected non-atomic comparison noise.
+- **WebSocket delivery:** 604,034 frames on one connection with zero invalid frames,
+  stream-sequence gaps, reconnects, client queue overflows, or sender failures.
+- **Episodes:** peak spread p50 0.127%, p99 0.840%, maximum 1.089%; lifetime p50 0.36 s,
+  p90 3.9 s, maximum 261 s. Venue pairs: Coinbase–Gemini 251, Binance.US–Coinbase 142,
+  Binance.US–Gemini 104. `UNI-USD` accounts for 302 of 497.
+
+### Stored net survival (2026-09-22)
+
+Unlike the 2026-09-16 table below, this is read from the schema-v4 pricing ledgers the
+product stored at each episode's open and peak, with the configured taker fees (Gemini
+0.40%, Coinbase and Binance.US 0.60%) and matched depth, via
+`uv run python tools/fee_survival.py --database var/soak_arb045.sqlite3 --start
+2026-09-22T19:35:44Z --end 2026-09-22T23:35:46Z`:
+
+| Notional | Routes with positive stored net | Insufficient depth | Best stored net spread |
+| ---: | ---: | ---: | ---: |
+| 100 | 0 / 497 | 0 | −0.18% |
+| 1,000 | 0 / 497 | 0 | −0.34% |
+| 10,000 | 0 / 497 | 0 | −0.63% |
+| 50,000 | 0 / 381 priced | 116 | −0.85% |
+
+No stored route was net-positive at any notional, consistent with ARB-041's offline
+finding. The best net spread worsens with size because depth impact adds to the fee.
+
+### Fill rates over the soak window (2026-09-22)
+
+The soak database's fill-rate buckets, summed with `/api/pricing/fill-rates` semantics over
+the whole minutes inside the soak window (19:36Z to 23:35Z), give one session and one
+configuration, **2,868 samples, zero missed, coverage 1.0**. Per venue across its nine
+pairs and both sides (51,624 samples per notional):
+
+| Venue | 100 | 1,000 | 10,000 | 50,000 | Ineligible book-samples |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Binance.US | 100% | 100% | 88.9% | 53.5% | none |
+| Coinbase | 100% | 100% | 100% | 100% | 9 `uninitialized` (its reconnect) |
+| Gemini | 100% | 100% | 100% | 94.8% | 9 `disconnected`, 2 `uninitialized` (drift recoveries) |
+
+Rates are `filled / (filled + insufficient_depth)` over eligible samples; the raw counts are
+in the API response. Binance.US `AAVE-USD`, `DOT-USD`, and `LTC-USD` never filled 50,000
+on either side. No shortfall occurred at the Binance.US 5,000-level cap
+(`insufficient_at_depth_cap` = 0), so these are liquidity limits rather than subscription
+limits. The ineligible samples line up with the reconnects above; none were read as depth
+shortfalls.
+
 ## Live soak (2026-09-16)
 
 A four-hour uninterrupted live soak against all 27 configured books completed on
-2026-09-16 and is the current long-duration reliability evidence:
+2026-09-16. It was the evidence for the 0.1.0 release and is now historical: it predates
+schema-v4 ledgers, ARB-028, and ARB-029, and the [2026-09-22 soak](#live-soak-2026-09-22)
+supersedes it for current claims.
 
 - Report: [`soak_4h_2026-09-16_062525.md`](../artifacts/benchmarks/soak/soak_4h_2026-09-16_062525.md)
   (raw per-sample JSONL retained locally beside it; it is ignored by Git)
@@ -359,15 +456,15 @@ against the venue fee difference, which is larger; see the scope section of the 
 
 ## Remaining validation gap
 
-The four-hour requirement used for the published 0.1.0 alpha is met. The following would
-strengthen the current evidence:
+The four-hour requirement is met on the current code by the
+[2026-09-22 soak](#live-soak-2026-09-22). The following would strengthen the evidence:
 
 - A 24-hour run on a dedicated machine. Four hours establishes recovery behavior and the
   absence of short-horizon leaks; it cannot rule out slower growth or daily-cycle effects.
 - A run with independently connected dashboard clients under real browser load, in addition
   to the observer's lightweight consumer. Rendering evidence remains the connected-dashboard
   benchmark above.
-- A qualifying live soak on the current code. The committed four-hour run predates the
-  schema-v4 depth/fee ledgers, Binance.US per-pair resynchronization (ARB-028), and direct
-  host-connectivity probes (ARB-029); those behaviors are covered by automated tests and
-  short diagnostics, but not by the published four-hour evidence.
+- Scoped recovery on Gemini. Its six confirmed drifts in the 2026-09-22 soak each
+  reconnected the whole venue for about two seconds; see ARB-046.
+- A soak whose host network actually drops. The ARB-029 probe recorded no outage on
+  2026-09-22, so its outage-window attribution is exercised only by automated tests.

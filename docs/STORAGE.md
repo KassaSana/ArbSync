@@ -17,7 +17,7 @@ These short, deliberately opportunity-heavy synthetic runs are planning examples
 their old harness predates the quote-currency correction and is not current live evidence.
 
 Those runs predate episodes (introduced in schema version 3), which store one row per dislocation
-rather than one per book update while it persists; the four-hour soak's 246 rows would
+rather than one per book update while it persists; the 2026-09-16 soak's 246 rows would
 have been 108 episodes, and the per-row size grew by the peak and close columns.
 Schema version 4 additionally stores one JSON pricing-ledger document per episode, so
 current row sizes can be larger than these pre-ledger estimates.

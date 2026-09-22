@@ -2,7 +2,7 @@
 
 Open tickets only. Estimates are engineering effort, not calendar duration, and include
 implementation, tests, review fixes, and documentation. Completed tickets (ARB-001 through
-ARB-044) are archived verbatim with their acceptance criteria in
+ARB-045) are archived verbatim with their acceptance criteria in
 [`docs/COMPLETED_TICKETS.md`](docs/COMPLETED_TICKETS.md); user-facing outcomes are in
 [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -20,27 +20,32 @@ ARB-044) are archived verbatim with their acceptance criteria in
 - ARB-043 filtered history API, bounded JSONL export, and dashboard drill-down: complete.
 - ARB-044 venue-comparison route coherence: complete; its evidence criterion moved to
   ARB-045.
+- ARB-045 current-code four-hour soak (2026-09-22) and claim refresh: complete.
 - Live net-executable episodes are not added: ARB-041 measured zero net-positive intervals
   on a 45-minute capture and recorded the decision to retain offline intervals.
 
 ## Open tickets
 
-### [ ] ARB-045 — Refresh research and validation claims and run a current-code soak
+### [ ] ARB-046 — Investigate recurring Gemini price drift and scope its recovery
 
-- Priority: P1
-- Estimate: 4–8 hours plus soak runtime
-- Dependencies: ARB-036 through ARB-040, ARB-044
+- Priority: P2
+- Estimate: 6–12 hours
+- Dependencies: ARB-028, ARB-045
 
-Problem: the published four-hour soak predates the schema-v4 depth/fee ledgers, Binance.US
-per-pair resynchronization (ARB-028), direct host-connectivity probes (ARB-029), and the
-research-correctness contracts of ARB-036 through ARB-040. This criterion was split out of
-ARB-044 so the completed dashboard fix is not held open by cross-cutting evidence work.
+Problem: the 2026-09-22 soak confirmed six Gemini price drifts in four hours (`DOT-USD`
+four times, `LTC-USD` twice), each within the first 90 minutes. Gemini has no scoped
+resync, so every confirmation reconnected the whole venue and made its other eight books
+briefly ineligible (2.0–2.7 s each); the reconnect metric labels these only
+`reason="RuntimeError"`.
 
 Acceptance criteria:
 
-- After ARB-036 through ARB-040 settle their contracts, refresh the relevant architecture,
-  research, changelog, and validation claims and run a qualifying current-code soak. Keep
-  that evidence work out of feature implementation commits when it is independently scoped.
+- Determine from captured traffic whether the drifts are genuine stream divergence, REST
+  snapshot staleness, or a normalization defect, and record the evidence.
+- If Gemini's protocol allows it, recover a single pair without reconnecting the venue, or
+  document why it cannot; keep recovery adapter-owned and fail-closed.
+- Label adapter reconnects by their cause (for example confirmed drift versus transport
+  error) instead of the exception class.
 
 ### Revised dependency order
 
@@ -55,7 +60,8 @@ ARB-036 canonical observations
 ARB-037 + ARB-038 -> ARB-042 windowed fill-rate evidence (complete)
 schema v4         -> ARB-043 historical query/export (complete)
 ARB-034           -> ARB-044 dashboard route correctness (complete)
-ARB-036..ARB-040 + ARB-044 -> ARB-045 current-code evidence and soak
+ARB-036..ARB-040 + ARB-044 -> ARB-045 current-code evidence and soak (complete)
+ARB-028 + ARB-045 -> ARB-046 Gemini drift and scoped recovery
 ```
 
 ARB-039 does not block ARB-040 or ARB-041: lead/lag estimator validity is separate from
@@ -70,7 +76,7 @@ limit; it should not be bundled with unrelated API performance work.
 | Milestone | Engineer effort | Status |
 | --- | ---: | --- |
 | P0, P1, P2 and executability roadmap (ARB-001 through ARB-035) | 171 h plus soak runtime | Complete; historical estimate, not elapsed time |
-| Research correctness and next roadmap (ARB-036 through ARB-045) | 116–188 h | ARB-036 through ARB-044 complete; ARB-045 open |
+| Research correctness and next roadmap (ARB-036 through ARB-045) | 116–188 h | Complete |
 
 Avoid expanding into execution modeling until the current detection-only claims, units,
 and evidence are internally consistent; ARB-041 decided against live net episodes.

@@ -76,12 +76,16 @@ different:
   WebSocket sequence numbers with REST Exchange sequence numbers.
 - **Binance.US** buffers WebSocket depth updates while fetching a REST snapshot, discards
   updates already covered by the snapshot, aligns the first retained update, and then
-  validates every later update range.
+  validates every later update range. A gap or an externally requested resync on one pair
+  re-fetches only that pair over the still-open socket.
 
-When an adapter detects a gap or cannot establish a trustworthy baseline, it requests a
-reconnect. The shared adapter loop clears per-connection state, reconnects with bounded
-exponential backoff and jitter, and notifies the book manager about connection changes.
-The affected books remain ineligible while reconstruction is in progress.
+When an adapter detects a gap or cannot establish a trustworthy baseline, it recovers the
+affected pair in place if it supports scoped resynchronization (Binance.US) and otherwise
+requests a reconnect. A reconnect clears per-connection state, reconnects with bounded
+exponential backoff and jitter, and notifies the book manager about connection changes;
+scoped recovery leaves the venue's other books flowing. The affected books remain
+ineligible while reconstruction is in progress, and `arb_adapter_pair_resyncs_total`
+counts scoped resyncs by trigger.
 
 Detailed recovery behavior and its tradeoffs are documented in
 [`RESYNC.md`](RESYNC.md).
@@ -117,7 +121,8 @@ A disconnect or normalized sequence gap clears the affected book, so later delta
 silently continue an untrusted chain. A crossed book produced by a delta is also cleared.
 An incomplete snapshot or one whose best bid is greater than or equal to its best ask is
 rejected and cleared as an invalid baseline. These chain-invalidating outcomes signal the
-originating adapter to reconnect, and recovery requires a new adapter-established snapshot
+originating adapter to resynchronize that pair (scoped where the adapter supports it,
+otherwise by reconnecting), and recovery requires a new adapter-established snapshot
 boundary. An incomplete state produced by a contiguous delta remains ineligible but may be
 repopulated by a later contiguous delta.
 
@@ -228,7 +233,8 @@ size corruption invisible. A matching comparison, changed size signature, or fet
 resets the relevant streak.
 
 After the applicable consecutive-mismatch threshold, the reconciler clears that canonical
-chain and broadcasts its ineligibility before asking the adapter to reconnect.
+chain and broadcasts its ineligibility before asking the adapter to resynchronize that
+pair, scoped where supported and by reconnecting otherwise.
 The adapter still owns connection reset, snapshot acquisition, and native sequence recovery.
 A cooldown prevents another recovery storm for the same target and is also the deadline for
 reporting a started recovery as unresolved. Started, completed, timed-out, confirmed-mismatch,
@@ -342,10 +348,10 @@ The system makes degraded state visible instead of treating it as valid market d
 | --- | --- |
 | Adapter disconnect | Its books are cleared and immediately marked ineligible |
 | Native or normalized sequence gap | The chain is invalidated; later deltas are rejected until a new snapshot arrives |
-| Incomplete or crossed snapshot | The baseline is rejected and adapter-owned reconnection is requested |
+| Incomplete or crossed snapshot | The baseline is rejected and adapter-owned pair resync (or reconnection) is requested |
 | Old, incomplete, or crossed book | The book is excluded from detection, readiness, metrics eligibility, and spread calculations |
 | Transient REST reconciliation mismatch | The mismatch is counted but the book remains eligible while confirmation is pending |
-| Confirmed REST reconciliation mismatch | The affected book is cleared before adapter-owned reconnection; cooldown suppresses recovery storms |
+| Confirmed REST reconciliation mismatch | The affected book is cleared before adapter-owned pair resync (or reconnection); cooldown suppresses recovery storms |
 | Full persistence queue | The row is dropped and counted without blocking ingestion |
 | Persistence initialization or worker failure | The store enters a terminal failed state, rejects and counts later rows by reason, and reports unflushed work |
 | Full client queue | The slow WebSocket client is disconnected and counted |

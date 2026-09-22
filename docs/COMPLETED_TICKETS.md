@@ -1214,3 +1214,33 @@ buckets to `venue_fill_rate_minutes.jsonl`. `server/tests/test_fillrates.py` cov
 restarts, quiet and missing books, configuration changes, capped versus full-depth venues,
 pruning, the v4 migration, and replay/live agreement on one observation sequence; a live
 smoke confirmed buckets and a window across a restart.
+
+### [x] ARB-045 — Refresh research and validation claims and run a current-code soak
+
+- Priority: P1
+- Estimate: 4–8 hours plus soak runtime
+- Dependencies: ARB-036 through ARB-040, ARB-044
+
+Problem: the published four-hour soak predates the schema-v4 depth/fee ledgers, Binance.US
+per-pair resynchronization (ARB-028), direct host-connectivity probes (ARB-029), and the
+research-correctness contracts of ARB-036 through ARB-040. This criterion was split out of
+ARB-044 so the completed dashboard fix is not held open by cross-cutting evidence work.
+
+Acceptance criteria:
+
+- After ARB-036 through ARB-040 settle their contracts, refresh the relevant architecture,
+  research, changelog, and validation claims and run a qualifying current-code soak. Keep
+  that evidence work out of feature implementation commits when it is independently scoped.
+
+Resolution (2026-09-22): a four-hour uninterrupted soak of commit `012537c` (clean
+checkout, launched under a Windows Scheduled Task) completed `14400.6 s` with 241/241
+ready samples, zero sequence gaps, restarts, background or HTTP failures, every configured
+book eligible in every sample, the host probe online throughout, two Binance.US scoped pair
+resyncs with no Binance.US reconnect, and 2,868 fill-rate samples with none missed.
+Stored schema-v4 ledgers show no net-positive route at any notional across 497 episodes.
+Report: `artifacts/benchmarks/soak/soak_4h_2026-09-22_153534.md`; evidence and remaining
+gaps are in `docs/VALIDATION.md`. ARCHITECTURE, CHANGELOG, README, BENCHMARKS, and STORAGE
+claims were refreshed; RESEARCH.md was refreshed with ARB-042. The six Gemini venue
+reconnects that each followed a confirmed `DOT-USD` or `LTC-USD` price drift are the
+designed fallback, not a failure; recurring Gemini drift and whole-venue recovery are
+ticketed as ARB-046.
