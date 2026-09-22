@@ -39,6 +39,10 @@ The suite covers:
 - dashboard boundary validation for every REST shape and live message type, including
   malformed JSON, missing fields, invalid decimal and nanosecond strings, and unknown types
 - REST, readiness, metrics, persistence, and statistics behavior
+- filtered history pagination: every filter and their conjunction, start-range boundaries,
+  orphaned rows as closed, id tiebreaks across page breaks, stability across concurrent
+  inserts and closes, malformed/foreign cursors, limits, the query budget, index-backed
+  plans without sorts, and bounded JSONL export with truncation, resume, and serialization
 - runtime configuration type, range, exchange, symbol, and normalized-duplicate validation
 - installed-wheel metadata, package contents, console startup outside the checkout,
   missing-configuration errors, and safe example generation
@@ -215,6 +219,32 @@ values.
 These are synthetic databases with uniformly distributed timestamps across nine
 pairs. Real history may cluster differently, and no measurement covers a
 database larger than 4M rows or the rollup's own growth beyond 30 days.
+
+## History query scaling
+
+`tools/perf_history.py` seeded a 1M-episode, 2.2 GB database over 30 days with the venue
+mix of a real local database and a production-size pricing ledger per row, without
+`ANALYZE` statistics (production databases never collect them). An earlier run, before
+`idx_episodes_close_start` existed and with an earlier revision of the tool that also ran
+`ANALYZE`, took 1.6–14.3 s for `state=open` pages and 1.5 s for a close reason matching
+nothing, both past the 0.5 s page budget
+([before](../artifacts/benchmarks/performance/history-20260922-before-index.json)). With the
+index ([after](../artifacts/benchmarks/performance/history-20260922.json)), every measured
+shape (unfiltered, last hour, one day mid-history, pair, pair and day, dense and sparse
+routes, open, closed, rare and absent close reasons) served first and mid-traversal 100-row
+pages in 2–15 ms from an index in result order with no sort. The remaining slow case is a
+buy/sell venue pairing with no rows, scanned across a full day of other traffic: 804 and
+812 ms in two runs, which the budget turns into a fast 503.
+Adding the index to that existing 1M-row file, as startup does on upgrade, took 1.8 s
+([upgrade run](../artifacts/benchmarks/performance/history-20260922-index-upgrade.json)).
+
+A 100,000-row export produced 194 MB in 2.1 s. Its on-loop work, encoding one 250-row page
+with the stored ledger JSON spliced in, took at most 1.43 ms. A 1 ms sleeper sampled
+event-loop lag throughout: p99 1.44 ms and maximum 23 ms during the export, against an idle
+baseline of p50 14.9 ms and maximum 28 ms that reflects Windows timer resolution rather than
+load. This bounds the export's own blocking; it is not an ingestion-latency measurement under
+live traffic. Measured on the development workstation with SQLite 3.49.1; absolute times
+depend on storage and cache state.
 
 ## Live soak (2026-09-16)
 

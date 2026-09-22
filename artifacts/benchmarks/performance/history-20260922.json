@@ -1,0 +1,185 @@
+{
+  "tool": "tools/perf_history.py",
+  "rows": 1000000,
+  "days": 30,
+  "database_bytes": 2183528448,
+  "seed_seconds": 24.5,
+  "index_create_seconds": 0.0,
+  "default_page_budget_seconds": 0.5,
+  "python": "3.12.10",
+  "sqlite": "3.49.1",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "shapes": {
+    "unfiltered": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns<?)",
+      "first_page": {
+        "ms": 4.8,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 9.35,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "last_hour": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns>? AND start_ns<?)",
+      "first_page": {
+        "ms": 4.39,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 3.96,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "one_day_mid_history": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns>? AND start_ns<?)",
+      "first_page": {
+        "ms": 8.4,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 7.27,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "pair": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_pair_start (pair=? AND start_ns<?)",
+      "first_page": {
+        "ms": 4.27,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 10.17,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "pair_one_day": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_pair_start (pair=? AND start_ns>? AND start_ns<?)",
+      "first_page": {
+        "ms": 11.44,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 10.28,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "dense_route": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns<?)",
+      "first_page": {
+        "ms": 3.6,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 11.97,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "sparse_route": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns<?)",
+      "first_page": {
+        "ms": 7.34,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 9.26,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "state_closed": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns<?)",
+      "first_page": {
+        "ms": 4.25,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 9.88,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "state_open": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_close_start (close_reason=? AND start_ns<?)",
+      "first_page": {
+        "ms": 2.71,
+        "rows": 5,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 2.22,
+        "rows": 2,
+        "within_default_budget": true
+      }
+    },
+    "rare_close_reason": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_close_start (close_reason=? AND start_ns<?)",
+      "first_page": {
+        "ms": 6.35,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 14.7,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "no_match_close_reason": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_close_start (close_reason=? AND start_ns<?)",
+      "first_page": {
+        "ms": 3.05,
+        "rows": 0,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "skipped": "fewer than two matches"
+      }
+    },
+    "no_match_route_one_day": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns>? AND start_ns<?)",
+      "first_page": {
+        "ms": 812.39,
+        "rows": 0,
+        "within_default_budget": false
+      },
+      "deep_page": {
+        "skipped": "fewer than two matches"
+      }
+    }
+  },
+  "export_unfiltered_max_rows": {
+    "idle_loop_lag": {
+      "samples": 132,
+      "p50_ms": 14.87,
+      "p99_ms": 27.86,
+      "max_ms": 28.34
+    },
+    "rows": 100000,
+    "bytes": 194368845,
+    "seconds": 2.138,
+    "page_rows": 250,
+    "slowest_page_encode_ms": 1.43,
+    "export_loop_lag": {
+      "samples": 2459,
+      "p50_ms": -0.27,
+      "p99_ms": 1.44,
+      "max_ms": 23.01
+    }
+  }
+}

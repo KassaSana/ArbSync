@@ -61,6 +61,24 @@ repeat maintenance periodically. Configure an OS scheduler with an explicit data
 cutoff, and bounded batch count if unattended pruning is needed. Never run this command
 inside the ingestion event loop. A misspelled path fails without creating a new database.
 
+## History queries and export
+
+`GET /api/opportunities` and `/api/opportunities/export` read canonical episodes through
+three indexes: `idx_episodes_start` (unfiltered, time, venue, and `state=closed` filters),
+`idx_episodes_pair_start` (pair filters), and `idx_episodes_close_start` (open episodes and
+a specific close reason). The last was added for these queries; startup creates it in place
+on an existing schema-version-4 database, which took 1.8 seconds on a 1M-row, 2.2 GB file.
+No row format or schema version changes.
+
+Every page query runs under a 0.5-second SQLite progress budget on its own reader
+connection. A filter that no index narrows and that matches few or no rows across a long
+range, such as an unused buy/sell venue pairing over weeks, returns 503 rather than scanning
+the table; narrow it with `from_ns`/`to_ns` or a pair. An export streams up to 100,000 rows
+in 250-row pages, one export at a time (a concurrent request gets 429; a client that stops
+reading for 30 seconds is dropped), and never holds a read transaction across pages. The last JSONL line is `{"type":"end",...}` with `rows`,
+`truncated`, `error`, and `next_cursor`; a file without it was cut off. Pruning during a
+traversal removes rows from later pages, as it removes them from the database.
+
 ## Backup, checkpoints, and vacuum
 
 Use SQLite's online backup API or the SQLite CLI `.backup` command to create a consistent

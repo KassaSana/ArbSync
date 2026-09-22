@@ -3,6 +3,7 @@ import {
   decodeBookStatuses,
   decodeDepthPricing,
   decodeOpportunities,
+  decodeOpportunityHistoryPage,
   decodePairs,
   decodeStats,
   decodeSystemOverview,
@@ -11,7 +12,9 @@ import {
   type AdapterStatus,
   type BookStatus,
   type DepthPricing,
+  type EpisodeCloseReason,
   type Opportunity,
+  type OpportunityHistoryPage,
   type PairRecord,
   type Stats,
   type SystemOverview,
@@ -23,7 +26,9 @@ import {
 export type {
   AdapterStatus,
   BookStatus,
+  EpisodeCloseReason,
   Opportunity,
+  OpportunityHistoryPage,
   PairRecord,
   PeakMinute,
   Stats,
@@ -121,4 +126,52 @@ export async function fetchSystemTimeseries(
     `/api/system/timeseries?window=${window}&bucket_seconds=${bucketSeconds}`,
     decodeTimeseries,
   );
+}
+
+/**
+ * Filters for `/api/opportunities` and its export. Times are Unix-nanosecond
+ * decimal strings on the episode start: `from_ns` inclusive, `to_ns` exclusive.
+ * `closed` includes orphaned episodes, whose lifetime is unknown.
+ */
+export type HistoryFilters = {
+  pair?: string;
+  buy_exchange?: string;
+  sell_exchange?: string;
+  close_reason?: EpisodeCloseReason;
+  state?: "open" | "closed";
+  from_ns?: string;
+  to_ns?: string;
+};
+
+function historyQuery(filters: HistoryFilters, extra: Record<string, string>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries({ ...filters, ...extra })) {
+    if (value !== undefined && value !== "") {
+      params.set(key, value);
+    }
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function fetchOpportunityHistory(
+  filters: HistoryFilters,
+  cursor: string | null,
+  limit = 100,
+): Promise<OpportunityHistoryPage> {
+  const extra: Record<string, string> = { limit: String(limit) };
+  if (cursor !== null) {
+    extra.cursor = cursor;
+  }
+  return requestJson(
+    `/api/opportunities${historyQuery(filters, extra)}`,
+    decodeOpportunityHistoryPage,
+  );
+}
+
+/** JSON Lines download; the last line is an `end` record that reports truncation. */
+export function opportunityExportUrl(filters: HistoryFilters, maxRows = 10_000): string {
+  return `${API_BASE}/api/opportunities/export${historyQuery(filters, {
+    max_rows: String(maxRows),
+  })}`;
 }

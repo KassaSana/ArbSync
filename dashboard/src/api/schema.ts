@@ -673,6 +673,32 @@ export function decodeTimeseries(value: unknown, location = "timeseries"): Times
 
 export const decodeOpportunities = (value: unknown, location = "opportunities"): Opportunity[] =>
   array(value, location, decodeOpportunity);
+
+/**
+ * One page of `/api/opportunities`, newest first. `next_cursor` is opaque and
+ * bound to the filters that produced it; null means the traversal is complete.
+ */
+export type OpportunityHistoryPage = {
+  items: Opportunity[];
+  next_cursor: string | null;
+  order: "start_ns_desc_id_desc";
+};
+
+export function decodeOpportunityHistoryPage(
+  value: unknown,
+  location = "opportunity_history",
+): OpportunityHistoryPage {
+  const source = object(value, location);
+  const order = text(field(source, "order", location), `${location}.order`);
+  if (order !== "start_ns_desc_id_desc") {
+    throw new PayloadValidationError(`${location}.order`, "start_ns_desc_id_desc");
+  }
+  return {
+    items: array(field(source, "items", location), `${location}.items`, decodeOpportunity),
+    next_cursor: nullable(field(source, "next_cursor", location), `${location}.next_cursor`, text),
+    order,
+  };
+}
 export const decodePairs = (value: unknown, location = "pairs"): PairRecord[] =>
   array(value, location, decodePair);
 export const decodeAdapterStatuses = (

@@ -1,0 +1,172 @@
+{
+  "tool": "tools/perf_history.py",
+  "rows": 1000000,
+  "days": 30,
+  "database_bytes": 2179182592,
+  "seed_seconds": null,
+  "index_create_seconds": 1.81,
+  "default_page_budget_seconds": 0.5,
+  "python": "3.12.10",
+  "sqlite": "3.49.1",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "shapes": {
+    "unfiltered": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns<?)",
+      "first_page": {
+        "ms": 5.62,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 14.99,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "last_hour": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns>? AND start_ns<?)",
+      "first_page": {
+        "ms": 7.69,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 5.68,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "one_day_mid_history": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns>? AND start_ns<?)",
+      "first_page": {
+        "ms": 8.72,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 10.7,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "pair": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_pair_start (pair=? AND start_ns<?)",
+      "first_page": {
+        "ms": 6.04,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 13.07,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "pair_one_day": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_pair_start (pair=? AND start_ns>? AND start_ns<?)",
+      "first_page": {
+        "ms": 13.74,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 13.38,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "dense_route": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns<?)",
+      "first_page": {
+        "ms": 5.24,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 6.57,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "sparse_route": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns<?)",
+      "first_page": {
+        "ms": 6.9,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 9.01,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "state_closed": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns<?)",
+      "first_page": {
+        "ms": 3.58,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 9.08,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "state_open": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_close_start (close_reason=? AND start_ns<?)",
+      "first_page": {
+        "ms": 2.89,
+        "rows": 5,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 2.1,
+        "rows": 2,
+        "within_default_budget": true
+      }
+    },
+    "rare_close_reason": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_close_start (close_reason=? AND start_ns<?)",
+      "first_page": {
+        "ms": 5.05,
+        "rows": 100,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "ms": 15.74,
+        "rows": 100,
+        "within_default_budget": true
+      }
+    },
+    "no_match_close_reason": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_close_start (close_reason=? AND start_ns<?)",
+      "first_page": {
+        "ms": 2.65,
+        "rows": 0,
+        "within_default_budget": true
+      },
+      "deep_page": {
+        "skipped": "fewer than two matches"
+      }
+    },
+    "no_match_route_one_day": {
+      "plan": "SEARCH opportunity_episodes USING INDEX idx_episodes_start (start_ns>? AND start_ns<?)",
+      "first_page": {
+        "ms": 804.37,
+        "rows": 0,
+        "within_default_budget": false
+      },
+      "deep_page": {
+        "skipped": "fewer than two matches"
+      }
+    }
+  },
+  "export_unfiltered_max_rows": {
+    "rows": 100000,
+    "bytes": 194368845,
+    "seconds": 3.155,
+    "slowest_page_ms": 32.13
+  }
+}

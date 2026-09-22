@@ -5,6 +5,7 @@ import Dashboard from "./pages/Dashboard";
 import { LiveProvider, useLive } from "./state/live";
 
 const Statistics = lazy(() => import("./pages/Statistics"));
+const History = lazy(() => import("./pages/History"));
 
 function Chrome() {
   const { status, lastTickAgeMs, invalidFrameCount } = useLive();
@@ -39,6 +40,16 @@ export default function App() {
                     fallback={<p className="px-1 py-6 text-xs text-ink-3">Loading statistics.</p>}
                   >
                     <Statistics />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/history"
+                element={
+                  <Suspense
+                    fallback={<p className="px-1 py-6 text-xs text-ink-3">Loading history.</p>}
+                  >
+                    <History />
                   </Suspense>
                 }
               />

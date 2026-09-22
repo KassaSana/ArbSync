@@ -242,6 +242,8 @@ def generate(tmp_path: Path) -> dict[str, object]:
 def routes(client: TestClient, state_snapshot: dict[str, Any]) -> dict[str, object]:
     return {
         "opportunities_recent": client.get("/api/opportunities/recent?limit=50").json(),
+        # Two of three episodes, so the fixture carries a real next-page cursor.
+        "opportunity_history": client.get("/api/opportunities?limit=2").json(),
         "stats": client.get("/api/stats?window=1h").json(),
         "pairs": client.get("/api/pairs").json(),
         "adapters": client.get("/api/adapters").json(),

@@ -14,6 +14,9 @@ vi.mock("./pages/Dashboard", () => ({
 vi.mock("./pages/Statistics", () => ({
   default: () => <h1>Statistics content</h1>,
 }));
+vi.mock("./pages/History", () => ({
+  default: () => <h1>History content</h1>,
+}));
 
 afterEach(() => window.history.replaceState(null, "", "/"));
 
@@ -44,5 +47,14 @@ describe("application navigation", () => {
     expect(await screen.findByRole("heading", { name: "Statistics content" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Dashboard content" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Statistics" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("navigates to the lazy history drill-down", async () => {
+    render(<App />);
+    const history = screen.getByRole("link", { name: "History" });
+    fireEvent.click(history);
+    expect(await screen.findByRole("heading", { name: "History content" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/history");
+    expect(history).toHaveAttribute("aria-current", "page");
   });
 });

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 import time
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -11,6 +13,7 @@ from typing import Any, Literal, TypedDict
 import aiosqlite
 import structlog
 
+from arb.history import HistoryCursor, HistoryFilters, build_page_query
 from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
 from arb.types import OpportunityEpisode
 
@@ -32,6 +35,34 @@ class ExtendedWindowStats(WindowStats):
 
 
 logger = structlog.get_logger(__name__)
+
+# Wall-clock budget for one history page query, enforced by a SQLite progress
+# handler like explicit pruning's. A sparse filter that would scan far through
+# the start index fails fast instead of occupying a reader thread and holding a
+# read snapshot that stalls WAL checkpoints.
+HISTORY_QUERY_BUDGET_SECONDS = 0.5
+# Export pages are smaller than API pages because their encoding runs on the event loop.
+HISTORY_EXPORT_PAGE_ROWS = 250
+
+
+class HistoryBudgetExceeded(Exception):
+    """A history page query ran past its budget; the caller should narrow its filters."""
+
+
+@dataclass(frozen=True)
+class HistoryPage:
+    items: list[dict[str, Any]]
+    next_cursor: HistoryCursor | None
+
+
+@dataclass(frozen=True)
+class HistoryChunk:
+    """Encoded JSON Lines for one export page."""
+
+    lines: bytes
+    rows: int
+    next_cursor: HistoryCursor | None
+
 
 PersistenceFailureReason = Literal["initialize_failed", "worker_failed"]
 PersistenceState = Literal["open", "failed", "closed"]
@@ -71,9 +102,15 @@ CREATE TABLE IF NOT EXISTS opportunity_episodes (
 );
 """
 
+# `idx_episodes_close_start` serves history filters that match few rows among
+# many: open episodes (NULL close reason) and rare close reasons such as
+# `orphaned`. Without it those filters walk the whole start index. Adding an
+# index changes no row format, so it is created in place without a version bump.
 CREATE_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_episodes_start ON opportunity_episodes(start_ns);
 CREATE INDEX IF NOT EXISTS idx_episodes_pair_start ON opportunity_episodes(pair, start_ns);
+CREATE INDEX IF NOT EXISTS idx_episodes_close_start
+    ON opportunity_episodes(close_reason, start_ns);
 """
 
 # Open and close events share one statement. An open inserts the row; a close
@@ -391,6 +428,86 @@ class OpportunityStore:
             rows = await cursor.fetchall()
         return [_episode_payload(row) for row in rows]
 
+    async def _history_rows(
+        self,
+        filters: HistoryFilters,
+        cursor: HistoryCursor | None,
+        limit: int,
+        budget_seconds: float,
+    ) -> tuple[list[Any], HistoryCursor | None]:
+        """Raw rows (`id` first) for one page and the cursor after it, if more remain."""
+        async with aiosqlite.connect(self.db_path) as db:
+            deadline = time.monotonic() + budget_seconds
+            await db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1_000)
+            try:
+                if cursor is None:
+                    snapshot_cursor = await db.execute(
+                        "SELECT COALESCE(MAX(id), 0) FROM opportunity_episodes"
+                    )
+                    snapshot_row = await snapshot_cursor.fetchone()
+                    snapshot_max_id = int(snapshot_row[0]) if snapshot_row else 0
+                    after = None
+                else:
+                    snapshot_max_id = cursor.snapshot_max_id
+                    after = (cursor.start_ns, cursor.row_id)
+                # One extra row says whether another page exists without a final empty page.
+                sql, params = build_page_query(filters, after, snapshot_max_id, limit + 1)
+                page_cursor = await db.execute(sql, params)
+                rows = list(await page_cursor.fetchall())
+            except sqlite3.OperationalError as exc:
+                # The progress handler aborts with "interrupted"; other operational
+                # errors (locking, I/O) are not budget exhaustion even if late.
+                if "interrupted" in str(exc) and time.monotonic() >= deadline:
+                    raise HistoryBudgetExceeded from exc
+                raise
+        next_cursor = None
+        if len(rows) > limit:
+            rows = rows[:limit]
+            last_id, last_start_ns = int(rows[-1][0]), int(rows[-1][1])
+            next_cursor = HistoryCursor(
+                last_start_ns, last_id, snapshot_max_id, filters.fingerprint()
+            )
+        return rows, next_cursor
+
+    async def history_page(
+        self,
+        filters: HistoryFilters,
+        cursor: HistoryCursor | None = None,
+        limit: int = 100,
+        budget_seconds: float = HISTORY_QUERY_BUDGET_SECONDS,
+    ) -> HistoryPage:
+        """One page of episodes matching `filters`, newest first; see `arb.history`."""
+        rows, next_cursor = await self._history_rows(filters, cursor, limit, budget_seconds)
+        return HistoryPage([_episode_payload(row[1:]) for row in rows], next_cursor)
+
+    async def history_export_chunks(
+        self,
+        filters: HistoryFilters,
+        cursor: HistoryCursor | None,
+        max_rows: int,
+        page_size: int = HISTORY_EXPORT_PAGE_ROWS,
+        budget_seconds: float = HISTORY_QUERY_BUDGET_SECONDS,
+    ) -> AsyncIterator[HistoryChunk]:
+        """JSON Lines for successive bounded pages until `max_rows` or the snapshot's end.
+
+        Each page opens its own short-lived connection, so an export never holds
+        one read transaction across the traversal. Lines are encoded on the event
+        loop, so pages stay small and the stored ledger JSON is spliced in rather
+        than parsed and re-encoded. The last chunk's `next_cursor` is set exactly
+        when rows remain beyond `max_rows`.
+        """
+        remaining = max_rows
+        while remaining > 0:
+            rows, next_cursor = await self._history_rows(
+                filters, cursor, min(page_size, remaining), budget_seconds
+            )
+            remaining -= len(rows)
+            lines = "".join(_episode_export_line(row[1:]) for row in rows).encode()
+            yield HistoryChunk(lines, len(rows), next_cursor)
+            if next_cursor is None:
+                return
+            cursor = next_cursor
+
     async def open_count(self) -> int:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
@@ -614,6 +731,11 @@ class OpportunityStore:
 
 
 def _episode_payload(row: Any) -> dict[str, Any]:
+    return {**_episode_fields(row), "pricing_ledgers": json.loads(row[14])}
+
+
+def _episode_fields(row: Any) -> dict[str, Any]:
+    """Every episode field except the pricing ledgers, from an episode column row."""
     start_ns, end_ns = int(row[0]), row[1]
     return {
         "start_ns": start_ns,
@@ -631,7 +753,28 @@ def _episode_payload(row: Any) -> dict[str, Any]:
         "peak_spread_pct": row[11],
         "peak_size": row[12],
         "peak_profit": row[13],
-        "pricing_ledgers": json.loads(row[14]),
         "close_spread_pct": row[15],
         "close_reason": row[16],
     }
+
+
+def episode_wire_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Episode payload with nanosecond integers as strings, as the API sends them."""
+    return {
+        **payload,
+        "start_ns": str(payload["start_ns"]),
+        "end_ns": None if payload["end_ns"] is None else str(payload["end_ns"]),
+        "duration_ns": None if payload["duration_ns"] is None else str(payload["duration_ns"]),
+    }
+
+
+def _episode_export_line(row: Any) -> str:
+    """One export JSON line, equal once parsed to the API's wire payload for the row.
+
+    `pricing_ledgers` is spliced in as stored: the writer produced it with
+    `json.dumps`, so it is already valid JSON whose numbers are strings.
+    """
+    head = json.dumps(
+        {"type": "episode", **episode_wire_payload(_episode_fields(row))}, separators=(",", ":")
+    )
+    return f'{head[:-1]},"pricing_ledgers":{row[14]}}}\n'

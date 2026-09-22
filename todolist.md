@@ -2,7 +2,7 @@
 
 Open tickets only. Estimates are engineering effort, not calendar duration, and include
 implementation, tests, review fixes, and documentation. Completed tickets (ARB-001 through
-ARB-041, and ARB-044) are archived verbatim with their acceptance criteria in
+ARB-041, ARB-043, and ARB-044) are archived verbatim with their acceptance criteria in
 [`docs/COMPLETED_TICKETS.md`](docs/COMPLETED_TICKETS.md); user-facing outcomes are in
 [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -16,6 +16,7 @@ ARB-041, and ARB-044) are archived verbatim with their acceptance criteria in
 - Research correctness ARB-036 through ARB-041 (canonical observations, capture provenance,
   time-faithful replay, estimator validation, age/skew measurement, offline net-executable
   intervals): complete.
+- ARB-043 filtered history API, bounded JSONL export, and dashboard drill-down: complete.
 - ARB-044 venue-comparison route coherence: complete; its evidence criterion moved to
   ARB-045.
 - Live net-executable episodes are not added: ARB-041 measured zero net-positive intervals
@@ -45,26 +46,6 @@ Acceptance criteria:
   full-depth venues, and replay/live agreement on the same observation sequence.
 - Do not make this ticket depend on live net episodes.
 
-### [ ] ARB-043 — Add filtered historical opportunity queries and export
-
-- Priority: P2
-- Estimate: 12–20 hours
-- Dependencies: existing schema version 4; net-specific filters wait for an approved ARB-041 follow-up
-
-Problem: the API exposes only the latest bounded list. Existing canonical episode history
-cannot be paged or filtered for ordinary investigation without reading SQLite directly.
-
-Acceptance criteria:
-
-- Add stable cursor pagination with explicit ordering and filters for time range, pair,
-  buy venue, sell venue, close reason, and open/closed state.
-- Add a bounded JSONL or CSV export path that preserves decimal strings and quote units and
-  cannot monopolize ingestion or hold an unbounded result in memory.
-- Validate query limits, cursor stability across concurrent inserts, malformed filters, and
-  index-supported plans on a representative database.
-- Add dashboard drill-down only after the API contract is tested. Do not imply net-executable
-  filtering until that lifecycle exists or an explicit stored-ledger filter is defined.
-
 ### [ ] ARB-045 — Refresh research and validation claims and run a current-code soak
 
 - Priority: P1
@@ -93,7 +74,7 @@ ARB-036 canonical observations
             -> ARB-041 offline net-interval analysis
 
 ARB-037 + ARB-038 -> ARB-042 windowed fill-rate evidence
-schema v4         -> ARB-043 historical query/export
+schema v4         -> ARB-043 historical query/export (complete)
 ARB-034           -> ARB-044 dashboard route correctness (complete)
 ARB-036..ARB-040 + ARB-044 -> ARB-045 current-code evidence and soak
 ```
@@ -110,7 +91,7 @@ limit; it should not be bundled with unrelated API performance work.
 | Milestone | Engineer effort | Status |
 | --- | ---: | --- |
 | P0, P1, P2 and executability roadmap (ARB-001 through ARB-035) | 171 h plus soak runtime | Complete; historical estimate, not elapsed time |
-| Research correctness and next roadmap (ARB-036 through ARB-045) | 116–188 h | ARB-036 through ARB-041 and ARB-044 complete; ARB-042, ARB-043, and ARB-045 open |
+| Research correctness and next roadmap (ARB-036 through ARB-045) | 116–188 h | ARB-036 through ARB-041, ARB-043, and ARB-044 complete; ARB-042 and ARB-045 open |
 
 Avoid expanding into execution modeling until the current detection-only claims, units,
 and evidence are internally consistent; ARB-041 decided against live net episodes.

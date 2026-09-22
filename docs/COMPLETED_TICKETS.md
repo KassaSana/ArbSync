@@ -1162,3 +1162,23 @@ Acceptance criteria:
 The original evidence criterion (refresh architecture, research, changelog, and validation
 claims and run a qualifying current-code soak) was split into ARB-045 because it spans
 ARB-036 through ARB-044 rather than this dashboard fix.
+
+### [x] ARB-043 — Add filtered historical opportunity queries and export
+
+- Priority: P2
+- Estimate: 12–20 hours
+- Dependencies: existing schema version 4; net-specific filters wait for an approved ARB-041 follow-up
+
+Problem: the API exposes only the latest bounded list. Existing canonical episode history
+cannot be paged or filtered for ordinary investigation without reading SQLite directly.
+
+Acceptance criteria:
+
+- Add stable cursor pagination with explicit ordering and filters for time range, pair,
+  buy venue, sell venue, close reason, and open/closed state.
+- Add a bounded JSONL or CSV export path that preserves decimal strings and quote units and
+  cannot monopolize ingestion or hold an unbounded result in memory.
+- Validate query limits, cursor stability across concurrent inserts, malformed filters, and
+  index-supported plans on a representative database.
+- Add dashboard drill-down only after the API contract is tested. Do not imply net-executable
+  filtering until that lifecycle exists or an explicit stored-ledger filter is defined.

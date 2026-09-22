@@ -40,6 +40,91 @@ const CLOSE_LABEL: Record<NonNullable<Opportunity["close_reason"]>, string> = {
   orphaned: "orphaned",
 };
 
+/** A stable React key: the episode's natural key in SQLite. */
+export function opportunityKey(row: Opportunity): string {
+  return `${row.start_ns}-${row.buy_exchange}-${row.sell_exchange}-${row.pair}`;
+}
+
+/** Column headings shared by the live feed and the history drill-down. */
+export function OpportunityTableHead() {
+  return (
+    <thead className="sticky top-0 bg-panel">
+      <tr className="border-b border-line-soft text-left text-micro text-ink-3">
+        <th scope="col" className="px-4 py-2 font-normal">
+          Time
+        </th>
+        <th scope="col" className="px-4 py-2 font-normal">
+          Pair
+        </th>
+        <th scope="col" className="px-4 py-2 font-normal">
+          Route
+        </th>
+        <th scope="col" className="px-4 py-2 text-right font-normal">
+          Peak spread
+        </th>
+        <th scope="col" className="px-4 py-2 text-right font-normal">
+          Peak profit
+        </th>
+        <th scope="col" className="px-4 py-2 text-right font-normal">
+          Net executable
+        </th>
+        <th scope="col" className="px-4 py-2 text-right font-normal">
+          Lifetime
+        </th>
+      </tr>
+    </thead>
+  );
+}
+
+/** One episode row: pair and route, peak gross tier, first-notional net tier, lifetime. */
+export function OpportunityRow({ row }: { row: Opportunity }) {
+  return (
+    <tr className="border-b border-line-soft/60 last:border-0">
+      <td className="num px-4 py-1.5 text-ink-3">{eventTime(row.start_ns)}</td>
+      <th scope="row" className="px-4 py-1.5 text-left font-medium text-ink">
+        {row.pair}
+      </th>
+      <td className="px-4 py-1.5 text-ink-2">
+        {row.buy_exchange} <span className="text-ink-3">&rarr;</span>{" "}
+        {row.sell_exchange}
+      </td>
+      <td className={`num px-4 py-1.5 text-right ${spreadTone(row.peak_spread_pct)}`}>
+        {spreadPct(row.peak_spread_pct)}
+      </td>
+      <td className="num px-4 py-1.5 text-right text-ink-2">
+        {quoteAmount(row.peak_profit, row.quote_asset)}
+      </td>
+      <td
+        className={`num px-4 py-1.5 text-right ${
+          row.pricing_ledgers[0]?.net_executable_spread_pct === null ||
+          row.pricing_ledgers[0] === undefined
+            ? "text-ink-3"
+            : spreadTone(row.pricing_ledgers[0].net_executable_spread_pct)
+        }`}
+        title={
+          row.pricing_ledgers[0] === undefined
+            ? "No stored executable-price ledger"
+            : `${row.pricing_ledgers[0].notional} ${row.quote_asset}; includes measured depth impact and configured taker fees`
+        }
+      >
+        {row.pricing_ledgers[0] === undefined
+          ? "not recorded"
+          : row.pricing_ledgers[0].net_executable_spread_pct === null
+            ? "insufficient depth"
+          : spreadPct(row.pricing_ledgers[0].net_executable_spread_pct)}
+      </td>
+      <td
+        className={`num px-4 py-1.5 text-right ${
+          row.close_reason === null ? "text-signal" : "text-ink-3"
+        }`}
+        title={row.close_reason === null ? "Still open" : CLOSE_LABEL[row.close_reason]}
+      >
+        {lifetime(row)}
+      </td>
+    </tr>
+  );
+}
+
 export function OpportunityFeed({ opportunities, onRetry }: Props) {
   if (opportunities.state === "failed") {
     return (
@@ -68,31 +153,7 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
             that moment, the first configured notional's net executable spread, and how long
             the spread lasted.
           </caption>
-          <thead className="sticky top-0 bg-panel">
-            <tr className="border-b border-line-soft text-left text-micro text-ink-3">
-              <th scope="col" className="px-4 py-2 font-normal">
-                Time
-              </th>
-              <th scope="col" className="px-4 py-2 font-normal">
-                Pair
-              </th>
-              <th scope="col" className="px-4 py-2 font-normal">
-                Route
-              </th>
-              <th scope="col" className="px-4 py-2 text-right font-normal">
-                Peak spread
-              </th>
-              <th scope="col" className="px-4 py-2 text-right font-normal">
-                Peak profit
-              </th>
-              <th scope="col" className="px-4 py-2 text-right font-normal">
-                Net executable
-              </th>
-              <th scope="col" className="px-4 py-2 text-right font-normal">
-                Lifetime
-              </th>
-            </tr>
-          </thead>
+          <OpportunityTableHead />
           <tbody>
             {opportunities.state === "loading" ? (
               <tr>
@@ -110,52 +171,7 @@ export function OpportunityFeed({ opportunities, onRetry }: Props) {
               </tr>
             ) : null}
             {rows.map((row) => (
-              <tr
-                key={`${row.start_ns}-${row.buy_exchange}-${row.sell_exchange}-${row.pair}`}
-                className="border-b border-line-soft/60 last:border-0"
-              >
-                <td className="num px-4 py-1.5 text-ink-3">{eventTime(row.start_ns)}</td>
-                <th scope="row" className="px-4 py-1.5 text-left font-medium text-ink">
-                  {row.pair}
-                </th>
-                <td className="px-4 py-1.5 text-ink-2">
-                  {row.buy_exchange} <span className="text-ink-3">&rarr;</span>{" "}
-                  {row.sell_exchange}
-                </td>
-                <td className={`num px-4 py-1.5 text-right ${spreadTone(row.peak_spread_pct)}`}>
-                  {spreadPct(row.peak_spread_pct)}
-                </td>
-                <td className="num px-4 py-1.5 text-right text-ink-2">
-                  {quoteAmount(row.peak_profit, row.quote_asset)}
-                </td>
-                <td
-                  className={`num px-4 py-1.5 text-right ${
-                    row.pricing_ledgers[0]?.net_executable_spread_pct === null ||
-                    row.pricing_ledgers[0] === undefined
-                      ? "text-ink-3"
-                      : spreadTone(row.pricing_ledgers[0].net_executable_spread_pct)
-                  }`}
-                  title={
-                    row.pricing_ledgers[0] === undefined
-                      ? "No stored executable-price ledger"
-                      : `${row.pricing_ledgers[0].notional} ${row.quote_asset}; includes measured depth impact and configured taker fees`
-                  }
-                >
-                  {row.pricing_ledgers[0] === undefined
-                    ? "not recorded"
-                    : row.pricing_ledgers[0].net_executable_spread_pct === null
-                      ? "insufficient depth"
-                    : spreadPct(row.pricing_ledgers[0].net_executable_spread_pct)}
-                </td>
-                <td
-                  className={`num px-4 py-1.5 text-right ${
-                    row.close_reason === null ? "text-signal" : "text-ink-3"
-                  }`}
-                  title={row.close_reason === null ? "Still open" : CLOSE_LABEL[row.close_reason]}
-                >
-                  {lifetime(row)}
-                </td>
-              </tr>
+              <OpportunityRow key={opportunityKey(row)} row={row} />
             ))}
           </tbody>
         </table>

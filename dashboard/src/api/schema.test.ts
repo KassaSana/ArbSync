@@ -5,6 +5,7 @@ import {
   decodeDepthPricing,
   decodeLiveEnvelope,
   decodeOpportunities,
+  decodeOpportunityHistoryPage,
   decodePairs,
   decodeStats,
   decodeSystemOverview,
@@ -23,6 +24,7 @@ const wireFixtures = import.meta.glob<unknown>("../../../server/tests/fixtures/w
 
 const wireDecoders: Record<string, (value: unknown) => unknown> = {
   opportunities_recent: decodeOpportunities,
+  opportunity_history: decodeOpportunityHistoryPage,
   stats: decodeStats,
   pairs: decodePairs,
   adapters: decodeAdapterStatuses,
@@ -250,6 +252,20 @@ describe("network payload schemas", () => {
         ],
       },
     ],
+    [
+      "opportunity history page",
+      decodeOpportunityHistoryPage,
+      {
+        items: [opportunity, orphanedOpportunity],
+        next_cursor: "eyJ2IjoxfQ",
+        order: "start_ns_desc_id_desc",
+      },
+    ],
+    [
+      "final opportunity history page",
+      decodeOpportunityHistoryPage,
+      { items: [], next_cursor: null, order: "start_ns_desc_id_desc" },
+    ],
   ])("accepts a valid %s response", (_name, decode, payload) => {
     expect(() => decode(payload)).not.toThrow();
   });
@@ -331,5 +347,19 @@ describe("network payload schemas", () => {
     ["unknown message types", { type: "unknown", stream_sequence: 1, payload: {} }],
   ])("rejects %s", (_name, frame) => {
     expect(() => decodeLiveEnvelope(frame)).toThrow(PayloadValidationError);
+  });
+});
+
+describe("opportunity history page schema", () => {
+  const page = { items: [opportunity], next_cursor: null, order: "start_ns_desc_id_desc" };
+
+  it.each([
+    ["an unknown order", { ...page, order: "start_ns_asc" }],
+    ["a missing cursor", { items: page.items, order: page.order }],
+    ["a numeric cursor", { ...page, next_cursor: 7 }],
+    ["a non-array item list", { ...page, items: {} }],
+    ["an invalid item", { ...page, items: [{ ...opportunity, peak_profit: 7.5 }] }],
+  ])("rejects %s", (_name, payload) => {
+    expect(() => decodeOpportunityHistoryPage(payload)).toThrow(PayloadValidationError);
   });
 });

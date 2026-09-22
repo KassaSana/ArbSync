@@ -182,6 +182,8 @@ the dashboard suitable for trading or accounting decisions.
 | `GET /api/book-status` | Eligibility and freshness for every configured book |
 | `GET /api/pairs` | Configured and observed `(exchange, pair)` roster, including cold start |
 | `GET /api/opportunities/recent?limit=50` | Recent theoretical opportunity episodes, open ones first by start (`limit`: 1–500) |
+| `GET /api/opportunities?limit=100&pair=BTC-USD&state=closed` | Stored episode history, newest first, with an opaque `cursor` for the next page; filters `from_ns`/`to_ns` (start, inclusive/exclusive), `pair`, `buy_exchange`, `sell_exchange`, `close_reason`, `state` (`open`/`closed`) |
+| `GET /api/opportunities/export?max_rows=10000` | The same filters as a JSON Lines download (`max_rows`: 1–100,000) ending in an `end` record with row count, truncation, and a resume `next_cursor` |
 | `GET /api/stats?window=1h` | Basic opportunity statistics |
 | `GET /api/system/overview` | Uptime, all-time peaks, open episode count and all-time lifetimes |
 | `GET /api/system/stats?window=1h` | Windowed aggregate statistics and episode lifetime p50/p90/max |

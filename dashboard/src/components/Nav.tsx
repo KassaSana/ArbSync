@@ -15,6 +15,9 @@ export function Nav() {
       <NavLink to="/stats" className={linkClasses}>
         Statistics
       </NavLink>
+      <NavLink to="/history" className={linkClasses}>
+        History
+      </NavLink>
     </nav>
   );
 }

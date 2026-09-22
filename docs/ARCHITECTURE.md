@@ -226,9 +226,24 @@ phase are retained, all later rows are rejected immediately, and the accepted-bu
 count remains available as a metric and shutdown log field. This preserves the market-data
 path at the cost of an explicitly observable persistence gap.
 
+Opportunity history is read through `arb.history` in the fixed order `start_ns DESC, id DESC`
+with keyset pagination. The first page fixes a snapshot bound on the row id, so rows written
+while a client pages never enter that traversal and no row is repeated. The snapshot bounds
+membership, not mutable fields: an episode is filtered by its state when its page is read, so
+an open episode that closes mid-traversal can drop out of a `state=open` walk, and pruning
+removes rows from later pages. Each page opens its own short-lived reader connection with a
+SQLite progress-handler budget, so a filter the indexes cannot narrow fails fast with 503
+instead of occupying a reader or pinning a WAL snapshot. The JSONL export streams at most
+100,000 rows in 250-row pages, splicing each stored ledger document rather than parsing and
+re-encoding it, because line encoding runs on the event loop that also carries ingestion. One
+export runs at a time; its slot is released when the response ends for any reason, including
+a client that disconnects before the first byte or stops reading for 30 seconds. The stream
+ends with a typed `end` record, so truncation or a cut-off download is explicit.
+
 ## Live API and backpressure
 
-FastAPI exposes recent opportunities and statistics, adapter and book status, health,
+FastAPI exposes recent opportunities, filtered opportunity history and its JSONL export,
+statistics, adapter and book status, health,
 readiness, Prometheus metrics, and the `/ws/live` stream. The generated OpenAPI reference
 is available at `/docs` while the backend is running.
 
@@ -278,6 +293,10 @@ state while reconnecting.
 
 The current opportunity table displays episode peak spread and theoretical peak profit,
 the first configured notional's stored net executable spread, and episode lifetime. The
+History view reuses those rows for stored episodes: it applies filters as a new cursor
+traversal, discards late pages from a superseded traversal, and links the matching JSONL
+export. It offers no net-executable filter because no net-executable episode lifecycle
+exists. The
 venue-comparison panel polls `/api/pricing/depth` for executable quotes and route
 economics at each configured notional. It displays independent per-side best badges,
 while its selected route is gated by the canonical eligibility of both legs, local age

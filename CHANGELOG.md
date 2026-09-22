@@ -35,6 +35,17 @@
 
 ### Added
 
+- Filtered opportunity history: `GET /api/opportunities` pages stored episodes newest first
+  with an opaque cursor that never repeats a row or admits rows written after the first page
+  (state is read per page, so an episode closing mid-walk can leave a `state=open`
+  traversal), and filters for start-time range, pair, buy venue,
+  sell venue, close reason, and open/closed state; `GET /api/opportunities/export` streams
+  the same filters as bounded JSON Lines (up to 100,000 rows) ending in an `end` record
+  with truncation and a resume cursor. Decimal strings and quote units are preserved.
+  Page queries run under a SQLite work budget; exports are serialized and release their slot
+  on disconnect or a 30-second stalled reader. A new History
+  dashboard view drills into the API with Load more and export.
+  `tools/perf_history.py` measures page and export cost on a representative database.
 - `arbsync capture` records real three-venue traffic (WebSocket texts plus REST
   snapshot payloads) to gzipped JSONL through a bounded non-blocking writer, and
   `arbsync replay` replays it through the production adapters, books, and detector
@@ -69,6 +80,9 @@
 
 ### Upgrade notes
 
+- Startup adds the `idx_episodes_close_start` index to existing schema-version-4
+  databases in place (about 1.8 seconds per million episodes measured); the schema version
+  is unchanged.
 - Schema version 3 replaces legacy per-update opportunities with episodes and cannot fold
   old rows into episode lifetimes; startup drops that legacy history. Schema version 4
   migrates version 3 in place by adding stored pricing ledgers. Back up first if history

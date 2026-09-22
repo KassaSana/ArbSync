@@ -1,22 +1,38 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncGenerator, Callable, Iterable
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.responses import Response
+from starlette.types import Message, Receive, Scope, Send
 from starlette.websockets import WebSocketState
 
 from arb.adapters.base import ExchangeAdapter
 from arb.broadcast import LiveBroadcaster
+from arb.history import (
+    HISTORY_ORDER,
+    MAX_SQLITE_INTEGER,
+    CursorError,
+    HistoryCursor,
+    HistoryFilters,
+    HistoryState,
+)
 from arb.metrics import book_metrics, render_metrics
 from arb.orderbook import OrderBookManager
-from arb.persistence import OpportunityStore, WindowStats
+from arb.persistence import (
+    HistoryBudgetExceeded,
+    OpportunityStore,
+    WindowStats,
+    episode_wire_payload,
+)
 from arb.pricing import DepthSampler
-from arb.types import LiveMessage
+from arb.types import EpisodeCloseReason, LiveMessage
 
 Window = Literal["1h", "4h", "24h", "1d", "72h", "1w"]
 
@@ -37,6 +53,92 @@ def serialize_peak(peak: dict[str, int] | None) -> dict[str, int | str] | None:
     if peak is None:
         return None
     return {**peak, "minute_start_ns": str(peak["minute_start_ns"])}
+
+
+NsQuery = Annotated[
+    str | None, Query(pattern=r"^[0-9]{1,19}$", description="Unix nanoseconds, decimal")
+]
+PairQuery = Annotated[str | None, Query(pattern=r"^[A-Za-z0-9]{1,20}-[A-Za-z0-9]{1,20}$")]
+ExchangeQuery = Annotated[str | None, Query(pattern=r"^[a-z0-9_]{1,32}$")]
+CursorQuery = Annotated[str | None, Query(max_length=512)]
+
+HISTORY_EXPORT_MAX_ROWS = 100_000
+
+
+# A client that stops reading stalls `send` under transport flow control; after
+# this long without progress the export is abandoned and its slot released.
+HISTORY_EXPORT_SEND_TIMEOUT_SECONDS = 30.0
+
+
+class ExportResponse(StreamingResponse):
+    """A streaming export that releases its slot however the response ends.
+
+    Starlette neither starts nor closes the body iterator when the client
+    disconnects before the first chunk or the first send fails, so a release in
+    the generator's own `finally` could never run and every later export would
+    be refused. Releasing here covers completion, disconnects, send failures,
+    cancellation, and a stalled reader.
+    """
+
+    def __init__(
+        self,
+        content: AsyncGenerator[bytes, None],
+        lock: asyncio.Lock,
+        *,
+        media_type: str,
+        headers: dict[str, str],
+    ) -> None:
+        super().__init__(content, media_type=media_type, headers=headers)
+        self._content = content
+        self._lock = lock
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async def bounded_send(message: Message) -> None:
+            await asyncio.wait_for(send(message), HISTORY_EXPORT_SEND_TIMEOUT_SECONDS)
+
+        try:
+            await super().__call__(scope, receive, bounded_send)
+        finally:
+            try:
+                await self._content.aclose()
+            finally:
+                self._lock.release()
+
+
+def history_filters(
+    from_ns: NsQuery = None,
+    to_ns: NsQuery = None,
+    pair: PairQuery = None,
+    buy_exchange: ExchangeQuery = None,
+    sell_exchange: ExchangeQuery = None,
+    close_reason: EpisodeCloseReason | None = None,
+    state: HistoryState | None = None,
+) -> HistoryFilters:
+    """Shared filter parameters for history pages and export; 422 on invalid values."""
+    bounds = [None if value is None else int(value) for value in (from_ns, to_ns)]
+    if any(value is not None and value > MAX_SQLITE_INTEGER for value in bounds):
+        raise HTTPException(status_code=422, detail="time bounds must fit a SQLite integer")
+    try:
+        return HistoryFilters(
+            from_ns=bounds[0],
+            to_ns=bounds[1],
+            pair=pair,
+            buy_exchange=buy_exchange,
+            sell_exchange=sell_exchange,
+            close_reason=close_reason,
+            state=state,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def decode_cursor(token: str | None, filters: HistoryFilters) -> HistoryCursor | None:
+    if token is None:
+        return None
+    try:
+        return HistoryCursor.decode(token, filters)
+    except CursorError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def create_app(
@@ -60,21 +162,81 @@ def create_app(
     adapter_list = list(adapters)
     tracked_pairs = list(expected_pairs)
     started_at: int = time.time_ns() if started_at_ns is None else started_at_ns
+    # One export at a time: each streams at most HISTORY_EXPORT_MAX_ROWS rows in
+    # bounded pages, and serializing them caps the read load an export adds.
+    history_export_lock = asyncio.Lock()
+    app.state.history_export_lock = history_export_lock
 
     @app.get("/api/opportunities/recent")
     async def recent_opportunities(
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ) -> list[dict[str, object]]:
         rows = await store.recent(limit=limit)
-        return [
-            {
-                **row,
-                "start_ns": str(row["start_ns"]),
-                "end_ns": None if row["end_ns"] is None else str(row["end_ns"]),
-                "duration_ns": None if row["duration_ns"] is None else str(row["duration_ns"]),
+        return [episode_wire_payload(row) for row in rows]
+
+    @app.get("/api/opportunities")
+    async def opportunity_history(
+        filters: Annotated[HistoryFilters, Depends(history_filters)],
+        cursor: CursorQuery = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> dict[str, object]:
+        """Filtered episodes, newest first, with an opaque cursor for the next page."""
+        start = decode_cursor(cursor, filters)
+        try:
+            page = await store.history_page(filters, start, limit)
+        except HistoryBudgetExceeded as exc:
+            raise HTTPException(
+                status_code=503, detail="query budget exceeded; narrow the time range or filters"
+            ) from exc
+        return {
+            "items": [episode_wire_payload(item) for item in page.items],
+            "next_cursor": None if page.next_cursor is None else page.next_cursor.encode(),
+            "order": HISTORY_ORDER,
+        }
+
+    @app.get("/api/opportunities/export")
+    async def opportunity_export(
+        filters: Annotated[HistoryFilters, Depends(history_filters)],
+        cursor: CursorQuery = None,
+        max_rows: Annotated[int, Query(ge=1, le=HISTORY_EXPORT_MAX_ROWS)] = 10_000,
+    ) -> ExportResponse:
+        """Stream filtered episodes as JSON Lines ending with a typed `end` record.
+
+        A download without the `end` record was cut off. A truncated export
+        (row cap or query budget) carries a `next_cursor` to resume from.
+        """
+        start = decode_cursor(cursor, filters)
+        if history_export_lock.locked():
+            raise HTTPException(status_code=429, detail="another export is in progress")
+        await history_export_lock.acquire()
+
+        async def lines() -> AsyncGenerator[bytes, None]:
+            rows = 0
+            resume = start
+            error: str | None = None
+            try:
+                async for chunk in store.history_export_chunks(filters, start, max_rows):
+                    rows += chunk.rows
+                    resume = chunk.next_cursor
+                    yield chunk.lines
+            except HistoryBudgetExceeded:
+                error = "query_budget_exceeded"
+            end = {
+                "type": "end",
+                "order": HISTORY_ORDER,
+                "rows": rows,
+                "truncated": error is not None or resume is not None,
+                "next_cursor": None if resume is None else resume.encode(),
+                "error": error,
             }
-            for row in rows
-        ]
+            yield (json.dumps(end, separators=(",", ":")) + "\n").encode()
+
+        return ExportResponse(
+            lines(),
+            history_export_lock,
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="arbsync-opportunities.jsonl"'},
+        )
 
     @app.get("/api/stats")
     async def stats(window: Window = "1h") -> WindowStats:
