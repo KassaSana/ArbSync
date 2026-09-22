@@ -1,9 +1,10 @@
 """Measure what offline net-interval extraction costs on real and synthetic books.
 
-Replays one capture twice, without and with the `NetSignalRecorder` book
-observer, and reports the wall-time delta, per-call observer timing, resident
-memory growth during the replay, and signal row count. Two comparison figures accompany it: the
-periodic `DepthSampler.sample_all` walk at the configured cadence (the
+Replays one capture twice, each in a fresh child process, without and with
+the `NetSignalRecorder` book observer, and reports the wall-time delta,
+per-call observer timing, peak working set and resident growth per process,
+and signal row count. Two comparison figures accompany it: the periodic
+`DepthSampler.sample_all` walk timed on the replay's own cadence ticks (the
 sampled-interpolation baseline a live implementation could fall back to) and
 a synthetic worst case with 300-level books on both legs plus a thin third
 venue. Research-only; it never touches SQLite or live ingestion.
@@ -22,8 +23,10 @@ import asyncio
 import gc
 import json
 import statistics
+import subprocess
+import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 from pathlib import Path
 
@@ -52,6 +55,11 @@ def _resident_bytes() -> int:
     return int(psutil.Process().memory_info().rss)
 
 
+def _peak_working_set_bytes() -> int:
+    info = psutil.Process().memory_info()
+    return int(getattr(info, "peak_wset", info.rss))
+
+
 @dataclass(frozen=True)
 class _ReplayCost:
     wall_seconds: float
@@ -60,6 +68,7 @@ class _ReplayCost:
     observer_calls: list[float]
     signal_rows: int
     resident_growth_bytes: int
+    peak_working_set_bytes: int
     sample_all_seconds: list[float]
     sample_interval_seconds: float
     notionals: list[str]
@@ -98,6 +107,16 @@ async def _replay(capture: Path, config_path: Path, *, with_observer: bool) -> _
             observer_calls.append(time.perf_counter() - started)
 
         observer = timed
+    # Time the sampler on the replay's own cadence ticks, while books are live.
+    sample_all_seconds: list[float] = []
+    sample_all = sampler.sample_all
+
+    def timed_sample_all(now_monotonic_ns: int | None = None) -> None:
+        started = time.perf_counter()
+        sample_all(now_monotonic_ns)
+        sample_all_seconds.append(time.perf_counter() - started)
+
+    sampler.sample_all = timed_sample_all  # type: ignore[method-assign]
     resident_before = _resident_bytes()
     started_wall = time.perf_counter()
     # Same GC discipline as `research.replay_for_research`, so observer timings
@@ -118,14 +137,6 @@ async def _replay(capture: Path, config_path: Path, *, with_observer: bool) -> _
         gc.enable()
     wall_seconds = time.perf_counter() - started_wall
     resident_growth = _resident_bytes() - resident_before
-    # The periodic sampler walk over the final books, evaluated at the last
-    # recorded instant so the books are still eligible: the cost a live
-    # implementation would pay per cadence tick instead of per event.
-    sample_all_seconds: list[float] = []
-    for _ in range(20):
-        started = time.perf_counter()
-        sampler.sample_all(frames[-1].mono_ns)
-        sample_all_seconds.append(time.perf_counter() - started)
     capture_seconds = (
         (frames[-1].mono_ns - frames[0].mono_ns) / 1_000_000_000 if len(frames) > 1 else 0.0
     )
@@ -136,6 +147,7 @@ async def _replay(capture: Path, config_path: Path, *, with_observer: bool) -> _
         observer_calls=observer_calls,
         signal_rows=recorder.signal_rows if recorder is not None else 0,
         resident_growth_bytes=resident_growth,
+        peak_working_set_bytes=_peak_working_set_bytes(),
         sample_all_seconds=sample_all_seconds,
         sample_interval_seconds=config.pricing.sample_interval_seconds,
         notionals=[str(value) for value in config.pricing.notionals],
@@ -203,9 +215,30 @@ def _synthetic_worst_case(levels: int = 300, ticks: int = 200) -> dict[str, obje
     }
 
 
+def _replay_in_child(capture: Path, config_path: Path, *, with_observer: bool) -> _ReplayCost:
+    """Run one replay in a fresh interpreter so memory figures are per process."""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            __file__,
+            "--capture",
+            str(capture),
+            "--config",
+            str(config_path),
+            "--single",
+            "with" if with_observer else "without",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(completed.stdout)
+    return _ReplayCost(**payload)
+
+
 def measure(capture: Path, config_path: Path) -> dict[str, object]:
-    without = asyncio.run(_replay(capture, config_path, with_observer=False))
-    with_observer = asyncio.run(_replay(capture, config_path, with_observer=True))
+    without = _replay_in_child(capture, config_path, with_observer=False)
+    with_observer = _replay_in_child(capture, config_path, with_observer=True)
     if without.digest != with_observer.digest:
         raise RuntimeError("the book observer changed the replay digest")
     calls = with_observer.observer_calls
@@ -220,10 +253,12 @@ def measure(capture: Path, config_path: Path) -> dict[str, object]:
         "without_observer": {
             "wall_seconds": without.wall_seconds,
             "resident_growth_bytes": without.resident_growth_bytes,
+            "peak_working_set_bytes": without.peak_working_set_bytes,
         },
         "with_observer": {
             "wall_seconds": with_observer.wall_seconds,
             "resident_growth_bytes": with_observer.resident_growth_bytes,
+            "peak_working_set_bytes": with_observer.peak_working_set_bytes,
             "signal_rows": with_observer.signal_rows,
         },
         "observer": {
@@ -242,9 +277,13 @@ def measure(capture: Path, config_path: Path) -> dict[str, object]:
             "resident_growth_delta_bytes": (
                 with_observer.resident_growth_bytes - without.resident_growth_bytes
             ),
+            "peak_working_set_delta_bytes": (
+                with_observer.peak_working_set_bytes - without.peak_working_set_bytes
+            ),
         },
         "sampled_baseline": {
             "sample_interval_seconds": with_observer.sample_interval_seconds,
+            "samples": len(with_observer.sample_all_seconds),
             "sample_all_mean_seconds": sample_mean,
             "sample_all_p90_seconds": _percentile(with_observer.sample_all_seconds, 0.9),
             "seconds_per_capture_second": sample_mean / with_observer.sample_interval_seconds,
@@ -258,11 +297,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--capture", type=Path, required=True, help="capture JSONL or JSONL.gz")
     parser.add_argument("--config", type=Path, default=Path("config.toml"))
     parser.add_argument("--output", type=Path, default=None, help="write the JSON report here")
+    parser.add_argument(
+        "--single",
+        choices=("with", "without"),
+        default=None,
+        help="internal: run one replay in this process and print its raw cost as JSON",
+    )
     return parser
 
 
 def main() -> None:
     args = _parser().parse_args()
+    if args.single is not None:
+        cost = asyncio.run(_replay(args.capture, args.config, with_observer=args.single == "with"))
+        print(json.dumps(asdict(cost)))
+        return
     document = measure(args.capture, args.config)
     text = json.dumps(document, indent=2, sort_keys=True)
     if args.output is not None:

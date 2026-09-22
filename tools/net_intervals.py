@@ -70,8 +70,8 @@ NetKey = tuple[str, str, str, Decimal]
 # window escalates so insufficient depth is still decided on the full book.
 DEPTH_WINDOW_LEVELS = 64
 
-SIGNAL_ROW_BYTES_ESTIMATE = 400
-"""Rough per-row heap footprint (slots dataclass plus its Decimal fields)."""
+SIGNAL_ROW_BYTES_ESTIMATE = 650
+"""Per-row resident footprint measured by `tools/perf_net_intervals.py` on the 150 s fixture."""
 
 
 @dataclass(frozen=True, slots=True)
