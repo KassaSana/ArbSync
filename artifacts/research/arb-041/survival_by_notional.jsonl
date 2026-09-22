@@ -1,0 +1,4 @@
+{"executable_size_survival_rate": 0.0, "fee_survival_rate": 0.0, "insufficient_depth": 0, "module": "survival_by_notional", "net_profit_by_quote": {}, "notional": "100", "observations": 132, "priced": 132, "survivors": 0}
+{"executable_size_survival_rate": 0.0, "fee_survival_rate": 0.0, "insufficient_depth": 0, "module": "survival_by_notional", "net_profit_by_quote": {}, "notional": "1000", "observations": 132, "priced": 132, "survivors": 0}
+{"executable_size_survival_rate": 0.0, "fee_survival_rate": 0.0, "insufficient_depth": 0, "module": "survival_by_notional", "net_profit_by_quote": {}, "notional": "10000", "observations": 132, "priced": 132, "survivors": 0}
+{"executable_size_survival_rate": 0.0, "fee_survival_rate": 0.0, "insufficient_depth": 7, "module": "survival_by_notional", "net_profit_by_quote": {}, "notional": "50000", "observations": 132, "priced": 125, "survivors": 0}

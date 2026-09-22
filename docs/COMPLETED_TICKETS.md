@@ -1092,3 +1092,45 @@ Acceptance criteria:
 - Propose a default route gate only if the captured sensitivity results support one. If a
   gate is adopted, make it configurable, close affected episodes deterministically, expose
   the rejection reason, and add boundary tests.
+
+### [x] ARB-041 — Analyze net-executable intervals offline before adding live episodes
+
+- Priority: P2
+- Estimate: 16–24 hours
+- Dependencies: ARB-038, ARB-040
+
+Problem: current episodes intentionally track theoretical top-of-book dislocations. Their
+pricing ledger is refreshed only at open or at a wider theoretical peak, so it cannot answer
+how long a configured notional stayed executable and net positive or whether depth improved
+without a new theoretical peak. That limitation does not by itself justify a second live
+episode lifecycle and schema.
+
+Resolution (2026-09-21): replay exposes an offline `book_observer` hook, and
+`tools/net_intervals.py` re-prices every directed route through the updated venue from
+matched depth and explicit taker fees on each canonical book change, keeping gross and
+fills so fee variants re-net without a second replay, then folds the change-only signal
+into intervals with explicit open, spread-closed, insufficient-depth, invalidated,
+end-of-capture, hysteresis, and delay semantics. Research writes `net_intervals.jsonl`
+and `net_interval_sensitivity.jsonl` (report `version` 4) with theoretical-episode
+overlap, and `tools/perf_net_intervals.py` measures the cost. The 45-minute capture
+produced zero net-positive intervals at every notional under configured fees, halved
+fees, a 0.1 % threshold, and every delay (best net −0.68 % against best gross +0.32 %);
+at zero fees the same signal holds 13,062 sub-basis-point gross-positive stretches with
+a 0.5 s median, barely overlapping theoretical episodes. Exact per-event pricing costs
+0.4–0.75 CPU-seconds per market second and ~600 bytes per retained row, about 30× the
+periodic sampler. Decision: retain offline intervals, do not add live net episodes, no
+SQLite migration; evidence is in `artifacts/research/arb-041/`.
+
+Acceptance criteria:
+
+- On faithful replay, compute per-notional route intervals from matched depth and configured
+  fees whenever a relevant canonical book change can alter the result.
+- Define opening, closing, insufficient-depth, invalidation, hysteresis, and end-of-capture
+  semantics explicitly. Keep theoretical and net-executable intervals as different datasets.
+- Report duration, peak and terminal net spread, executable base and quote amounts, depth
+  insufficiency, leg ages/skew, and sensitivity to threshold and assumed delay.
+- Measure CPU and memory cost at representative book depths and event rates before proposing
+  equivalent live computation.
+- End with a recorded product decision: add live net episodes, retain offline intervals, or
+  collect more evidence. Do not migrate SQLite or change live episode semantics unless that
+  decision approves a separately scoped follow-up.

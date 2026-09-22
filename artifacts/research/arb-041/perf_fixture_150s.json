@@ -1,0 +1,57 @@
+{
+  "capture": "server\\tests\\fixtures\\captured\\three_venue_150s_20260917.jsonl.gz",
+  "capture_seconds": 149.563,
+  "digest": "0a660affc7068ad12a151cc09235b7c75303819e85fd9da1de73c9638c08736c",
+  "notionals": [
+    "100",
+    "1000",
+    "10000",
+    "50000"
+  ],
+  "observer": {
+    "calls": 15226,
+    "max_seconds": 0.02132020005956292,
+    "mean_seconds": 0.003753141882530508,
+    "p90_seconds": 0.00817699998151511,
+    "p99_seconds": 0.013586300075985491,
+    "peak_working_set_delta_bytes": 47099904,
+    "resident_growth_delta_bytes": 46518272,
+    "seconds_per_capture_second": 0.38208205440790516,
+    "total_seconds": 57.14533830340952,
+    "wall_delta_seconds": 58.8145543000428
+  },
+  "sampled_baseline": {
+    "sample_all_mean_seconds": 0.06660442413152035,
+    "sample_all_p90_seconds": 0.07353729999158531,
+    "sample_interval_seconds": 5.0,
+    "samples": 29,
+    "seconds_per_capture_second": 0.013320884826304068
+  },
+  "synthetic_deep_book": {
+    "depth_window_levels": 64,
+    "levels_per_side": 300,
+    "notionals": [
+      "100",
+      "1000",
+      "10000",
+      "50000"
+    ],
+    "observe_calls": 200,
+    "observe_mean_seconds": 0.008365636995877139,
+    "observe_p90_seconds": 0.009267000015825033,
+    "routes_per_observe": 4,
+    "signal_rows": 414
+  },
+  "transitions": 15226,
+  "with_observer": {
+    "peak_working_set_bytes": 339189760,
+    "resident_growth_bytes": 149094400,
+    "signal_rows": 71444,
+    "wall_seconds": 63.3689797000261
+  },
+  "without_observer": {
+    "peak_working_set_bytes": 292089856,
+    "resident_growth_bytes": 102576128,
+    "wall_seconds": 4.554425399983302
+  }
+}

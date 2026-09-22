@@ -1,0 +1,57 @@
+{
+  "capture": "var\\capture-arb040-2026-09-20_165459.jsonl.gz",
+  "capture_seconds": 2708.484,
+  "digest": "d01772b7dda9f6b74b8927c9eb460efcdfe4d2ce23a9f1890935f9ae62d4b9be",
+  "notionals": [
+    "100",
+    "1000",
+    "10000",
+    "50000"
+  ],
+  "observer": {
+    "calls": 306976,
+    "max_seconds": 0.14164529996924102,
+    "mean_seconds": 0.006645599637812366,
+    "p90_seconds": 0.012336399988271296,
+    "p99_seconds": 0.01980879995971918,
+    "peak_working_set_delta_bytes": -88297472,
+    "resident_growth_delta_bytes": 1473163264,
+    "seconds_per_capture_second": 0.7532034874184558,
+    "total_seconds": 2040.0395944170887,
+    "wall_delta_seconds": 2157.5333270999836
+  },
+  "sampled_baseline": {
+    "sample_all_mean_seconds": 0.12608115841026027,
+    "sample_all_p90_seconds": 0.1379016999853775,
+    "sample_interval_seconds": 5.0,
+    "samples": 541,
+    "seconds_per_capture_second": 0.025216231682052052
+  },
+  "synthetic_deep_book": {
+    "depth_window_levels": 64,
+    "levels_per_side": 300,
+    "notionals": [
+      "100",
+      "1000",
+      "10000",
+      "50000"
+    ],
+    "observe_calls": 200,
+    "observe_mean_seconds": 0.00836559000890702,
+    "observe_p90_seconds": 0.008692300063557923,
+    "routes_per_observe": 4,
+    "signal_rows": 414
+  },
+  "transitions": 306893,
+  "with_observer": {
+    "peak_working_set_bytes": 2252681216,
+    "resident_growth_bytes": 931045376,
+    "signal_rows": 1666586,
+    "wall_seconds": 2265.026436200016
+  },
+  "without_observer": {
+    "peak_working_set_bytes": 2340978688,
+    "resident_growth_bytes": -542117888,
+    "wall_seconds": 107.4931091000326
+  }
+}

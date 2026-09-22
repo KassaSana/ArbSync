@@ -53,6 +53,13 @@
   `/api/pricing/depth` routes, and research datasets `route_leg_ages.jsonl`,
   `age_skew_bands.jsonl`, and `age_skew_gate_sensitivity.jsonl` with configurable
   `--age-bands-ms` and `--skew-bands-ms`.
+- Research-only net-executable intervals: replay exposes a book observer hook, and
+  `tools/research.py` re-prices every affected route from matched depth and explicit
+  taker fees on each canonical book change, writing `net_intervals.jsonl` and
+  `net_interval_sensitivity.jsonl` (threshold, hysteresis, delay, and halved-fee
+  variants) with theoretical-episode overlap; research reports are now `version` 4.
+  `tools/perf_net_intervals.py` measures the observer's cost against the periodic
+  sampler and a synthetic deep book. Live episode semantics and SQLite are unchanged.
 
 ### Upgrade notes
 

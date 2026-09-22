@@ -2,7 +2,7 @@
 
 Open tickets only. Estimates are engineering effort, not calendar duration, and include
 implementation, tests, review fixes, and documentation. Completed tickets (ARB-001 through
-ARB-040) are archived verbatim with their acceptance criteria in
+ARB-041) are archived verbatim with their acceptance criteria in
 [`docs/COMPLETED_TICKETS.md`](docs/COMPLETED_TICKETS.md); user-facing outcomes are in
 [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -13,37 +13,13 @@ ARB-040) are archived verbatim with their acceptance criteria in
 - Executability roadmap ARB-030 through ARB-035 (capture/replay, episodes, depth-walked and
   fee-aware pricing, venue comparison, offline research): complete on the default branch
   under `Unreleased`; package metadata is still `0.1.0`.
-- Research correctness ARB-036 through ARB-040 (canonical observations, capture provenance,
-  time-faithful replay, estimator validation, age/skew measurement): complete.
-- Live net-executable episodes remain deliberately deferred: ARB-041 is the decision gate.
+- Research correctness ARB-036 through ARB-041 (canonical observations, capture provenance,
+  time-faithful replay, estimator validation, age/skew measurement, offline net-executable
+  intervals): complete.
+- Live net-executable episodes are not added: ARB-041 measured zero net-positive intervals
+  on a 45-minute capture and recorded the decision to retain offline intervals.
 
 ## Open tickets
-
-### [ ] ARB-041 — Analyze net-executable intervals offline before adding live episodes
-
-- Priority: P2
-- Estimate: 16–24 hours
-- Dependencies: ARB-038, ARB-040
-
-Problem: current episodes intentionally track theoretical top-of-book dislocations. Their
-pricing ledger is refreshed only at open or at a wider theoretical peak, so it cannot answer
-how long a configured notional stayed executable and net positive or whether depth improved
-without a new theoretical peak. That limitation does not by itself justify a second live
-episode lifecycle and schema.
-
-Acceptance criteria:
-
-- On faithful replay, compute per-notional route intervals from matched depth and configured
-  fees whenever a relevant canonical book change can alter the result.
-- Define opening, closing, insufficient-depth, invalidation, hysteresis, and end-of-capture
-  semantics explicitly. Keep theoretical and net-executable intervals as different datasets.
-- Report duration, peak and terminal net spread, executable base and quote amounts, depth
-  insufficiency, leg ages/skew, and sensitivity to threshold and assumed delay.
-- Measure CPU and memory cost at representative book depths and event rates before proposing
-  equivalent live computation.
-- End with a recorded product decision: add live net episodes, retain offline intervals, or
-  collect more evidence. Do not migrate SQLite or change live episode semantics unless that
-  decision approves a separately scoped follow-up.
 
 ### [ ] ARB-042 — Make fill-rate statistics complete, windowed, and reproducible
 
@@ -130,9 +106,9 @@ ARB-034           -> ARB-044 dashboard route correctness
 ```
 
 ARB-039 does not block ARB-040 or ARB-041: lead/lag estimator validity is separate from
-book-age diagnostics and executable-route arithmetic. ARB-041 is the decision gate for any
-future live net-episode ticket; it is not a prerequisite for existing-history queries or
-fill-rate correctness. Streaming multi-hour captures with bounded memory remains a focused
+book-age diagnostics and executable-route arithmetic. ARB-041 decided against a live
+net-episode ticket on current evidence; it was never a prerequisite for existing-history
+queries or fill-rate correctness. Streaming multi-hour captures with bounded memory remains a focused
 follow-up when the chosen research dataset demonstrates that materialization is the actual
 limit; it should not be bundled with unrelated API performance work.
 
@@ -141,7 +117,7 @@ limit; it should not be bundled with unrelated API performance work.
 | Milestone | Engineer effort | Status |
 | --- | ---: | --- |
 | P0, P1, P2 and executability roadmap (ARB-001 through ARB-035) | 171 h plus soak runtime | Complete; historical estimate, not elapsed time |
-| Research correctness and next roadmap (ARB-036 through ARB-044) | 112–180 h | ARB-036 through ARB-040 complete; ARB-041 through ARB-044 open |
+| Research correctness and next roadmap (ARB-036 through ARB-044) | 112–180 h | ARB-036 through ARB-041 complete; ARB-042 through ARB-044 open |
 
 Avoid expanding into execution modeling until the current detection-only claims, units,
-and evidence are internally consistent; ARB-041 is the decision gate.
+and evidence are internally consistent; ARB-041 decided against live net episodes.

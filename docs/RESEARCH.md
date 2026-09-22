@@ -14,8 +14,8 @@ uv run python tools/research.py `
 
 The output directory contains JSONL datasets for episode lifetimes,
 fee-adjusted/executable-size survival by notional, venue fill rates, lead/lag,
-lead/lag sensitivity, and route leg age and skew, plus `report.json` (`version` 3)
-with the replay digest, row counts, and measurement metadata.
+lead/lag sensitivity, route leg age and skew, and net-executable intervals, plus
+`report.json` (`version` 4) with the replay digest, row counts, and measurement metadata.
 The datasets are files rather than SQLite tables so research runs cannot affect
 product persistence or ingestion.
 
@@ -34,6 +34,9 @@ product persistence or ingestion.
 - `route_leg_ages.jsonl`, `age_skew_bands.jsonl`, and
   `age_skew_gate_sensitivity.jsonl` are described under
   [Route leg age and receipt skew](#route-leg-age-and-receipt-skew).
+- `net_intervals.jsonl` and `net_interval_sensitivity.jsonl` are described under
+  [Net-executable intervals](#net-executable-intervals). They are a separate dataset
+  from theoretical episodes and never replace them.
 
 ## Route leg age and receipt skew
 
@@ -83,6 +86,73 @@ per comparison that did not trend with age or skew; at open the older leg's age 
 the skew because detection runs on the updating leg's event. The pre-stated rule for
 proposing a gate was not met, so none is adopted. Datasets and the decision record are
 in [`artifacts/research/arb-040/`](../artifacts/research/arb-040/README.md).
+
+## Net-executable intervals
+
+Theoretical episodes track top-of-book dislocations and refresh their pricing ledger
+only at open or at a wider theoretical peak, so they cannot say how long a configured
+notional stayed executable and net positive. `tools/net_intervals.py` answers that
+offline. During the research replay a book observer fires after every canonical book
+change (accepted or rejected update, age expiry, connection boundary) and re-prices the
+directed routes on that pair that include the updated venue, with the same matched
+depth walk and explicit taker fees `DepthSampler.ledgers_for_route` uses. Depth is
+walked over a bounded window of best levels and escalates to the whole book whenever a
+walk exhausts the window, so insufficient depth is always decided on the full book. The
+signal is kept in memory as change-only rows per `(pair, buy venue, sell venue,
+notional)`; each priced row keeps the gross spread and the matched fills (base
+acquired, quote spent, quote received), so fee variants re-net through
+`arb.pricing.executable_spread_pcts` without a second replay. Intervalization is a pure
+second pass over those rows.
+
+Semantics for one key:
+
+- **open**: state `priced` and net spread > `--net-threshold-pct` (default `0`, "net
+  positive"). The detector's theoretical `threshold_pct` is a different tier and appears
+  only as a sensitivity variant.
+- **spread_closed**: `priced` and net <= threshold - `--net-hysteresis-pct` (default `0`).
+- **insufficient_depth**: the matched walk can no longer fill the notional while both
+  legs remain eligible.
+- **invalidated**: a leg became ineligible; `ineligibility_reason` keeps the canonical
+  `BookEligibility` reason verbatim.
+- **end_of_capture**: still open at the last recorded frame, the boundary the replay
+  also uses to close standing theoretical episodes.
+- **delay**: an interval opening at `t` counts only if it is still open at `t + delay`;
+  its open moves to `t + delay` and its close is unchanged. The base dataset uses no
+  delay; `--net-delays-ms` (default `50 250 1000`) is the sensitivity grid.
+
+Each interval row carries decimal-string `duration_ns`, `peak_net_spread_pct` (largest
+net while open), `terminal_net_spread_pct` (last net seen while still open, before the
+closing observation), executable base and quote at open and at the last priced
+observation, leg ages and skew at open, the widest skew while open, `close_reason`,
+the settings it was produced under, and two joins to `episodes.jsonl` on the same
+route: `theoretical_open_at_start` and `theoretical_coverage_fraction`. Rows are
+change-driven, so durations are bounded below by the recording host's monotonic tick.
+`net_interval_sensitivity.jsonl` holds one-at-a-time variants of the baseline
+(`threshold_detector`, `hysteresis_0_01`, `hysteresis_0_05`, `delay_<n>ms`,
+`fees_halved`), each labelled by `variant` and its settings. `--no-net-intervals` skips
+the observer; `--write-net-signal` also dumps the raw change-only rows
+(`net_signal.jsonl`), which are large. `measurement.net_intervals` in `report.json`
+records the threshold, hysteresis, delay grid, fee schedule, notionals, timing fidelity,
+`signal_rows`, and a memory estimate. Rows stay in memory for the whole run, so keep
+captures for this analysis to about an hour or split longer ones.
+
+`tools/perf_net_intervals.py` replays a capture with and without the observer and
+reports the wall-time delta, per-call timing, resident growth, the periodic
+`sample_all` baseline at the configured cadence, and a synthetic 300-level deep-book
+worst case, so the cost of an equivalent live computation is measured before any is
+proposed.
+
+The first analysis, on the lossless 45-minute capture from ARB-040, found no
+net-positive interval at any notional under configured fees, halved fees, a 0.1 %
+threshold, or any delay; the best net executable spread in 45 minutes was −0.68 %
+against a best gross of +0.32 %, so the gap is fees, not depth or ledger refresh.
+Re-netted at zero fees the same signal yields 13,062 gross-positive intervals with a
+median duration of about 0.5 s, of which 28 % survive a 1 s delay and 1.2 % of whose
+duration falls inside a theoretical episode. Exact per-event pricing cost 0.4–0.75
+CPU-seconds per second of market data and about 560–650 bytes per retained row, roughly
+30× the periodic sampler. The recorded decision is to retain offline intervals and not
+add live net episodes; datasets, cost tables, and the decision record are in
+[`artifacts/research/arb-041/`](../artifacts/research/arb-041/README.md).
 
 ## Lead/lag method and limits
 
