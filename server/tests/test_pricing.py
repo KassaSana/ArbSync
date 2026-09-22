@@ -4,8 +4,6 @@ from decimal import Decimal
 
 import pytest
 from arb.pricing import (
-    DepthQuote,
-    FillRateTracker,
     matched_route_fills,
     price_book,
     pricing_ledger,
@@ -417,36 +415,6 @@ def test_matched_route_conserves_base_quantity_across_legs(
     assert buy_fill.vwap is not None and sell_fill.vwap is not None
 
 
-# --- Fill-rate tracker ---
-
-
-def quote(exchange: str, side: str, notional: str, insufficient: bool) -> DepthQuote:
-    fill = walk_levels(levels(("100", "1")), Decimal(notional))
-    assert fill.insufficient_depth is insufficient
-    return DepthQuote(exchange, "BTC-USD", side, 5000 if exchange == "binance" else None, fill)  # type: ignore[arg-type]
-
-
-def test_fill_rate_tracker_counts_per_venue_notional_and_side() -> None:
-    tracker = FillRateTracker(notionals=(Decimal("50"), Decimal("500")))
-    tracker.observe([quote("binance", "buy", "50", False), quote("binance", "buy", "500", True)])
-    tracker.observe([quote("binance", "buy", "50", False), quote("binance", "buy", "500", True)])
-    tracker.observe([quote("gemini", "sell", "500", True)])
-    tracker.observe_ineligible("binance", "BTC-USD")
-
-    rows = tracker.rows()
-    assert [
-        (r["exchange"], r["notional"], r["side"], r["observations"], r["filled"]) for r in rows
-    ] == [
-        ("binance", "50", "buy", 2, 2),
-        ("binance", "500", "buy", 2, 0),
-        ("gemini", "500", "sell", 1, 0),
-    ]
-    assert rows[0]["fill_rate"] == 1.0 and rows[1]["fill_rate"] == 0.0
-    # The ineligible sample is reported beside the book, never as a failed fill.
-    assert rows[0]["ineligible_samples"] == 1 and rows[2]["ineligible_samples"] == 0
-    assert rows[0]["subscribed_depth_levels"] == 5000 and rows[2]["subscribed_depth_levels"] is None
-
-
 # --- Manager depth read and the sampler ---
 
 
@@ -503,13 +471,16 @@ def test_sampler_observes_eligible_books_and_counts_ineligible_ones() -> None:
     sampler.sample_all(0)
 
     assert sampler.samples == 2
-    rows = {(r["exchange"], r["notional"], r["side"]): r for r in sampler.tracker.rows()}
+    rows = {(r["exchange"], r["notional"], r["side"]): r for r in sampler.fill_rates.rows()}
     assert rows[("gemini", "100", "buy")]["filled"] == 2
     assert rows[("gemini", "1000", "buy")]["filled"] == 2
     assert rows[("binance", "100", "buy")]["observations"] == 1
     assert rows[("binance", "1000", "buy")]["filled"] == 0
+    assert rows[("binance", "1000", "buy")]["insufficient_depth"] == 1
     # The second binance sample was ineligible: not a failed fill, a missing observation.
     assert rows[("binance", "100", "buy")]["ineligible_samples"] == 1
+    assert rows[("binance", "100", "buy")]["ineligible"]["uninitialized"] == 1  # type: ignore[index]
+    assert rows[("binance", "100", "buy")]["samples"] == 2
     assert rows[("binance", "100", "buy")]["subscribed_depth_levels"] == 5000
     assert sampler.quote("binance", "BTC-USD", 0) == []
     assert len(sampler.quote_pair("BTC-USD", 0)) == 4  # gemini only: 2 notionals x 2 sides

@@ -15,7 +15,7 @@ uv run python tools/research.py `
 The output directory contains JSONL datasets for episode lifetimes,
 fee-adjusted/executable-size survival by notional, venue fill rates, lead/lag,
 lead/lag sensitivity, route leg age and skew, and net-executable intervals, plus
-`report.json` (`version` 4) with the replay digest, row counts, and measurement metadata.
+`report.json` (`version` 5) with the replay digest, row counts, and measurement metadata.
 The datasets are files rather than SQLite tables so research runs cannot affect
 product persistence or ingestion.
 
@@ -29,8 +29,18 @@ product persistence or ingestion.
   observations; `executable_size_survival_rate` is survivors divided by all
   observations, including insufficient-depth outcomes.
 - `venue_fill_rates.jsonl` contains the depth sampler's per-venue, per-pair,
-  per-notional, per-side observations. Ineligible samples remain separate from
-  insufficient depth.
+  per-notional, per-side counts for every book the capture header configures, so a
+  book that never initialized is present with its `missing` or `uninitialized`
+  count. Each row satisfies `samples == filled + insufficient_depth + sum(ineligible)`;
+  ineligible samples keep their canonical reason and stay separate from insufficient
+  depth, and `insufficient_at_depth_cap` marks shortfalls on a side that held the
+  venue's full subscribed level cap. Samples fall at `first frame + k * interval`,
+  the same grid a live session uses from process start.
+- `venue_fill_rate_minutes.jsonl` holds the same counts as one-minute buckets keyed
+  by scheduled sample time, the file-backed form of the live `fill_rate_minutes`
+  table; `arb.fillrates.aggregate` reduces them to any whole-minute window.
+  `measurement.fill_rates` records the session, configuration fingerprint and
+  inputs, sample counts, and first and last sample times.
 - `route_leg_ages.jsonl`, `age_skew_bands.jsonl`, and
   `age_skew_gate_sensitivity.jsonl` are described under
   [Route leg age and receipt skew](#route-leg-age-and-receipt-skew).
@@ -163,7 +173,8 @@ in `tools/lead_lag.py`. The normalized input deltas remain available separately
 for protocol auditing; they are not a price source. Lead/lag datasets produced
 before the ARB-036 observation correction or before the ARB-039 estimator
 validation (research report `version` 1) are not valid evidence and must be
-regenerated; version 2 rows are not comparable with version 1 rows.
+regenerated; version 2 rows are not comparable with version 1 rows. Versions 3 to 5
+add datasets and provenance without changing lead/lag rows.
 
 ### Estimator
 

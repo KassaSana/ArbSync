@@ -21,7 +21,12 @@ def prune_batch(
     batch_size: int = 1000,
     timeout_seconds: float = 0.5,
 ) -> int:
-    """Delete at most batch_size rows strictly before cutoff, atomically repairing rollups.
+    """Delete at most batch_size rows of each kind before cutoff, atomically repairing rollups.
+
+    Episodes that started before the cutoff are deleted with their minute rollups
+    rebuilt. Fill-rate buckets are deleted only for whole minutes that ended at
+    or before the cutoff, then tick rows and sessions left with no buckets. The
+    return value counts deleted episodes plus deleted fill-rate bucket rows.
 
     A SQLite progress deadline bounds query work (including dense-minute rebuilds).
     Lock contention or expiry raises OperationalError and rolls back the whole batch.
@@ -65,10 +70,30 @@ def prune_batch(
                 + ROLLUP_REBUILD_SELECT,
                 (minute, pair, minute, minute + MINUTE_NS),
             )
+        # A bucket covers [minute_ns, minute_ns + 1 minute); only whole minutes
+        # before the cutoff go, so a window after the cutoff keeps its counts.
+        last_minute_ns = cutoff_ns - MINUTE_NS
+        fill_rows = db.execute(
+            "DELETE FROM fill_rate_minutes WHERE (minute_ns, session_id, exchange, pair, "
+            "notional, side) IN (SELECT minute_ns, session_id, exchange, pair, notional, side "
+            "FROM fill_rate_minutes WHERE minute_ns <= ? ORDER BY minute_ns LIMIT ?)",
+            (last_minute_ns, batch_size),
+        ).rowcount
+        db.execute(
+            "DELETE FROM fill_rate_ticks WHERE minute_ns <= ? AND NOT EXISTS ("
+            "SELECT 1 FROM fill_rate_minutes m WHERE m.minute_ns = fill_rate_ticks.minute_ns "
+            "AND m.session_id = fill_rate_ticks.session_id)",
+            (last_minute_ns,),
+        )
+        db.execute(
+            "DELETE FROM fill_rate_sessions WHERE started_wall_ns < ? AND NOT EXISTS ("
+            "SELECT 1 FROM fill_rate_ticks t WHERE t.session_id = fill_rate_sessions.session_id)",
+            (cutoff_ns,),
+        )
         if time.monotonic() >= deadline:
             raise sqlite3.OperationalError("Pruning time budget expired")
         db.commit()
-        return len(rows)
+        return len(rows) + max(0, fill_rows)
     finally:
         db.set_progress_handler(None, 0)
         try:

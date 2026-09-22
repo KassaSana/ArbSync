@@ -334,10 +334,21 @@ class OrderBookManager:
         Eligibility is the same canonical decision detection uses, so a
         disconnected, discontinuous or stale book yields no depth to price.
         """
-        if not self.eligibility(exchange, pair, now_monotonic_ns).eligible:
-            return None
+        return self.depth_with_eligibility(exchange, pair, now_monotonic_ns)[1]
+
+    def depth_with_eligibility(
+        self, exchange: str, pair: str, now_monotonic_ns: int | None = None
+    ) -> tuple[BookEligibility, tuple[list[PriceLevel], list[PriceLevel]] | None]:
+        """The canonical eligibility decision and, only when eligible, every level.
+
+        Fill-rate sampling needs the reason a book was ineligible as well as its
+        depth, from one evaluation at one clock reading.
+        """
+        status = self.eligibility(exchange, pair, now_monotonic_ns)
+        if not status.eligible:
+            return status, None
         book = self._books[(exchange, pair)]
-        return (book.bids.all_levels(), book.asks.all_levels())
+        return status, (book.bids.all_levels(), book.asks.all_levels())
 
     def level_snapshot(
         self, exchange: str, pair: str, limit: int = 10

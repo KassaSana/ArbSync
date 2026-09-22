@@ -111,9 +111,9 @@ async def _replay(capture: Path, config_path: Path, *, with_observer: bool) -> _
     sample_all_seconds: list[float] = []
     sample_all = sampler.sample_all
 
-    def timed_sample_all(now_monotonic_ns: int | None = None) -> None:
+    def timed_sample_all(now_monotonic_ns: int | None = None, *, tick: int | None = None) -> None:
         started = time.perf_counter()
-        sample_all(now_monotonic_ns)
+        sample_all(now_monotonic_ns, tick=tick)
         sample_all_seconds.append(time.perf_counter() - started)
 
     sampler.sample_all = timed_sample_all  # type: ignore[method-assign]

@@ -387,6 +387,9 @@ def build_pipeline(
         {adapter.name: adapter.subscribed_depth_levels for adapter in adapters},
         config.fees.taker_pct,
         interval_seconds=config.pricing.sample_interval_seconds,
+        roster=expected_pairs,
+        max_age_seconds=config.order_books.max_age_seconds,
+        sink=store.offer_fill_rates,
     )
     detector = ArbitrageDetector(
         threshold_pct=Decimal(str(config.detector.threshold_pct)),
@@ -496,6 +499,9 @@ async def shutdown_pipeline(pipeline: Pipeline, tasks: PipelineTasks) -> None:
     for task in producers:
         task.cancel()
     await asyncio.gather(*producers, return_exceptions=True)
+    if tasks.depth_sampler is not None:
+        # The sampler is stopped; its partial minute still belongs in storage.
+        pipeline.depth_sampler.flush_fill_rates()
     # Nothing can open an episode once the adapters are gone; close the ones
     # still standing so storage never holds an episode with no end.
     await deliver_episodes(
@@ -597,12 +603,18 @@ async def run_replay_serve(
     configure_logging()
     config = load_config(config_path)
     pipeline = build_pipeline(config)
+    # Replayed books are not live observations: the dashboard still sees the
+    # running session's fill rates, but none are persisted beside live buckets.
+    pipeline.depth_sampler.fill_rates.sink = None
     await pipeline.store.initialize()
     tasks = PipelineTasks(
         persistence=pipeline.supervisor.create("persistence", pipeline.store.run()),
         replay=pipeline.supervisor.create(
             "replay", feed_replay_into_pipeline(pipeline, capture_path, speed)
         ),
+        # The live timeline ages books on this machine's clock, so fill rates
+        # are sampled by the ordinary live loop rather than the replay heap.
+        depth_sampler=pipeline.supervisor.create("depth_sampler", pipeline.depth_sampler.run()),
     )
     try:
         await _serve_app(pipeline)

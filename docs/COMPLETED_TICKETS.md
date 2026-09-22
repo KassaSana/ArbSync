@@ -1182,3 +1182,35 @@ Acceptance criteria:
   index-supported plans on a representative database.
 - Add dashboard drill-down only after the API contract is tested. Do not imply net-executable
   filtering until that lifecycle exists or an explicit stored-ledger filter is defined.
+
+### [x] ARB-042 — Make fill-rate statistics complete, windowed, and reproducible
+
+- Priority: P2
+- Estimate: 12–20 hours
+- Dependencies: ARB-037, ARB-038
+
+Problem: live fill counts exist only for the current process, and sampling iterates books
+that have already been seen. A configured book that never initializes can be absent rather
+than counted as unavailable, and the API has no time window or sample provenance.
+
+Acceptance criteria:
+
+- Sample the configured roster, including missing and never-initialized books, and preserve
+  ineligible observations separately from insufficient depth.
+- Define sample start/end, cadence, restart, missed-sample, depth-cap, and configuration
+  semantics. Expose raw counts alongside ratios.
+- Produce reproducible windowed aggregates by venue, pair, side, and notional from a bounded
+  persisted or file-backed representation chosen explicitly for this use case.
+- Verify restart behavior, quiet and missing books, configuration changes, capped versus
+  full-depth venues, and replay/live agreement on the same observation sequence.
+- Do not make this ticket depend on live net episodes.
+
+Resolution (2026-09-22): `arb.fillrates` defines the per-session sample grid, missed-tick
+accounting, per-reason ineligible counts, depth-cap shortfalls, and configuration
+fingerprints. Counts persist as one-minute buckets in SQLite schema version 5 through the
+bounded store queue, and `/api/pricing/fill-rates` sums them over whole-minute windows
+grouped by fingerprint with session and coverage provenance. Research writes the same
+buckets to `venue_fill_rate_minutes.jsonl`. `server/tests/test_fillrates.py` covers
+restarts, quiet and missing books, configuration changes, capped versus full-depth venues,
+pruning, the v4 migration, and replay/live agreement on one observation sequence; a live
+smoke confirmed buckets and a window across a restart.

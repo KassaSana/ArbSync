@@ -82,7 +82,7 @@ reconcile_failures_total = Counter(
 )
 persistence_queue_drops_total = Counter(
     "arb_persistence_queue_drops_total",
-    "Opportunities not accepted for persistence",
+    "Opportunity episodes or fill-rate buckets not accepted for persistence",
     ["reason"],
 )
 persistence_unflushed_rows = Gauge(

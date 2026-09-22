@@ -77,6 +77,15 @@
   variants) with theoretical-episode overlap; research reports are now `version` 4.
   `tools/perf_net_intervals.py` measures the observer's cost against the periodic
   sampler and a synthetic deep book. Live episode semantics and SQLite are unchanged.
+- Complete, windowed fill-rate statistics. Every sample counts every configured book,
+  including missing and never-initialized ones, with ineligible samples kept by canonical
+  reason and separate from insufficient depth (and depth-cap shortfalls flagged). Samples
+  follow a fixed per-session grid with `missed_samples` counted, persist as one-minute
+  buckets per session (SQLite schema version 5), and `/api/pricing/fill-rates` accepts
+  `from_ns`/`to_ns`/`exchange`/`pair` to sum them over whole minutes, grouped by a
+  configuration fingerprint with session and `coverage` provenance. `arbsync replay
+  --serve` now samples fill rates in memory without persisting them as live buckets, and research writes `venue_fill_rate_minutes.jsonl`
+  with fill-rate provenance in `report.json` (`version` 5).
 
 ### Upgrade notes
 
@@ -87,6 +96,12 @@
   old rows into episode lifetimes; startup drops that legacy history. Schema version 4
   migrates version 3 in place by adding stored pricing ledgers. Back up first if history
   matters.
+- Schema version 5 adds the fill-rate session, tick, and minute-bucket tables; versions 3
+  and 4 migrate in place and keep their episodes. `arbsync-prune` also removes fill-rate
+  buckets for whole minutes before the cutoff.
+- `/api/pricing/fill-rates` rows now cover the whole configured roster and add `samples`,
+  `insufficient_depth`, `insufficient_at_depth_cap`, per-reason `ineligible`, and
+  `eligible_share`; `fill_rate` is `null` when a row had no eligible sample.
 - Every configured exchange now requires a `fees.<exchange>.taker_pct` entry. There is no
   implicit zero-fee default.
 - Research reports are now `version` 2. The Fisher confidence interval fields were removed
@@ -94,6 +109,9 @@
   regenerate any earlier lead/lag output.
 - Research reports are now `version` 3, adding the route leg age datasets and their band
   settings to `measurement`; existing dataset rows are unchanged.
+- Research reports are now `version` 5, adding `venue_fill_rate_minutes.jsonl` and a
+  `measurement.fill_rates` provenance block; `venue_fill_rates.jsonl` rows gain the
+  per-reason and depth-cap counts and now include never-eligible configured books.
 
 ### Performance
 

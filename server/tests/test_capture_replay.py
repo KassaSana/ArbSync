@@ -486,6 +486,13 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
     recorded clock; those samples count as ineligible, not as depth shortfalls.
     """
     from arb.capture import CaptureFrame, CaptureHeader
+    from arb.fillrates import (
+        INELIGIBLE_REASONS,
+        FillRateItem,
+        FillRateSession,
+        aggregate,
+        rows_payload,
+    )
     from arb.orderbook import OrderBookManager
     from arb.pricing import DepthSampler
 
@@ -536,7 +543,10 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
         frame(7, "gemini", gemini(2, "5", "5.1")),
     ]
 
+    items: list[FillRateItem] = []
+
     def run() -> tuple[list[dict[str, object]], int, str]:
+        items.clear()
         manager = OrderBookManager(max_age_seconds=60.0)
         sampler = DepthSampler(
             manager,
@@ -544,15 +554,36 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
             {"gemini": None, "binance": 5000},
             {},
             interval_seconds=1.0,
+            roster=[("binance", "DOT-USD"), ("coinbase", "DOT-USD"), ("gemini", "DOT-USD")],
+            sink=items.append,
         )
         report = asyncio.run(
             replay_frames(header, frames, book_manager=manager, depth_sampler=sampler)
         )
-        return sampler.tracker.rows(), sampler.samples, report.digest
+        return sampler.fill_rates.rows(), sampler.samples, report.digest
 
     rows, samples, digest = run()
+    first_items = list(items)
     again, samples_again, digest_again = run()
     assert (rows, samples, digest) == (again, samples_again, digest_again)
+    # ARB-042: the replay emits the same session and minute buckets every time,
+    # and the reference window reducer over them reproduces the session totals.
+    assert first_items == items
+    session = items[0]
+    assert isinstance(session, FillRateSession)
+    assert session.started_wall_ns == base_wall
+    window = aggregate(items, 0, base_wall + 3_600 * second)
+    assert window.sessions[session.session_id].samples == 7
+    assert window.sessions[session.session_id].missed_samples == 0
+    assert rows_payload(window.groups[session.config_fingerprint], session.config) == rows
+
+    # A configured book that never receives data is counted in every sample.
+    never = {(r["exchange"], r["notional"], r["side"]): r for r in rows}[("coinbase", "100", "buy")]
+    assert never["samples"] == 7 and never["ineligible"] == {
+        **dict.fromkeys(INELIGIBLE_REASONS, 0),
+        "missing": 7,
+    }
+    assert never["fill_rate"] is None and never["eligible_share"] == 0.0
 
     # Samples fire after same-instant frames at t=1..7: seven samples on the
     # recorded clock.
@@ -571,6 +602,7 @@ def test_replay_samples_depth_on_a_thin_book_and_through_a_resync_window() -> No
     # t=6 completes before the t=6 sample, so t=6 and t=7 are eligible again.
     assert deep_large["observations"] == 4 and deep_large["filled"] == 4
     assert deep_large["ineligible_samples"] == 3
+    assert deep_large["samples"] == 7
     assert deep_large["subscribed_depth_levels"] == 5000
 
 

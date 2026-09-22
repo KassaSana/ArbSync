@@ -479,8 +479,11 @@ class _Replay:
                     raise ReplayError(f"capture frame {index} has no raw message")
                 self._push(frame.mono_ns, _PRIORITY_WS, "ws", frame, seq=index)
         if self.depth_sampler is not None and self.frames:
-            interval_ns = int(self.depth_sampler.interval_seconds * 1_000_000_000)
+            interval_ns = self.depth_sampler.fill_config.interval_ns
             if interval_ns > 0:
+                # The same grid a live session uses, anchored at the first frame.
+                if self.depth_sampler.fill_rates.session is None:
+                    self.depth_sampler.start_session(self._anchor_mono_ns, self._anchor_wall_ns)
                 self._push(self.clock.now_ns + interval_ns, _PRIORITY_SAMPLE, "sample", interval_ns)
 
     # -- helpers -----------------------------------------------------------
@@ -810,7 +813,7 @@ class _Replay:
 
     def _on_sample(self, interval_ns: int, mono_ns: int) -> None:
         assert self.depth_sampler is not None
-        self.depth_sampler.sample_all(mono_ns)
+        self.depth_sampler.sample_all(mono_ns, tick=self.depth_sampler.tick_at(mono_ns))
         self._push(mono_ns + interval_ns, _PRIORITY_SAMPLE, "sample", interval_ns)
 
     # -- run ---------------------------------------------------------------
@@ -907,6 +910,8 @@ async def replay_frames(
             book_observer=book_observer,
         )
         report = await replay.run()
+        if depth_sampler is not None:
+            depth_sampler.flush_fill_rates()
         # The capture ended with these spreads still standing. Closing them
         # as `shutdown` at the last recorded instant keeps the report a full
         # accounting and the digest deterministic.

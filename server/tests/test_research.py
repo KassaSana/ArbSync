@@ -319,7 +319,12 @@ def test_net_intervals_replay_deterministically_and_join_theoretical_episodes(
     first = _net_research(tmp_path, "first", write_net_signal=True)
     second = _net_research(tmp_path, "second")
     assert first["replay_digest"] == second["replay_digest"]
-    for name in ("net_intervals.jsonl", "net_interval_sensitivity.jsonl"):
+    for name in (
+        "net_intervals.jsonl",
+        "net_interval_sensitivity.jsonl",
+        "venue_fill_rates.jsonl",
+        "venue_fill_rate_minutes.jsonl",
+    ):
         assert (tmp_path / "first" / name).read_bytes() == (tmp_path / "second" / name).read_bytes()
 
     metadata = cast(dict[str, Any], first["measurement"])["net_intervals"]
@@ -346,7 +351,31 @@ def test_net_intervals_replay_deterministically_and_join_theoretical_episodes(
         row["buy_cost_quote"] == row["notional"] and row["sell_proceeds_quote"] is not None
         for row in priced
     )
-    assert first["version"] == 4
+    assert first["version"] == 5
+
+    # ARB-042: fill-rate rows carry their sampling provenance, cover the whole
+    # configured roster, and reduce from the file-backed minute buckets.
+    fill = cast(dict[str, Any], first["measurement"])["fill_rates"]
+    assert fill["samples"] > 0 and fill["missed_samples"] == 0
+    assert fill["session"]["config_fingerprint"]
+    roster = {tuple(book) for book in fill["config"]["roster"]}
+    fill_rows = [
+        json.loads(line)
+        for line in (tmp_path / "first" / "venue_fill_rates.jsonl").read_text().splitlines()
+    ]
+    assert {(row["exchange"], row["pair"]) for row in fill_rows} >= roster
+    assert all(
+        row["samples"] == fill["samples"]
+        and row["samples"]
+        == row["filled"] + row["insufficient_depth"] + sum(row["ineligible"].values())
+        for row in fill_rows
+    )
+    minutes = [
+        json.loads(line)
+        for line in (tmp_path / "first" / "venue_fill_rate_minutes.jsonl").read_text().splitlines()
+    ]
+    assert counts["fill_rate_minutes"] == len(minutes) > 0
+    assert sum(minute["samples"] for minute in minutes) == fill["samples"]
 
     intervals = [
         json.loads(line)

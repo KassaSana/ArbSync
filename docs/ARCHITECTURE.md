@@ -53,9 +53,9 @@ never persisted there.
 | Exchange adapters | Protocol parsing, native sequence validation, reconnects, and snapshot recovery | Cross-exchange eligibility or detection |
 | `OrderBookManager` | In-memory L2 state, normalized continuity, freshness, and canonical eligibility | Exchange-native recovery |
 | `ArbitrageDetector` | Pairwise top-of-book spread episodes and snapshots of route-pricing ledgers | Book trust or trade execution |
-| `DepthSampler` | Depth-walked venue VWAPs, fill rates, and explicit fee-aware route ledgers | Fee defaults or order execution |
+| `DepthSampler` | Depth-walked venue VWAPs, fill-rate sampling of the configured roster, and explicit fee-aware route ledgers | Fee defaults or order execution |
 | `SnapshotReconciler` | Confirmed live-versus-REST divergence and recovery coordination | Exchange-native recovery |
-| `OpportunityStore` | Bounded queuing, batched SQLite writes, and statistics queries | Order-book storage |
+| `OpportunityStore` | Bounded queuing, batched SQLite writes of episodes and fill-rate buckets, and statistics queries | Order-book storage |
 | `LiveBroadcaster` | State envelopes, book-update coalescing, and bounded per-client delivery | Market-data ingestion or detection |
 | FastAPI application | REST, WebSocket, health, readiness, and metrics interfaces | Exchange protocol semantics |
 | React `LiveProvider` | Shared browser connection, frame batching, reconnect refreshes, and live UI state | Deciding whether a book is eligible |
@@ -183,6 +183,35 @@ new peak. The ledger keeps these tiers separate:
 
 These values estimate the visible-book route at one observation. They do not place orders
 or model latency, inventory, transfer costs, later market movement, or execution risk.
+
+### Fill-rate sampling
+
+`DepthSampler` samples the configured roster (plus any other book the manager holds) on a
+fixed grid: tick *k* is due `k × pricing.sample_interval_seconds` after the session anchor,
+which is process start live and the first captured frame in replay. Each sample evaluates
+every book through `OrderBookManager.depth_with_eligibility`, the same canonical decision
+detection uses, and adds exactly one outcome per (venue, pair, notional, side): filled,
+insufficient depth (flagged when the side held the venue's full subscribed level cap), or
+ineligible under its reason. So `samples == filled + insufficient_depth + Σ ineligible`
+always holds, and a missing or never-initialized book is counted rather than omitted.
+
+A live loop that wakes one or more whole intervals late skips those ticks and records them
+as `missed_samples` in the bucket of the sample that ends the gap. Samples are stamped with
+their scheduled grid time and accumulated into one-minute buckets per session
+(`fill_rate_sessions`, `fill_rate_ticks`, `fill_rate_minutes`, schema version 5). A closed
+minute is offered to the store's bounded queue as one item, never awaited, and the open
+minute is flushed at graceful shutdown; a process killed without shutdown loses at most
+that open minute, which then shows as reduced `coverage` rather than as outcomes. These
+are sampled counts, not order books, which keeps the "SQLite stores opportunities, not
+order books" boundary: no price level is persisted.
+
+Each session records a SHA-256 fingerprint of its roster, notionals, cadence, per-venue
+depth caps and book age limit. A windowed query sums exact integer counts over whole
+minutes in SQL and groups them by fingerprint, so a configuration change never merges
+incomparable rows; a restart simply leaves unsampled time, reported through `coverage`.
+`arb.fillrates.aggregate` is the reference reducer over the same buckets, and replay,
+research, and the store all produce buckets through the same recorder, which is what the
+replay/live agreement tests hold equal.
 
 ## Confirmed reconciliation recovery
 

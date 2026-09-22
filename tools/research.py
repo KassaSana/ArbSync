@@ -34,6 +34,7 @@ from arb.adapters import ADAPTER_TYPES
 from arb.capture import CaptureFrame, CaptureHeader, read_capture
 from arb.config import AppConfig, load_config
 from arb.detector import ArbitrageDetector
+from arb.fillrates import FillRateItem, FillRateMinute, minute_row
 from arb.orderbook import OrderBookManager
 from arb.pricing import DepthSampler
 from arb.replay import ReplayObservation, ReplayReport, replay_frames
@@ -85,14 +86,24 @@ class LeadLagSettings:
 
 
 def _adapter_depths(header: CaptureHeader) -> dict[str, int | None]:
+    return _capture_adapters(header)[0]
+
+
+def _capture_adapters(
+    header: CaptureHeader,
+) -> tuple[dict[str, int | None], list[tuple[str, str]]]:
+    """Each captured venue's subscribed depth cap, and the configured book roster."""
     adapter_types = {adapter_type.name: adapter_type for adapter_type in ADAPTER_TYPES}
     depths: dict[str, int | None] = {}
+    roster: list[tuple[str, str]] = []
     for exchange, symbols in header.exchanges.items():
         adapter_type = adapter_types.get(exchange)
         if adapter_type is None:
             raise ValueError(f"capture names unknown exchange {exchange!r}")
-        depths[exchange] = adapter_type(list(symbols)).subscribed_depth_levels
-    return depths
+        adapter = adapter_type(list(symbols))
+        depths[exchange] = adapter.subscribed_depth_levels
+        roster.extend((exchange, pair) for pair in adapter.expected_pairs())
+    return depths, roster
 
 
 async def replay_for_research(
@@ -102,11 +113,13 @@ async def replay_for_research(
     bands: AgeSkewBands | None = None,
     *,
     net_intervals: bool = True,
+    fill_rate_items: list[FillRateItem] | None = None,
 ) -> tuple[ReplayReport, DepthSampler, AgeSkewRecorder, NetSignalRecorder | None]:
     """Replay one capture with the configured depth and fee assumptions.
 
     `net_intervals` attaches the offline net-signal recorder to the replay's
-    book observer; it is returned as None when disabled.
+    book observer; it is returned as None when disabled. `fill_rate_items`, when
+    given, receives the fill-rate session and every minute bucket in order.
     """
     recorder = AgeSkewRecorder(bands if bands is not None else default_bands())
     book_manager = OrderBookManager(max_age_seconds=config.order_books.max_age_seconds)
@@ -114,12 +127,16 @@ async def replay_for_research(
     fees = {
         exchange: fee for exchange, fee in config.fees.taker_pct.items() if exchange in exchanges
     }
+    depths, roster = _capture_adapters(header)
     sampler = DepthSampler(
         book_manager,
         config.pricing.notionals,
-        _adapter_depths(header),
+        depths,
         fees,
         interval_seconds=config.pricing.sample_interval_seconds,
+        roster=roster,
+        max_age_seconds=config.order_books.max_age_seconds,
+        sink=fill_rate_items.append if fill_rate_items is not None else None,
     )
     net_recorder = NetSignalRecorder(book_manager, sampler) if net_intervals else None
     detector = ArbitrageDetector(
@@ -302,7 +319,7 @@ def analyze_capture(
         raise ValueError("net threshold, hysteresis, and delays must be non-negative")
     episodes = _canonical_episode_rows(report)
     survival = _survival_rows(episodes)
-    fill_rates = [{"module": "venue_fill_rate", **row} for row in sampler.tracker.rows()]
+    fill_rates = [{"module": "venue_fill_rate", **row} for row in sampler.fill_rates.rows()]
     lead_lag = _lead_lag_rows(report.observations, settings)
     lead_lag_sensitivity = (
         _lead_lag_sensitivity_rows(report.observations, settings) if sensitivity else []
@@ -405,7 +422,37 @@ def analyze_capture(
             ),
             "clock_skew_warning": "local receive timestamps include network path and exchange clock effects",
             "net_intervals": net_measurement,
+            "fill_rates": _fill_rate_measurement(sampler),
         },
+    }
+
+
+def _fill_rate_measurement(sampler: DepthSampler) -> dict[str, object]:
+    """Provenance for `venue_fill_rates.jsonl` and its minute buckets."""
+    session = sampler.fill_rates.session
+    interval_ns = sampler.fill_config.interval_ns
+    return {
+        "session": None if session is None else session.payload(),
+        "config": sampler.fill_config.payload(),
+        "samples": sampler.samples,
+        "missed_samples": sampler.missed_samples,
+        "first_sample_wall_ns": (
+            None
+            if session is None or sampler.samples == 0
+            else str(session.started_wall_ns + interval_ns)
+        ),
+        "last_sample_wall_ns": (
+            None
+            if session is None or sampler.samples == 0
+            else str(sampler.fill_rates.sample_wall_ns(sampler.samples))
+        ),
+        "grid": "tick k at first frame + k * interval (k >= 1); samples after the last frame are not taken",
+        "note": (
+            "every configured book is counted in every sample; ineligible samples keep the "
+            "canonical eligibility reason and are separate from insufficient depth; "
+            "insufficient_at_depth_cap marks shortfalls on a side holding the venue's full "
+            "subscribed level cap"
+        ),
     }
 
 
@@ -447,8 +494,9 @@ async def run_research(
     write_net_signal: bool = False,
 ) -> dict[str, object]:
     header, frames = read_capture(capture, allow_lossy=allow_lossy)
+    fill_rate_items: list[FillRateItem] = []
     replay_report, sampler, recorder, net_recorder = await replay_for_research(
-        header, frames, config, bands, net_intervals=net_enabled
+        header, frames, config, bands, net_intervals=net_enabled, fill_rate_items=fill_rate_items
     )
     end_mono_ns = max(frame.mono_ns for frame in frames) if frames else 0
     end_wall_ns = max(frame.wall_ns for frame in frames) if frames else 0
@@ -488,6 +536,10 @@ async def run_research(
         name: _write_jsonl(output_dir / filename, cast(list[dict[str, object]], datasets[name]))
         for name, filename in files.items()
     }
+    counts["fill_rate_minutes"] = _write_jsonl(
+        output_dir / "venue_fill_rate_minutes.jsonl",
+        (minute_row(item) for item in fill_rate_items if isinstance(item, FillRateMinute)),
+    )
     if write_net_signal and net_recorder is not None:
         counts["net_signal"] = _write_jsonl(
             output_dir / "net_signal.jsonl",
@@ -499,7 +551,7 @@ async def run_research(
         )
     metadata: dict[str, object] = {
         "format": "arbsync-research",
-        "version": 4,
+        "version": 5,
         "capture": str(capture),
         "replay_digest": replay_report.digest,
         "snapshots_consumed": replay_report.snapshots_consumed,

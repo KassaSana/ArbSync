@@ -189,7 +189,7 @@ the dashboard suitable for trading or accounting decisions.
 | `GET /api/system/stats?window=1h` | Windowed aggregate statistics and episode lifetime p50/p90/max |
 | `GET /api/system/timeseries?window=1h&bucket_seconds=60` | Chart buckets (`bucket_seconds`: 1–86,400) |
 | `GET /api/pricing/depth?pair=BTC-USD` | Depth-walked venue VWAPs plus directed route ledgers through depth impact, taker fees and net spread (`pair` optional) |
-| `GET /api/pricing/fill-rates` | How often each venue could fill each notional across periodic samples |
+| `GET /api/pricing/fill-rates?from_ns=...&to_ns=...` | Fill-rate counts per venue, pair, notional and side: the running session without a window, or persisted minute buckets summed over the whole minutes of `[from_ns, to_ns)`; optional `exchange` and `pair` filters |
 | `GET /metrics` | Prometheus exposition |
 | `WS /ws/live` | Initial state followed by live book/status/opportunity messages |
 
@@ -219,9 +219,10 @@ open is marked `orphaned`: it keeps its count, contributes no lifetime, and must
 currently open. An episode closes when its spread narrows, when a
 leg's book is rejected, invalidated or disconnected, or at shutdown; a leg that merely ages past
 the freshness threshold with no further events on either venue is noticed at the next event, so
-a thin pair's lifetime can overrun by that gap. Schema version 4 adds stored fee/depth ledgers;
-version 3 databases migrate in place, while versions before 3 drop earlier per-update rows on
-startup because they cannot be folded into episodes after the fact; back up first if that
+a thin pair's lifetime can overrun by that gap. Schema version 4 adds stored fee/depth ledgers
+and version 5 adds fill-rate buckets; versions 3 and 4 migrate in place, while versions before
+3 drop earlier per-update rows on startup because they cannot be folded into episodes after the
+fact; back up first if that
 history matters. The earlier quote-currency migration likewise cleared Binance.US USDT rows
 that had been labelled USD.
 
@@ -231,8 +232,25 @@ When the subscribed depth cannot cover a notional the result is an explicit `ins
 with the amount that was available, never a fabricated price. Every quote carries the venue's
 `subscribed_depth_levels` (`5000` for Binance.US, whose snapshot is capped; `null` for Coinbase
 and Gemini, which stream full books) because a fill rate on a capped book is not comparable
-with one on a full book. Fill rates come from periodic samples of every book, off the ingestion
-path; an ineligible book is counted as an ineligible sample, not as a failed fill.
+with one on a full book.
+
+Fill rates come from periodic samples, off the ingestion path, of every configured book. Each
+sample adds exactly one outcome to every (venue, pair, notional, side) row: `filled`,
+`insufficient_depth` (with `insufficient_at_depth_cap` when the walked side held the venue's
+full level cap, so the shortfall may be the cap rather than liquidity), or an `ineligible`
+count under the canonical eligibility reason (`missing`, `uninitialized`, `too_old`, and so
+on). A configured book that never initializes is therefore counted, never absent, and an
+outage is never read as a depth shortfall. `fill_rate` is `filled / observations` over
+eligible samples only (`null` when there were none) and `eligible_share` is
+`observations / samples`; the raw counts are always alongside. Samples fall on a fixed grid
+from process start; ticks the loop slept through are counted as `missed_samples`, not
+backfilled. Counts are persisted as one-minute buckets per process session, so a window
+spanning a restart sums both sessions and reports `coverage` below 1 for the gap, and
+buckets from different roster, notional, cadence, depth-cap or age settings are reported as
+separate `configurations` rather than merged. With an `exchange` or `pair` filter, `samples`,
+`coverage`, and `sessions` count only the session minutes behind the returned rows.
+`arbsync replay --serve` shows its own session's fill rates but never persists them beside live
+buckets. `arbsync-prune` removes buckets with episodes.
 
 Fee-aware route pricing keeps the tiers explicit. `spread_pct` and `theoretical_profit` remain
 top-of-book theoretical values. For each configured quote budget, the buy leg is walked to that

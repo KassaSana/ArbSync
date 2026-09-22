@@ -13,6 +13,18 @@ from typing import Any, Literal, TypedDict
 import aiosqlite
 import structlog
 
+from arb.fillrates import (
+    INELIGIBLE_REASONS,
+    FillCounts,
+    FillRateConfig,
+    FillRateItem,
+    FillRateMinute,
+    FillRateSession,
+    FillRateWindow,
+    FillRowKey,
+    SessionWindow,
+    window_bounds,
+)
 from arb.history import HistoryCursor, HistoryFilters, build_page_query
 from arb.metrics import persistence_queue_drops_total, persistence_unflushed_rows
 from arb.types import OpportunityEpisode
@@ -67,7 +79,7 @@ class HistoryChunk:
 PersistenceFailureReason = Literal["initialize_failed", "worker_failed"]
 PersistenceState = Literal["open", "failed", "closed"]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # One row per episode: a (pair, buy venue, sell venue) route from the moment
 # its spread crossed the threshold to the moment it stopped. The `*_price`,
@@ -161,6 +173,74 @@ CREATE TABLE IF NOT EXISTS opportunity_minutes (
 CREATE INDEX IF NOT EXISTS idx_minutes_ns ON opportunity_minutes(minute_ns);
 """
 
+# Fill-rate statistics (schema 5). These are sampled outcome counts, not order
+# books: one row per session, minute, and (venue, pair, notional, side), holding
+# exact integer counts that windows sum in SQL. `fill_rate_ticks` carries each
+# session's sample and missed-tick counts per minute, which a window needs even
+# for rows it filters out. See `arb.fillrates` for the semantics.
+FILL_RATE_INELIGIBLE_COLUMNS = tuple(f"ineligible_{reason}" for reason in INELIGIBLE_REASONS)
+_FILL_COUNT_COLUMNS = (
+    "samples",
+    "filled",
+    "insufficient_depth",
+    "insufficient_at_depth_cap",
+    *FILL_RATE_INELIGIBLE_COLUMNS,
+)
+CREATE_FILL_RATE_SQL = (
+    """
+CREATE TABLE IF NOT EXISTS fill_rate_sessions (
+    session_id TEXT PRIMARY KEY,
+    started_wall_ns INTEGER NOT NULL,
+    interval_seconds REAL NOT NULL,
+    config_fingerprint TEXT NOT NULL,
+    config_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fill_rate_ticks (
+    minute_ns INTEGER NOT NULL,
+    session_id TEXT NOT NULL,
+    samples INTEGER NOT NULL,
+    missed_samples INTEGER NOT NULL,
+    PRIMARY KEY (minute_ns, session_id)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_fill_rate_ticks_session ON fill_rate_ticks(session_id);
+CREATE TABLE IF NOT EXISTS fill_rate_minutes (
+    minute_ns INTEGER NOT NULL,
+    session_id TEXT NOT NULL,
+    exchange TEXT NOT NULL,
+    pair TEXT NOT NULL,
+    notional TEXT NOT NULL,
+    side TEXT NOT NULL,
+"""
+    + "".join(f"    {column} INTEGER NOT NULL,\n" for column in _FILL_COUNT_COLUMNS)
+    + """    PRIMARY KEY (minute_ns, session_id, exchange, pair, notional, side)
+) WITHOUT ROWID;
+"""
+)
+# A bucket is normally written once; summing on conflict means a repeated write
+# of the same minute (a partial minute flushed twice) never loses counts.
+UPSERT_FILL_MINUTE_SQL = (
+    "INSERT INTO fill_rate_minutes (minute_ns, session_id, exchange, pair, notional, side, "
+    + ", ".join(_FILL_COUNT_COLUMNS)
+    + ") VALUES ("
+    + ", ".join("?" * (6 + len(_FILL_COUNT_COLUMNS)))
+    + ") ON CONFLICT(minute_ns, session_id, exchange, pair, notional, side) DO UPDATE SET "
+    + ", ".join(f"{column} = {column} + excluded.{column}" for column in _FILL_COUNT_COLUMNS)
+)
+UPSERT_FILL_TICKS_SQL = (
+    "INSERT INTO fill_rate_ticks (minute_ns, session_id, samples, missed_samples) "
+    "VALUES (?, ?, ?, ?) ON CONFLICT(minute_ns, session_id) DO UPDATE SET "
+    "samples = samples + excluded.samples, "
+    "missed_samples = missed_samples + excluded.missed_samples"
+)
+INSERT_FILL_SESSION_SQL = (
+    "INSERT OR IGNORE INTO fill_rate_sessions "
+    "(session_id, started_wall_ns, interval_seconds, config_fingerprint, config_json) "
+    "VALUES (?, ?, ?, ?, ?)"
+)
+# Long windows sum many buckets; they fail fast rather than hold a reader.
+FILL_RATE_QUERY_BUDGET_SECONDS = 2.0
+
+
 # Column list the readers and the pruner's rebuild share with the writer.
 ROLLUP_REBUILD_SELECT = (
     "SELECT ?, pair, COUNT(*), MAX(CAST(peak_spread_pct AS REAL)), "
@@ -237,7 +317,9 @@ class OpportunityStore:
         self.db_path = db_path
         self.batch_size = batch_size
         self.flush_interval_seconds = flush_interval_seconds
-        self._queue: asyncio.Queue[OpportunityEpisode | None] = asyncio.Queue(maxsize=queue_maxsize)
+        self._queue: asyncio.Queue[OpportunityEpisode | FillRateItem | None] = asyncio.Queue(
+            maxsize=queue_maxsize
+        )
         self._closed = False
         self._failure: Exception | None = None
         self._failure_reason: PersistenceFailureReason | None = None
@@ -291,7 +373,11 @@ class OpportunityStore:
                         "DROP TABLE IF EXISTS opportunity_minutes; "
                         "DROP TABLE IF EXISTS opportunities;"
                     )
-                await db.executescript(CREATE_TABLE_SQL + CREATE_INDEX_SQL + CREATE_ROLLUP_SQL)
+                # Schema 5 only adds the fill-rate tables, so a version 4
+                # database upgrades in place when they are created here.
+                await db.executescript(
+                    CREATE_TABLE_SQL + CREATE_INDEX_SQL + CREATE_ROLLUP_SQL + CREATE_FILL_RATE_SQL
+                )
                 if version == 3:
                     await db.execute(
                         "ALTER TABLE opportunity_episodes "
@@ -311,6 +397,17 @@ class OpportunityStore:
             raise
 
     async def enqueue(self, episode: OpportunityEpisode) -> bool:
+        return self.offer(episode)
+
+    def offer_fill_rates(self, item: FillRateItem) -> bool:
+        """Queue a fill-rate session or minute bucket without awaiting.
+
+        It shares the bounded episode queue: when that is full the bucket is
+        dropped and counted, rather than delaying the sampler or ingestion.
+        """
+        return self.offer(item)
+
+    def offer(self, episode: OpportunityEpisode | FillRateItem) -> bool:
         if self._closed:
             persistence_queue_drops_total.labels(
                 reason=self._failure_reason or "store_closed"
@@ -326,7 +423,7 @@ class OpportunityStore:
         return True
 
     async def run(self) -> None:
-        batch: list[OpportunityEpisode] = []
+        batch: list[OpportunityEpisode | FillRateItem] = []
         self._worker_started = True
         try:
             while True:
@@ -507,6 +604,84 @@ class OpportunityStore:
             if next_cursor is None:
                 return
             cursor = next_cursor
+
+    async def fill_rate_window(
+        self,
+        from_ns: int,
+        to_ns: int,
+        *,
+        exchange: str | None = None,
+        pair: str | None = None,
+        budget_seconds: float = FILL_RATE_QUERY_BUDGET_SECONDS,
+    ) -> FillRateWindow:
+        """Sum persisted fill-rate buckets over the whole minutes inside a window.
+
+        Equal to `arb.fillrates.aggregate` over the same buckets. Only flushed
+        minutes are stored, so a running session's open minute is not included.
+        """
+        effective_from, effective_to = window_bounds(from_ns, to_ns)
+        window = FillRateWindow(from_ns, to_ns, effective_from, effective_to)
+        row_filters = ""
+        filter_params: list[object] = []
+        if exchange is not None:
+            row_filters += " AND m.exchange = ?"
+            filter_params.append(exchange)
+        if pair is not None:
+            row_filters += " AND m.pair = ?"
+            filter_params.append(pair)
+        params: list[object] = [effective_from, effective_to, *filter_params]
+        sums = ", ".join(f"SUM(m.{column})" for column in _FILL_COUNT_COLUMNS)
+        async with aiosqlite.connect(self.db_path) as db:
+            deadline = time.monotonic() + budget_seconds
+            await db.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1_000)
+            try:
+                session_cursor = await db.execute(
+                    "SELECT s.session_id, s.started_wall_ns, s.config_json, "
+                    "SUM(t.samples), SUM(t.missed_samples) "
+                    "FROM fill_rate_ticks t JOIN fill_rate_sessions s USING (session_id) "
+                    "WHERE t.minute_ns >= ? AND t.minute_ns < ? "
+                    # A session minute counts only when it holds a row the filter keeps.
+                    "AND EXISTS (SELECT 1 FROM fill_rate_minutes m "
+                    "WHERE m.minute_ns = t.minute_ns AND m.session_id = t.session_id"
+                    + row_filters
+                    + ") GROUP BY s.session_id",
+                    params,
+                )
+                session_rows = list(await session_cursor.fetchall())
+                row_cursor = await db.execute(
+                    "SELECT s.config_fingerprint, m.exchange, m.pair, m.notional, m.side, "
+                    + sums
+                    + " FROM fill_rate_minutes m JOIN fill_rate_sessions s USING (session_id) "
+                    "WHERE m.minute_ns >= ? AND m.minute_ns < ?"
+                    + row_filters
+                    + " GROUP BY s.config_fingerprint, m.exchange, m.pair, m.notional, m.side",
+                    params,
+                )
+                count_rows = list(await row_cursor.fetchall())
+            except sqlite3.OperationalError as exc:
+                if "interrupted" in str(exc) and time.monotonic() >= deadline:
+                    raise HistoryBudgetExceeded from exc
+                raise
+        for session_id, started_wall_ns, config_json, samples, missed in session_rows:
+            session = FillRateSession(
+                str(session_id),
+                int(started_wall_ns),
+                FillRateConfig.from_payload(json.loads(config_json)),
+            )
+            window.sessions[session.session_id] = SessionWindow(session, int(samples), int(missed))
+        for row in count_rows:
+            fingerprint, exchange_name, pair_name, notional, side = row[:5]
+            values = [int(value) for value in row[5:]]
+            counts = FillCounts(
+                samples=values[0],
+                filled=values[1],
+                insufficient_depth=values[2],
+                insufficient_at_depth_cap=values[3],
+                ineligible=dict(zip(INELIGIBLE_REASONS, values[4:], strict=True)),
+            )
+            key: FillRowKey = (str(exchange_name), str(pair_name), Decimal(notional), side)
+            window.groups.setdefault(str(fingerprint), {})[key] = counts
+        return window
 
     async def open_count(self) -> int:
         async with aiosqlite.connect(self.db_path) as db:
@@ -699,8 +874,9 @@ class OpportunityStore:
             for bucket in sorted(buckets)
         ]
 
-    async def _flush(self, batch: Iterable[OpportunityEpisode]) -> None:
-        batch = list(batch)
+    async def _flush(self, items: Iterable[OpportunityEpisode | FillRateItem]) -> None:
+        items = list(items)
+        batch = [item for item in items if isinstance(item, OpportunityEpisode)]
         affected = sorted(
             {((episode.start_ns // MINUTE_NS) * MINUTE_NS, episode.pair) for episode in batch}
         )
@@ -711,6 +887,28 @@ class OpportunityStore:
         # Events are applied in arrival order, so an open and its close in
         # the same batch insert and then update the same row.
         await db.executemany(UPSERT_EPISODE_SQL, [_episode_row(episode) for episode in batch])
+        for item in items:
+            if isinstance(item, OpportunityEpisode):
+                continue
+            # Every bucket restores its session row if pruning or a dropped
+            # session item removed it, so no bucket is left without a config.
+            session = item if isinstance(item, FillRateSession) else item.session
+            await db.execute(
+                INSERT_FILL_SESSION_SQL,
+                (
+                    session.session_id,
+                    session.started_wall_ns,
+                    session.config.interval_seconds,
+                    session.config_fingerprint,
+                    session.config.canonical_json(),
+                ),
+            )
+            if isinstance(item, FillRateMinute):
+                await db.execute(
+                    UPSERT_FILL_TICKS_SQL,
+                    (item.minute_ns, item.session_id, item.samples, item.missed_samples),
+                )
+                await db.executemany(UPSERT_FILL_MINUTE_SQL, _fill_minute_rows(item))
         for minute_ns, pair in affected:
             await db.execute(
                 "DELETE FROM opportunity_minutes WHERE minute_ns = ? AND pair = ?",
@@ -726,8 +924,27 @@ class OpportunityStore:
         # Replaying an open or close therefore cannot increment a rollup twice,
         # and a close whose bounded-queue open was dropped still contributes.
         await db.commit()
-        self._flushed_count += len(batch)
+        self._flushed_count += len(items)
         persistence_unflushed_rows.set(self.unflushed_count)
+
+
+def _fill_minute_rows(minute: FillRateMinute) -> list[tuple[object, ...]]:
+    return [
+        (
+            minute.minute_ns,
+            minute.session_id,
+            exchange,
+            pair,
+            str(notional),
+            side,
+            counts.samples,
+            counts.filled,
+            counts.insufficient_depth,
+            counts.insufficient_at_depth_cap,
+            *(counts.ineligible.get(reason, 0) for reason in INELIGIBLE_REASONS),
+        )
+        for (exchange, pair, notional, side), counts in sorted(minute.rows.items())
+    ]
 
 
 def _episode_payload(row: Any) -> dict[str, Any]:

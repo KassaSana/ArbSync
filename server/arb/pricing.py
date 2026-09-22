@@ -18,12 +18,22 @@ sells exactly the acquired base on the sell venue.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+import time
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from fractions import Fraction
 from typing import Literal
 
+from arb.fillrates import (
+    SIDES,
+    FillCounts,
+    FillRateConfig,
+    FillRateRecorder,
+    FillRateSession,
+    FillRateSink,
+    FillRowKey,
+)
 from arb.orderbook import OrderBookManager
 from arb.types import PriceLevel, PricingLedger, RouteLegAges, TopOfBook
 
@@ -342,71 +352,19 @@ def price_book(
     return quotes
 
 
-FillKey = tuple[str, str, Decimal, Side]
-
-
-@dataclass
-class _FillCounts:
-    observations: int = 0
-    filled: int = 0
-
-
-@dataclass
-class FillRateTracker:
-    """Count how often each (venue, pair, notional, side) could be filled.
-
-    Only eligible books are observed; an ineligible book is counted separately
-    so an outage or resync never reads as a depth shortfall. Counts live in
-    memory for the process lifetime.
-    """
-
-    notionals: tuple[Decimal, ...]
-    _counts: dict[FillKey, _FillCounts] = field(default_factory=dict)
-    _ineligible: dict[tuple[str, str], int] = field(default_factory=dict)
-    _depth_levels: dict[tuple[str, str], int | None] = field(default_factory=dict)
-
-    def observe(self, quotes: Iterable[DepthQuote]) -> None:
-        for quote in quotes:
-            self._depth_levels[(quote.exchange, quote.pair)] = quote.subscribed_depth_levels
-            key: FillKey = (quote.exchange, quote.pair, quote.fill.notional, quote.side)
-            counts = self._counts.setdefault(key, _FillCounts())
-            counts.observations += 1
-            if not quote.fill.insufficient_depth:
-                counts.filled += 1
-
-    def observe_ineligible(self, exchange: str, pair: str) -> None:
-        self._ineligible[(exchange, pair)] = self._ineligible.get((exchange, pair), 0) + 1
-
-    def rows(self) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        for (exchange, pair, notional, side), counts in sorted(
-            self._counts.items(), key=lambda item: (item[0][0], item[0][1], item[0][2], item[0][3])
-        ):
-            rows.append(
-                {
-                    "exchange": exchange,
-                    "pair": pair,
-                    "notional": str(notional),
-                    "side": side,
-                    "observations": counts.observations,
-                    "filled": counts.filled,
-                    # A ratio for display; the exact counts are alongside.
-                    "fill_rate": counts.filled / counts.observations,
-                    "ineligible_samples": self._ineligible.get((exchange, pair), 0),
-                    "subscribed_depth_levels": self._depth_levels.get((exchange, pair)),
-                }
-            )
-        return rows
-
-
 class DepthSampler:
-    """Walk every known book on a schedule and feed the fill-rate tracker.
+    """Walk every configured book on a schedule and record fill-rate outcomes.
 
     Fill-rate sampling is periodic rather than per book update, which makes it
-    time-weighted instead of weighted toward busy books. `route_prices` is also
-    used only when an episode opens or reaches a new peak, not on every update,
-    to snapshot that episode's product ledger. Replay drives `sample_all` from
-    its recorded clock; live runs use `run`.
+    time-weighted instead of weighted toward busy books. Each sample classifies
+    every book in the configured roster (plus any other book the manager has
+    seen) through the canonical eligibility decision, so missing and
+    never-initialized books are counted, by reason, rather than absent; see
+    `arb.fillrates` for the grid, session and bucket semantics.
+
+    `route_prices` is also used only when an episode opens or reaches a new
+    peak, not on every update, to snapshot that episode's product ledger.
+    Replay drives `sample_all` from its recorded clock; live runs use `run`.
     """
 
     def __init__(
@@ -417,14 +375,34 @@ class DepthSampler:
         taker_fees_pct: Mapping[str, Decimal],
         *,
         interval_seconds: float,
+        roster: Iterable[tuple[str, str]] = (),
+        max_age_seconds: float | None = None,
+        sink: FillRateSink | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        wall_clock: Callable[[], int] = time.time_ns,
     ) -> None:
         self.book_manager = book_manager
         self.notionals = tuple(notionals)
         self.depth_levels = dict(depth_levels)
         self.taker_fees_pct = dict(taker_fees_pct)
         self.interval_seconds = interval_seconds
-        self.tracker = FillRateTracker(self.notionals)
-        self.samples = 0
+        self.roster = tuple(roster)
+        self.fill_config = FillRateConfig.build(
+            self.roster, self.notionals, interval_seconds, self.depth_levels, max_age_seconds
+        )
+        self.fill_rates = FillRateRecorder(self.fill_config, sink)
+        self._sleep = sleep
+        self._wall_clock = wall_clock
+        self._anchor_mono_ns = 0
+        self._tick = 0
+
+    @property
+    def samples(self) -> int:
+        return self.fill_rates.samples
+
+    @property
+    def missed_samples(self) -> int:
+        return self.fill_rates.missed_samples
 
     def quote(
         self, exchange: str, pair: str, now_monotonic_ns: int | None = None
@@ -536,16 +514,66 @@ class DepthSampler:
             )
         return tuple(ledgers)
 
-    def sample_all(self, now_monotonic_ns: int | None = None) -> None:
-        self.samples += 1
-        for exchange, pair in self.book_manager.known_pairs():
-            quotes = self.quote(exchange, pair, now_monotonic_ns)
-            if quotes:
-                self.tracker.observe(quotes)
-            else:
-                self.tracker.observe_ineligible(exchange, pair)
+    def start_session(self, anchor_monotonic_ns: int, anchor_wall_ns: int) -> FillRateSession:
+        """Anchor the sample grid: tick k is due `k * interval` after this instant."""
+        self._anchor_mono_ns = anchor_monotonic_ns
+        self._tick = 0
+        return self.fill_rates.start(anchor_wall_ns)
+
+    def tick_at(self, monotonic_ns: int) -> int:
+        """The latest grid tick due at or before `monotonic_ns`."""
+        return (monotonic_ns - self._anchor_mono_ns) // self.fill_config.interval_ns
+
+    def sample_all(self, now_monotonic_ns: int | None = None, *, tick: int | None = None) -> None:
+        """Record one sample of every book, stamped with grid tick `tick`.
+
+        Without a tick the next one is used; without a session, one is anchored
+        at this call so direct callers need no setup.
+        """
+        now = self.book_manager.now_monotonic_ns() if now_monotonic_ns is None else now_monotonic_ns
+        if self.fill_rates.session is None:
+            interval_ns = self.fill_config.interval_ns
+            self.start_session(now - interval_ns, self._wall_clock() - interval_ns)
+        tick = self._tick + 1 if tick is None else tick
+        if tick <= self._tick:
+            raise ValueError(f"sample tick {tick} does not advance past {self._tick}")
+        self._tick = tick
+        books = sorted(set(self.roster).union(self.book_manager.known_pairs()))
+        outcomes: dict[FillRowKey, FillCounts] = {}
+        for exchange, pair in books:
+            status, sides = self.book_manager.depth_with_eligibility(exchange, pair, now)
+            cap = self.depth_levels.get(exchange)
+            for notional in self.notionals:
+                for side in SIDES:
+                    counts = FillCounts()
+                    if sides is None:
+                        counts.record_ineligible(status.reason or "missing")
+                    else:
+                        levels = sides[1] if side == "buy" else sides[0]
+                        fill = walk_levels(levels, notional)
+                        counts.record_fill(
+                            filled=not fill.insufficient_depth,
+                            at_depth_cap=cap is not None and len(levels) >= cap,
+                        )
+                    outcomes[(exchange, pair, notional, side)] = counts
+        self.fill_rates.record_sample(self.fill_rates.sample_wall_ns(tick), outcomes)
+
+    def flush_fill_rates(self) -> None:
+        """Emit the open minute bucket; shutdown and the end of a replay call this."""
+        self.fill_rates.flush()
 
     async def run(self) -> None:
+        """Sample on the session grid, counting whole intervals the loop slept through."""
+        interval_ns = self.fill_config.interval_ns
+        if self.fill_rates.session is None:
+            self.start_session(self.book_manager.now_monotonic_ns(), self._wall_clock())
         while True:
-            await asyncio.sleep(self.interval_seconds)
-            self.sample_all()
+            due = self._anchor_mono_ns + (self._tick + 1) * interval_ns
+            delay_ns = due - self.book_manager.now_monotonic_ns()
+            if delay_ns > 0:
+                await self._sleep(delay_ns / 1_000_000_000)
+            now = self.book_manager.now_monotonic_ns()
+            tick = max(self._tick + 1, self.tick_at(now))
+            missed = tick - self._tick - 1
+            self.fill_rates.record_missed(missed, self.fill_rates.sample_wall_ns(tick))
+            self.sample_all(now, tick=tick)

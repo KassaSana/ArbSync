@@ -310,16 +310,52 @@ def create_app(
         }
 
     @app.get("/api/pricing/fill-rates")
-    async def fill_rates() -> dict[str, object]:
-        """How often each venue could fill each notional across periodic samples."""
+    async def fill_rates(
+        from_ns: NsQuery = None,
+        to_ns: NsQuery = None,
+        exchange: ExchangeQuery = None,
+        pair: PairQuery = None,
+    ) -> dict[str, object]:
+        """How often each venue could fill each notional across periodic samples.
+
+        Without a window this is the running session, including its open
+        minute. With `from_ns` and `to_ns` it sums the persisted minute buckets
+        of every session inside the whole minutes of `[from_ns, to_ns)`.
+        """
         if depth_sampler is None:
             raise HTTPException(status_code=404, detail="depth pricing is not configured")
-        return {
-            "sample_interval_seconds": depth_sampler.interval_seconds,
-            "samples": depth_sampler.samples,
-            "notionals": [str(notional) for notional in depth_sampler.notionals],
-            "rows": depth_sampler.tracker.rows(),
-        }
+        if from_ns is None and to_ns is None:
+            recorder = depth_sampler.fill_rates
+            session = recorder.session
+            rows = [
+                row
+                for row in recorder.rows()
+                if (exchange is None or row["exchange"] == exchange)
+                and (pair is None or row["pair"] == pair)
+            ]
+            return {
+                "sample_interval_seconds": depth_sampler.interval_seconds,
+                "samples": recorder.samples,
+                "missed_samples": recorder.missed_samples,
+                "notionals": [str(notional) for notional in depth_sampler.notionals],
+                "session": None if session is None else session.payload(),
+                "config": depth_sampler.fill_config.payload(),
+                "rows": rows,
+            }
+        if from_ns is None or to_ns is None:
+            raise HTTPException(status_code=422, detail="from_ns and to_ns must be given together")
+        start, end = int(from_ns), int(to_ns)
+        if max(start, end) > MAX_SQLITE_INTEGER:
+            raise HTTPException(status_code=422, detail="time bounds must fit a SQLite integer")
+        if start >= end:
+            raise HTTPException(status_code=422, detail="from_ns must be before to_ns")
+        try:
+            window = await store.fill_rate_window(start, end, exchange=exchange, pair=pair)
+        except HistoryBudgetExceeded as exc:
+            raise HTTPException(
+                status_code=503, detail="query budget exceeded; narrow the time range or filters"
+            ) from exc
+        return window.payload()
 
     @app.get("/api/pairs")
     async def pairs() -> list[dict[str, str]]:

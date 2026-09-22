@@ -121,6 +121,10 @@ def test_build_pipeline_wires_configuration_into_each_component(tmp_path: Path) 
     assert pipeline.depth_sampler.notionals == (Decimal("100"), Decimal("1000"))
     assert pipeline.depth_sampler.interval_seconds == 0.5
     assert pipeline.depth_sampler.depth_levels == {"stub": None}
+    # ARB-042: fill rates sample the configured roster and persist through the store.
+    assert pipeline.depth_sampler.roster == (("stub", "BTC-USD"), ("stub", "ETH-USD"))
+    assert pipeline.depth_sampler.fill_config.max_age_seconds == 12.5
+    assert pipeline.depth_sampler.fill_rates.sink == pipeline.store.offer_fill_rates
     # Only the registered adapter types are built; other configured exchanges are ignored.
     assert [adapter.name for adapter in pipeline.adapters] == ["stub"]
     assert pipeline.expected_pairs == [("stub", "BTC-USD"), ("stub", "ETH-USD")]
@@ -524,3 +528,31 @@ def test_build_pipeline_observes_route_open_ages_without_evaluation_events(
     assert pipeline.detector._route_observer is observe_route_open
     # Live ingestion never pays for per-evaluation events; only research opts in.
     assert pipeline.detector._observe_evaluations is False
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flushes_the_open_fill_rate_minute_to_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlite3
+
+    async def idle_consume_adapter(adapter: ExchangeAdapter, **kwargs: object) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(main, "consume_adapter", idle_consume_adapter)
+    pipeline = main.build_pipeline(make_config(tmp_path), adapter_types=(StubAdapter,))
+    tasks = await main.start_pipeline(pipeline)
+    await asyncio.sleep(0)
+    pipeline.depth_sampler.sample_all()
+
+    await main.shutdown_pipeline(pipeline, tasks)
+
+    samples = pipeline.depth_sampler.samples
+    assert samples >= 1
+    with sqlite3.connect(tmp_path / "arb.sqlite3") as db:
+        # The partial minute was never closed by a later sample, only by shutdown.
+        assert db.execute("SELECT SUM(samples) FROM fill_rate_ticks").fetchone()[0] == samples
+        assert (
+            db.execute("SELECT SUM(ineligible_missing) FROM fill_rate_minutes").fetchone()[0]
+            == samples * 2 * 2 * 2
+        )  # two books, two notionals, two sides

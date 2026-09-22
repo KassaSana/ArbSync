@@ -1,7 +1,8 @@
 # SQLite retention and maintenance
 
 ArbSync keeps history until the operator explicitly prunes it. SQLite contains
-canonical opportunity episodes and approximate minute rollups, not order books. Back up
+canonical opportunity episodes, approximate minute rollups, and exact fill-rate count
+buckets, not order books. Back up
 valuable history before maintenance. Use the database path from the selected config;
 relative runtime paths are resolved beside that config.
 
@@ -28,6 +29,11 @@ zero opportunities cannot establish a useful nonzero storage-growth rate. Measur
 your own row-count and database-plus-WAL growth over a representative interval and
 budget extra space for backups, WAL/checkpoints, and vacuum before selecting retention.
 
+Fill-rate buckets (schema version 5) grow with time rather than with opportunities: one
+row per configured book, notional, and side per minute while the process runs, plus one
+tick row per minute and one session row per start. The default 27 books and four
+notionals write 216 bucket rows a minute, about 311,000 a day.
+
 ## Explicit retention
 
 Run from the repository root (or use the installed `arbsync-prune` command):
@@ -41,6 +47,11 @@ timezone-qualified timestamp, open or not. Rows exactly on the boundary remain. 
 cumulative committed deletions. With no batch options, it attempts just one batch
 of at most 1,000 rows. A full final batch may leave older rows; rerun to continue.
 Choose the cutoff explicitly; this example is not a recommended retention duration.
+
+The same batch also deletes up to the same number of fill-rate bucket rows for whole
+minutes that ended at or before the cutoff, then the tick rows and sessions left with no
+buckets; the printed count is episodes plus bucket rows. A window that starts at or after
+the cutoff therefore keeps every count it covers.
 
 Each transaction deletes at most 10,000 canonical rows and rebuilds only affected
 minute/pair rollups from survivors. This keeps counts, sums, and maxima correct even
@@ -97,8 +108,9 @@ time and acquire locks, so do not run it automatically on the market-data path.
 
 ## Migration and restore
 
-The pruner requires the current schema version 4 and never migrates a database. Application
-startup owns migrations. Version 4 adds the exact-string depth/fee pricing-ledger document
+The pruner requires the current schema version 5 and never migrates a database. Application
+startup owns migrations. Version 5 adds the fill-rate session, tick, and bucket tables and
+leaves episodes untouched. Version 4 adds the exact-string depth/fee pricing-ledger document
 to version 3 episode rows. The episode migration (version 3) discards per-update opportunity rows,
 and the earlier quote-currency migration discarded conflated USD/USDT history; back up
 before upgrading if that historical data must be retained for investigation. Startup also
