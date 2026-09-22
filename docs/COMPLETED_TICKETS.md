@@ -1134,3 +1134,31 @@ Acceptance criteria:
 - End with a recorded product decision: add live net episodes, retain offline intervals, or
   collect more evidence. Do not migrate SQLite or change live episode semantics unless that
   decision approves a separately scoped follow-up.
+
+### [x] ARB-044 — Keep venue-comparison route economics coherent with eligibility
+
+- Priority: P1
+- Estimate: 8–12 hours
+- Dependencies: ARB-034
+
+Problem: individual venue cells consult canonical book status, but the selected gross/net
+route is chosen from the last polled pricing response without applying those statuses. The
+panel can therefore show a route's economics after one leg has become ineligible. Its
+independent cheapest-buy and best-sell labels can also describe different venues from the
+route whose gross and net spread is displayed.
+
+Acceptance criteria:
+
+- Suppress a cached route immediately when either route leg becomes ineligible or the live
+  feed is disconnected; distinguish unavailable from insufficient depth.
+- Label the buy and sell venues for the exact displayed route. If independent per-side best
+  quotes remain useful, present them separately without implying they produced that route.
+- Carry an as-of marker or generation through pricing refreshes so an older response cannot
+  revive a route after a newer invalidation or refresh.
+- Test disconnect, age expiry, crossed/incomplete status, out-of-order pricing responses,
+  same-venue independent best quotes, route recovery, and a route that differs from the
+  independent cheapest-buy/best-sell pair.
+
+The original evidence criterion (refresh architecture, research, changelog, and validation
+claims and run a qualifying current-code soak) was split into ARB-045 because it spans
+ARB-036 through ARB-044 rather than this dashboard fix.
