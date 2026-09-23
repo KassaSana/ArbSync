@@ -68,9 +68,9 @@ class ReconcileAdapter(ExchangeAdapter):
             self.fetch_hook()
         return snapshot
 
-    def request_reconnect(self) -> None:
+    def request_reconnect(self, cause: str) -> None:
         self.reconnect_requests += 1
-        super().request_reconnect()
+        super().request_reconnect(cause)
 
 
 class PairResyncAdapter(ReconcileAdapter):
@@ -181,6 +181,7 @@ async def test_persistent_mismatch_invalidates_before_requesting_recovery() -> N
     assert manager.eligibility("stub", "BTC-USD").eligible is False
     assert notifications == [False]
     assert adapter.reconnect_requests == 1
+    assert adapter.reconnect_request().cause == "confirmed_drift"
     assert (
         metric_value(reconcile_confirmations_total, exchange="stub", pair="BTC-USD")
         - confirmed_before

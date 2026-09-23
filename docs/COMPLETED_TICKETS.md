@@ -1244,3 +1244,42 @@ claims were refreshed; RESEARCH.md was refreshed with ARB-042. The six Gemini ve
 reconnects that each followed a confirmed `DOT-USD` or `LTC-USD` price drift are the
 designed fallback, not a failure; recurring Gemini drift and whole-venue recovery are
 ticketed as ARB-046.
+
+### [x] ARB-046 — Investigate recurring Gemini price drift and scope its recovery
+
+- Priority: P2
+- Estimate: 6–12 hours
+- Dependencies: ARB-028, ARB-045
+
+Problem: the 2026-09-22 soak confirmed six Gemini price drifts in four hours (`DOT-USD`
+four times, `LTC-USD` twice), each within the first 90 minutes. Gemini has no scoped
+resync, so every confirmation reconnected the whole venue and made its other eight books
+briefly ineligible (2.0–2.7 s each); the reconnect metric labels these only
+`reason="RuntimeError"`.
+
+Acceptance criteria:
+
+- Determine from captured traffic whether the drifts are genuine stream divergence, REST
+  snapshot staleness, or a normalization defect, and record the evidence.
+- If Gemini's protocol allows it, recover a single pair without reconnecting the venue, or
+  document why it cannot; keep recovery adapter-owned and fail-closed.
+- Label adapter reconnects by their cause (for example confirmed drift versus transport
+  error) instead of the exception class.
+
+Resolution (2026-09-22): the drifts are genuine divergence of Gemini's incremental `@depth`
+stream from Gemini's own subscription snapshots, not REST staleness or a normalization
+defect. `tools/gemini_drift.py` compares each incremental book with the fresh WebSocket
+snapshot that replaces it: over 81 forced single-pair rebuilds with a 0.1 s gap, all nine
+pairs had levels the stream had removed or never announced more than 30 s earlier (115 in
+total), while every frame continued its `U/u` chain and none repeated a price. DOT-USD and
+LTC-USD confirm because one missing level in a sparse book exceeds the reconciler's 0.5 %
+per-index threshold. A live probe showed `UNSUBSCRIBE` then `SUBSCRIBE` on an open socket
+yields a full snapshot while other pairs keep streaming, so the Gemini adapter now
+recovers a sequence gap or confirmed drift by resubscribing only that pair, driven by
+self-describing request ids that replay reads from the recorded acknowledgements; a
+rejected step, no snapshot within 10 s, or more than three resyncs of a pair per minute
+falls back to a full reconnect. `arb_adapter_reconnects_total` now labels reconnects by
+cause (`confirmed_drift`, `sequence_gap`, `invalid_book`, `transport_error`, ...). A 90-minute
+live capture confirmed no drift, so the reconciler-triggered path is proven by tests and
+81 forced live resyncs rather than a natural drift; that gap is recorded in
+`docs/VALIDATION.md`. Evidence and protocol details are in `docs/RESYNC.md`.

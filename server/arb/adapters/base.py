@@ -88,6 +88,19 @@ class IngestResult:
     snapshot_requests: list[SnapshotRequest]
 
 
+# Bounded label values for `arb_adapter_reconnects_total{reason=...}`: each
+# names why a connection was dropped, never an exception class.
+TRANSPORT_ERROR = "transport_error"
+
+
+class AdapterReconnectRequested(RuntimeError):
+    """Raised by a stream loop to drop a connection the adapter asked to replace."""
+
+    def __init__(self, cause: str, detail: str | None = None) -> None:
+        super().__init__(detail or f"adapter requested reconnect ({cause})")
+        self.cause = cause
+
+
 class ExchangeAdapter(abc.ABC):
     name: str
     ws_url: str
@@ -103,6 +116,7 @@ class ExchangeAdapter(abc.ABC):
         self._last_sequence_by_pair: dict[str, int] = {}
         self._connection_state_callback: Callable[[str, bool], Awaitable[None] | None] | None = None
         self._reconnect_requested = False
+        self._reconnect_cause: str | None = None
         self.connection_generation = 0
         self._snapshot_context: contextvars.ContextVar[SnapshotRequestContext | None] = (
             contextvars.ContextVar("snapshot_context", default=None)
@@ -190,7 +204,7 @@ class ExchangeAdapter(abc.ABC):
 
     def snapshot_failed(self, pair: str) -> None:
         """Record that a requested snapshot fetch raised instead of returning."""
-        self.request_reconnect()
+        self.request_reconnect("snapshot_failed")
 
     async def reset_state(self) -> None:
         """Clear per-connection state. Called before each (re)subscribe so
@@ -198,6 +212,7 @@ class ExchangeAdapter(abc.ABC):
         instead of applying deltas onto a stale book."""
         self._last_sequence_by_pair.clear()
         self._reconnect_requested = False
+        self._reconnect_cause = None
 
     async def fetch_snapshot_with_context(
         self, pair: str, trigger_sequence: int, *, purpose: str
@@ -222,8 +237,20 @@ class ExchangeAdapter(abc.ABC):
     # on a capped book is not comparable with the same result on a full one.
     subscribed_depth_levels: int | None = None
 
-    def request_reconnect(self) -> None:
+    def request_reconnect(self, cause: str) -> None:
+        """Ask the stream loop to drop and rebuild the whole connection.
+
+        ``cause`` labels the reconnect metric, so it must come from a small
+        fixed vocabulary (``sequence_gap``, ``confirmed_drift``, ...). The
+        first cause wins until the connection is replaced.
+        """
+        if not self._reconnect_requested:
+            self._reconnect_cause = cause
         self._reconnect_requested = True
+
+    def reconnect_request(self) -> AdapterReconnectRequested:
+        """The exception a stream loop raises for the pending reconnect request."""
+        return AdapterReconnectRequested(self._reconnect_cause or "unspecified")
 
     def request_pair_resync(self, pair: str) -> bool:
         """Resynchronize one pair without dropping the shared connection.
@@ -259,9 +286,9 @@ class ExchangeAdapter(abc.ABC):
                     else replace(event, received_monotonic_ns=received_monotonic_ns)
                 )
                 if self._reconnect_requested:
-                    raise RuntimeError("adapter requested reconnect")
+                    raise self.reconnect_request()
             if self._reconnect_requested:
-                raise RuntimeError("adapter requested reconnect")
+                raise self.reconnect_request()
 
     async def connect(self) -> AsyncGenerator[MarketEvent, None]:
         import websockets
@@ -283,8 +310,15 @@ class ExchangeAdapter(abc.ABC):
                 self.connected = False
                 await self._report_connection_state(False)
                 self.reconnect_count += 1
-                adapter_reconnects_total.labels(exchange=self.name, reason=type(exc).__name__).inc()
-                logger.warning("adapter_reconnect", exchange=self.name, reason=str(exc))
+                cause = exc.cause if isinstance(exc, AdapterReconnectRequested) else TRANSPORT_ERROR
+                adapter_reconnects_total.labels(exchange=self.name, reason=cause).inc()
+                logger.warning(
+                    "adapter_reconnect",
+                    exchange=self.name,
+                    cause=cause,
+                    error_type=type(exc).__name__,
+                    reason=str(exc),
+                )
                 await asyncio.sleep(backoff + random.uniform(0, 0.5))
                 backoff = min(backoff * 2, 30.0)
             finally:

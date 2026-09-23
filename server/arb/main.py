@@ -306,7 +306,7 @@ async def consume_adapter(
                 reason=result.reason,
             )
             if not request_scoped_resync(adapter, event.pair):
-                adapter.request_reconnect()
+                adapter.request_reconnect("invalid_book")
         if on_book_update is not None:
             on_book_update(event.exchange, event.pair)
 

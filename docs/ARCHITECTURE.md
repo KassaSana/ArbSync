@@ -69,9 +69,10 @@ version of that decision.
 All adapters expose the same normalized event shape, but their synchronization rules are
 different:
 
-- **Gemini** treats the first differential-depth frame for a pair after connecting as a
+- **Gemini** treats the first differential-depth frame for a pair after subscribing as a
   full stream snapshot, validates later exchange update ranges, and assigns a consecutive
-  local sequence.
+  local sequence. A gap or an externally requested resync on one pair unsubscribes and
+  resubscribes only that pair's stream on the open socket, which yields a fresh snapshot.
 - **Coinbase** waits for a fresh Level 2 stream snapshot. It does not mix Advanced Trade
   WebSocket sequence numbers with REST Exchange sequence numbers.
 - **Binance.US** buffers WebSocket depth updates while fetching a REST snapshot, discards
@@ -80,12 +81,14 @@ different:
   re-fetches only that pair over the still-open socket.
 
 When an adapter detects a gap or cannot establish a trustworthy baseline, it recovers the
-affected pair in place if it supports scoped resynchronization (Binance.US) and otherwise
-requests a reconnect. A reconnect clears per-connection state, reconnects with bounded
+affected pair in place if it supports scoped resynchronization (Binance.US and Gemini) and
+otherwise requests a reconnect. A reconnect clears per-connection state, reconnects with bounded
 exponential backoff and jitter, and notifies the book manager about connection changes;
 scoped recovery leaves the venue's other books flowing. The affected books remain
 ineligible while reconstruction is in progress, and `arb_adapter_pair_resyncs_total`
-counts scoped resyncs by trigger.
+counts scoped resyncs by trigger. `arb_adapter_reconnects_total` labels each reconnect with
+its cause (for example `confirmed_drift`, `sequence_gap`, `invalid_book`, or
+`transport_error`) rather than an exception class.
 
 Detailed recovery behavior and its tradeoffs are documented in
 [`RESYNC.md`](RESYNC.md).

@@ -320,7 +320,7 @@ async def test_binance_stops_before_buffered_delta_after_reconnect_request() -> 
     stream = adapter.stream_events(socket)
 
     snapshot = await anext(stream)
-    adapter.request_reconnect()
+    adapter.request_reconnect("sequence_gap")
 
     assert snapshot.kind is EventKind.SNAPSHOT
     with pytest.raises(RuntimeError, match="adapter requested reconnect"):

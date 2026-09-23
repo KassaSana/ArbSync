@@ -293,8 +293,9 @@ Results:
   2026-09-16 run could not show. Gemini had six confirmed price drifts (`DOT-USD` four
   times, `LTC-USD` twice); Gemini has no scoped resync, so each one reconnected that venue
   and completed in 2.0–2.7 s. These six are the six `reason="RuntimeError"` Gemini
-  reconnects in the report: the label is the adapter's reconnect-request exception class,
-  not an unexplained failure. Coinbase reconnected once after `ConnectionClosedError`.
+  reconnects in the report: the label was then the adapter's reconnect-request exception
+  class, not an unexplained failure. Since ARB-046 the label names the cause (here it would
+  read `confirmed_drift`), and Gemini recovers such a drift by resubscribing only the pair. Coinbase reconnected once after `ConnectionClosedError`.
   Unconfirmed mismatch warnings (mostly Coinbase and Gemini size-only) remained the
   expected non-atomic comparison noise.
 - **WebSocket delivery:** 604,034 frames on one connection with zero invalid frames,
@@ -464,7 +465,11 @@ The four-hour requirement is met on the current code by the
 - A run with independently connected dashboard clients under real browser load, in addition
   to the observer's lightweight consumer. Rendering evidence remains the connected-dashboard
   benchmark above.
-- Scoped recovery on Gemini. Its six confirmed drifts in the 2026-09-22 soak each
-  reconnected the whole venue for about two seconds; see ARB-046.
+- Gemini scoped recovery triggered by a naturally confirmed drift. ARB-046 exercised
+  Gemini's per-pair resubscription live 81 times by forcing it (no reconnect, gap, or
+  refusal) and covers the drift-triggered path with reconciler, adapter, and replay tests,
+  but its 90-minute live capture (2026-09-22, 44,963 Gemini frames) happened to confirm no
+  drift, so no soak has yet shown the reconciler-to-resubscription path end to end. See
+  [`RESYNC.md`](RESYNC.md#gemini-drift-diagnosis-arb-046).
 - A soak whose host network actually drops. The ARB-029 probe recorded no outage on
   2026-09-22, so its outage-window attribution is exercised only by automated tests.

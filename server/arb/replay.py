@@ -647,7 +647,7 @@ class _Replay:
                     result.reason or "",
                 )
             else:
-                adapter.request_reconnect()
+                adapter.request_reconnect("invalid_book")
         self._update_deadline(event.exchange, event.pair)
         self._reschedule_expiry()
         self._notify_book(event.exchange, event.pair, wall_ns, mono_ns)

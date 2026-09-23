@@ -284,7 +284,7 @@ class SnapshotReconciler:
 
         try:
             if not request_scoped_resync(adapter, target.pair):
-                adapter.request_reconnect()
+                adapter.request_reconnect("confirmed_drift")
         except Exception as exc:
             state.recovery_failure_recorded = True
             reconcile_failures_total.labels(

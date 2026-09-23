@@ -9,7 +9,13 @@ from typing import Any
 
 import structlog
 
-from arb.adapters.base import ExchangeAdapter, IngestResult, SnapshotRequest, parse_levels
+from arb.adapters.base import (
+    AdapterReconnectRequested,
+    ExchangeAdapter,
+    IngestResult,
+    SnapshotRequest,
+    parse_levels,
+)
 from arb.metrics import adapter_pair_resyncs_total
 from arb.types import EventKind, MarketEvent, PriceLevel
 
@@ -159,7 +165,7 @@ class BinanceAdapter(ExchangeAdapter):
         """
         payload = json.loads(text)
         if payload.get("e") == "serverShutdown":
-            self.request_reconnect()
+            self.request_reconnect("server_shutdown")
             return IngestResult([], [])
         if not ("b" in payload and "a" in payload and "s" in payload):
             return IngestResult(await self.parse_message(text), [])
@@ -189,8 +195,10 @@ class BinanceAdapter(ExchangeAdapter):
             attempts = self._snapshot_attempts.get(pair, 1)
             if attempts >= 3:
                 self._snapshot_attempts.pop(pair, None)
-                self._restart_sync(pair)
-                raise RuntimeError(f"snapshot did not catch up for {pair}")
+                self._restart_sync(pair, cause="snapshot_misaligned")
+                raise AdapterReconnectRequested(
+                    "snapshot_misaligned", f"snapshot did not catch up for {pair}"
+                )
             return IngestResult([], [self._request_snapshot(pair, attempt=attempts + 1)])
         self._snapshot_attempts.pop(pair, None)
         self._snapshot_purpose.pop(pair, None)
@@ -199,7 +207,7 @@ class BinanceAdapter(ExchangeAdapter):
     def snapshot_failed(self, pair: str) -> None:
         self._snapshot_in_flight.discard(pair)
         self._snapshot_attempts.pop(pair, None)
-        self._restart_sync(pair)
+        self._restart_sync(pair, cause="snapshot_failed")
 
     async def stream_events(self, websocket: Any) -> AsyncGenerator[MarketEvent, None]:
         """Keep reading and buffering depth updates while snapshots are in flight.
@@ -249,9 +257,9 @@ class BinanceAdapter(ExchangeAdapter):
                         for event in result.events:
                             yield event
                             if self._reconnect_requested:
-                                raise RuntimeError("adapter requested reconnect")
+                                raise self.reconnect_request()
                         if self._reconnect_requested:
-                            raise RuntimeError("adapter requested reconnect")
+                            raise self.reconnect_request()
                         read_task = asyncio.create_task(anext(iterator))
 
                 for pair, task in list(snapshot_tasks.items()):
@@ -262,7 +270,9 @@ class BinanceAdapter(ExchangeAdapter):
                         snapshot = task.result()
                     except Exception as exc:
                         self.snapshot_failed(pair)
-                        raise RuntimeError(f"snapshot retrieval failed for {pair}") from exc
+                        raise AdapterReconnectRequested(
+                            "snapshot_failed", f"snapshot retrieval failed for {pair}"
+                        ) from exc
 
                     result = self.complete_snapshot(pair, snapshot)
                     for request in result.snapshot_requests:
@@ -270,9 +280,9 @@ class BinanceAdapter(ExchangeAdapter):
                     for event in result.events:
                         yield event
                         if self._reconnect_requested:
-                            raise RuntimeError("adapter requested reconnect")
+                            raise self.reconnect_request()
                     if self._reconnect_requested:
-                        raise RuntimeError("adapter requested reconnect")
+                        raise self.reconnect_request()
         finally:
             self._snapshot_in_flight.difference_update(snapshot_tasks)
             tasks = [*snapshot_tasks.values()]
@@ -299,7 +309,7 @@ class BinanceAdapter(ExchangeAdapter):
         buffer = self._buffers.setdefault(update.pair, [])
         buffer.append(update)
         if len(buffer) > self.max_buffered_updates:
-            self._restart_sync(update.pair)
+            self._restart_sync(update.pair, cause="buffer_overflow")
 
     async def _emit(self, update: _DepthUpdate) -> list[MarketEvent]:
         if update.pair not in self._initialized:
@@ -352,13 +362,13 @@ class BinanceAdapter(ExchangeAdapter):
             if events is None:
                 continue
             return events
-        self._restart_sync(pair)
+        self._restart_sync(pair, cause="snapshot_misaligned")
         return []
 
     def _align_snapshot(self, pair: str, snapshot: MarketEvent) -> list[MarketEvent] | None:
         buffer = self._buffers.get(pair, [])
         if not buffer:
-            self._restart_sync(pair)
+            self._restart_sync(pair, cause="snapshot_misaligned")
             return []
         snapshot_id = snapshot.exchange_last_sequence or snapshot.sequence
         # The first retained range only needs to cover ``lastUpdateId + 1``.
@@ -373,7 +383,7 @@ class BinanceAdapter(ExchangeAdapter):
         # snapshot is contiguous, not a gap.
         if pending and pending[0].first_id > snapshot_id + 1:
             self.gap_count += 1
-            self._restart_sync(pair)
+            self._restart_sync(pair, cause="sequence_gap")
             return []
 
         self._initialized.add(pair)
@@ -389,7 +399,7 @@ class BinanceAdapter(ExchangeAdapter):
                 continue
             if update.first_id > last_id + 1:
                 self.gap_count += 1
-                self._restart_sync(pair)
+                self._restart_sync(pair, cause="sequence_gap")
                 return []
             events.append(self._delta_event(update))
         return events
@@ -412,7 +422,7 @@ class BinanceAdapter(ExchangeAdapter):
             received_monotonic_ns=update.received_monotonic_ns,
         )
 
-    def _restart_sync(self, pair: str) -> None:
+    def _restart_sync(self, pair: str, *, cause: str) -> None:
         """Fall back to a full-venue reconnect.
 
         Only ``pair``'s sync state is discarded, but the reconnect request
@@ -425,7 +435,7 @@ class BinanceAdapter(ExchangeAdapter):
         self._last_exchange_update_id.pop(pair, None)
         self._last_sequence_by_pair.pop(pair, None)
         self._buffers.pop(pair, None)
-        self.request_reconnect()
+        self.request_reconnect(cause)
 
     async def fetch_snapshot(self, pair: str, trigger_sequence: int) -> MarketEvent:
         symbol = pair.replace("-", "")

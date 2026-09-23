@@ -58,7 +58,7 @@ class CoinbaseAdapter(ExchangeAdapter):
         envelope_sequence = payload.get("sequence_num")
         if envelope_sequence is None:
             if channel == "l2_data":
-                self.request_reconnect()
+                self.request_reconnect("protocol_error")
             return []
         if not self._accept_envelope_sequence(int(envelope_sequence)):
             return []
@@ -81,14 +81,14 @@ class CoinbaseAdapter(ExchangeAdapter):
             first_kind = product_events[0]["type"]
             if first_kind != "snapshot" and pair not in self._initialized:
                 self._awaiting_snapshot.add(pair)
-                self.request_reconnect()
+                self.request_reconnect("missing_snapshot")
                 return []
             local_sequence = next_local_sequences.get(pair, 0) + 1
             event = self._combine_product_events(
                 product_events, local_sequence, int(envelope_sequence)
             )
             if event is None:
-                self.request_reconnect()
+                self.request_reconnect("invalid_update")
                 return []
             events.append(event)
             next_local_sequences[pair] = local_sequence
@@ -110,7 +110,7 @@ class CoinbaseAdapter(ExchangeAdapter):
         if sequence != previous + 1:
             self.gap_count += 1
             self._awaiting_snapshot.update(normalize_coinbase_symbol(pair) for pair in self.pairs)
-            self.request_reconnect()
+            self.request_reconnect("sequence_gap")
             return False
         self._last_envelope_sequence = sequence
         return True
@@ -175,19 +175,19 @@ class CoinbaseAdapter(ExchangeAdapter):
                 continue
 
             if pair in self._awaiting_snapshot:
-                self.request_reconnect()
+                self.request_reconnect("missing_snapshot")
                 return []
             last_sequence = next_sequences.get(pair)
             if last_sequence is None:
                 self._awaiting_snapshot.add(pair)
-                self.request_reconnect()
+                self.request_reconnect("missing_snapshot")
                 return []
             if event.sequence <= last_sequence:
                 continue
             if event.sequence != last_sequence + 1:
                 self.gap_count += 1
                 self._awaiting_snapshot.add(pair)
-                self.request_reconnect()
+                self.request_reconnect("sequence_gap")
                 return []
             next_sequences[pair] = event.sequence
             accepted.append(event)

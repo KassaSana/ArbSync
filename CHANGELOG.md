@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Recover one Gemini pair by unsubscribing and resubscribing its depth stream on the open
+  socket instead of reconnecting the venue, for both sequence gaps and confirmed
+  reconciliation drift. Captured traffic showed the drifts are genuine divergence of
+  Gemini's incremental stream from its own snapshots, not REST staleness or a
+  normalization defect; see `docs/RESYNC.md`. A rejected step, no snapshot within 10 s, or
+  more than three resyncs of one pair in a minute still falls back to a full reconnect.
 - Keep venue-comparison route economics coherent with canonical book eligibility and
   live-feed state, reject out-of-order pricing responses, and label stale cached pricing
   instead of presenting it as current route economics.
@@ -106,6 +112,10 @@
 
 ### Upgrade notes
 
+- `arb_adapter_reconnects_total{reason=...}` now names the cause of each reconnect
+  (`confirmed_drift`, `sequence_gap`, `invalid_book`, `transport_error`, ...) instead of an
+  exception class such as `RuntimeError`; update dashboards or alerts that matched the old
+  values.
 - Startup adds the `idx_episodes_close_start` index to existing schema-version-4
   databases in place (about 1.8 seconds per million episodes measured); the schema version
   is unchanged.

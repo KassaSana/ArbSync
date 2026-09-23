@@ -36,7 +36,8 @@ exact symbols.
 
 Recovery stays inside each exchange adapter because sequence semantics differ:
 Binance.US aligns buffered deltas with a REST snapshot, Coinbase waits for a new
-Level 2 stream snapshot, and Gemini reconnects for a new differential-depth snapshot.
+Level 2 stream snapshot, and Gemini resubscribes one pair's differential-depth stream for a
+fresh snapshot.
 The shared order-book module only accepts a continuous normalized stream.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a component-by-component walkthrough

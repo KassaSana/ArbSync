@@ -275,7 +275,7 @@ async def test_consumer_requests_adapter_resync_after_invalid_snapshot() -> None
         broadcaster=broadcaster,
     )
 
-    adapter.request_reconnect.assert_called_once_with()
+    adapter.request_reconnect.assert_called_once_with("invalid_book")
     assert len(broadcaster.messages) == 1
     assert broadcaster.messages[0].payload["eligible"] is False
 
@@ -326,7 +326,7 @@ async def test_consumer_prefers_single_pair_resync() -> None:
             self.pair_resync_calls.append(pair)
             return True
 
-        def request_reconnect(self) -> None:
+        def request_reconnect(self, cause: str) -> None:
             self.reconnect_calls += 1
 
     adapter = PairCapableAdapter()

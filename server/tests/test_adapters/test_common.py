@@ -86,11 +86,61 @@ async def test_stream_stops_between_events_when_consumer_requests_reconnect() ->
     events = adapter.stream_events(OneMessageSocket())
 
     first = await anext(events)
-    adapter.request_reconnect()
+    adapter.request_reconnect("sequence_gap")
 
     assert first.pair == "BTC-USD"
     with pytest.raises(RuntimeError, match="adapter requested reconnect"):
         await anext(events)
+
+
+class _StopConnectLoop(BaseException):
+    """Escapes connect()'s retry loop at its backoff sleep."""
+
+
+class GapAdapter(ReceiptTimeAdapter):
+    name = "cause-test"
+
+    async def parse_message(self, message: str) -> list[MarketEvent]:
+        self.request_reconnect("sequence_gap")
+        return []
+
+
+class FailingSocket(OneMessageSocket):
+    async def __aiter__(self) -> AsyncIterator[str]:
+        raise ConnectionResetError("peer reset")
+        yield "{}"  # pragma: no cover - makes this an async generator
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("socket", "cause"),
+    [(OneMessageSocket(), "sequence_gap"), (FailingSocket(), "transport_error")],
+)
+async def test_reconnect_metric_is_labelled_by_cause_not_exception_class(
+    monkeypatch: pytest.MonkeyPatch, socket: OneMessageSocket, cause: str
+) -> None:
+    from prometheus_client import REGISTRY
+
+    async def stop(delay: float) -> None:
+        raise _StopConnectLoop
+
+    def count(reason: str) -> float:
+        value = REGISTRY.get_sample_value(
+            "arb_adapter_reconnects_total", {"exchange": "cause-test", "reason": reason}
+        )
+        return value or 0.0
+
+    adapter = GapAdapter(["BTC-USD"])
+    monkeypatch.setattr(websockets, "connect", lambda *args, **kwargs: socket)
+    monkeypatch.setattr("arb.adapters.base.asyncio.sleep", stop)
+    before = count(cause)
+
+    with pytest.raises(_StopConnectLoop):
+        async for _ in adapter.connect():
+            pass
+
+    assert count(cause) - before == 1
+    assert count("RuntimeError") == 0
 
 
 def test_status_snapshot_reports_age_and_counters() -> None:
