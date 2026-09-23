@@ -232,6 +232,12 @@ class ExchangeAdapter(abc.ABC):
         finally:
             self._snapshot_context.reset(token)
 
+    # True when the adapter checks every book against the exchange's own
+    # snapshots at the same update id (EventKind.VERIFY). Such venues are left
+    # out of REST reconciliation, whose non-atomic comparison would only add
+    # false recoveries on top of an exact check.
+    verifies_continuously: bool = False
+
     # Levels the venue's subscription can hold at most, or None for a full
     # book. Depth pricing reports it with every quote because "could not fill"
     # on a capped book is not comparable with the same result on a full one.

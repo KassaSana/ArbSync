@@ -28,6 +28,7 @@ from arb.detector import ArbitrageDetector
 from arb.metrics import (
     background_task_failures_total,
     book_metrics,
+    book_verifications_total,
     detection_latency_seconds,
     observe_route_open,
     opportunity_counter,
@@ -40,6 +41,7 @@ from arb.reconcile import SnapshotReconciler
 from arb.types import (
     BookEligibility,
     BookUpdateResult,
+    EventKind,
     LiveMessage,
     MarketEvent,
     OpportunityEpisode,
@@ -188,6 +190,50 @@ def configure_logging() -> None:
     )
 
 
+_VERIFICATION_OUTCOMES = {
+    "verified": "match",
+    "verification_mismatch": "mismatch",
+    "verification_skipped": "skipped",
+}
+
+
+async def _process_verification(
+    event: MarketEvent,
+    *,
+    book_manager: OrderBookManager,
+    detector: ArbitrageDetector,
+    store: EpisodeSink,
+    broadcaster: LivePublisher,
+    detected_at_ns: int | None,
+    now_monotonic_ns: int | None,
+    eligibility_publisher: BookEligibilityPublisher | None,
+) -> BookUpdateResult:
+    """Check a book against the exchange's snapshot; never feeds detection.
+
+    A match changes nothing and publishes nothing. A confirmed mismatch has
+    already cleared the book, so its ineligibility is published at once and
+    the caller requests the adapter's scoped resync.
+    """
+    result = book_manager.apply(event)
+    book_verifications_total.labels(
+        exchange=event.exchange,
+        pair=event.pair,
+        outcome=_VERIFICATION_OUTCOMES.get(result.reason or "", "skipped"),
+    ).inc()
+    if result.requires_resync:
+        checked_ns = now_monotonic_ns if now_monotonic_ns is not None else time.monotonic_ns()
+        publisher = eligibility_publisher or BookEligibilityPublisher(
+            book_manager, detector, store, broadcaster, ()
+        )
+        await publisher.publish(
+            book_manager.eligibility(event.exchange, event.pair, checked_ns),
+            immediate=True,
+            detected_at_ns=detected_at_ns if detected_at_ns is not None else time.time_ns(),
+            now_monotonic_ns=checked_ns,
+        )
+    return result
+
+
 async def process_market_event(
     event: MarketEvent,
     *,
@@ -212,6 +258,17 @@ async def process_market_event(
         if now_monotonic_ns is not None
         else time.monotonic_ns()
     )
+    if event.kind is EventKind.VERIFY:
+        return await _process_verification(
+            event,
+            book_manager=book_manager,
+            detector=detector,
+            store=store,
+            broadcaster=broadcaster,
+            detected_at_ns=detected_at_ns,
+            now_monotonic_ns=now_monotonic_ns,
+            eligibility_publisher=eligibility_publisher,
+        )
     metrics = book_metrics(event.exchange, event.pair)
     metrics.ingested.inc()
     result = book_manager.apply(event, received_monotonic_ns=received_monotonic_ns)
@@ -413,10 +470,11 @@ def build_pipeline(
 
     for adapter in adapters:
         adapter.set_connection_state_callback(report_connection_state)
+    verified = {adapter.name for adapter in adapters if adapter.verifies_continuously}
     reconciler = SnapshotReconciler(
         adapters,
         book_manager,
-        expected_pairs,
+        [(exchange, pair) for exchange, pair in expected_pairs if exchange not in verified],
         cycle_seconds=config.reconciliation.cycle_seconds,
         confirmation_count=config.reconciliation.confirmation_count,
         size_confirmation_count=config.reconciliation.size_confirmation_count,

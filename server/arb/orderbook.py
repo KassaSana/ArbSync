@@ -91,6 +91,19 @@ class OrderBook:
         self.cached_top = None
 
 
+def _side_matches(side: SortedLevels, levels: tuple[PriceLevel, ...], depth: int | None) -> bool:
+    """Whether the book's top levels equal the exchange's, price and size.
+
+    A snapshot side shorter than the exchange's depth cap is the whole side,
+    so the book must hold exactly those levels: one more level would be a
+    level the exchange no longer has. An unknown cap compares the top only.
+    """
+    count = len(levels)
+    if depth is not None and count < depth:
+        return side.top_n(count + 1) == list(levels)
+    return side.top_n(count) == list(levels)
+
+
 class OrderBookManager:
     def __init__(
         self, max_age_seconds: float = 30.0, clock: Callable[[], int] = time.monotonic_ns
@@ -149,6 +162,9 @@ class OrderBookManager:
             # The adapter already owns the recovery; only eligibility changes.
             book.clear()
             return BookUpdateResult(accepted=False, reason="adapter_reset", stale=True)
+
+        if event.kind is EventKind.VERIFY:
+            return self._verify(book, event)
 
         if event.kind is EventKind.SNAPSHOT:
             self._apply_snapshot(book, event, received_at)
@@ -357,6 +373,35 @@ class OrderBookManager:
         if not book or book.stale or book.sequence is None:
             return None
         return (book.bids.top_n(limit), book.asks.top_n(limit))
+
+    def _verify(self, book: OrderBook, event: MarketEvent) -> BookUpdateResult:
+        """Compare the exchange's top-N levels with the book at the same update.
+
+        Only a current, continuous book at exactly the event's sequence can be
+        judged; anything else is skipped rather than guessed. Each side's top
+        levels must equal the exchange's, price and size. A disagreement is
+        not repaired from the partial snapshot: the book is cleared and the
+        adapter resynchronizes the pair from a full snapshot.
+        """
+        if (
+            not book.initialized
+            or not book.continuous
+            or book.stale
+            or book.sequence is None
+            or event.sequence != book.sequence
+        ):
+            return BookUpdateResult(accepted=False, reason="verification_skipped")
+        if _side_matches(book.bids, event.bids, event.verify_depth) and _side_matches(
+            book.asks, event.asks, event.verify_depth
+        ):
+            return BookUpdateResult(accepted=False, reason="verified")
+        book.clear()
+        return BookUpdateResult(
+            accepted=False,
+            reason="verification_mismatch",
+            stale=True,
+            requires_resync=True,
+        )
 
     def _apply_snapshot(
         self, book: OrderBook, event: MarketEvent, received_monotonic_ns: int

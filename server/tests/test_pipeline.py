@@ -670,3 +670,65 @@ async def test_shutdown_closes_open_episodes_before_the_store(
     [closed] = [m for m in broadcaster.messages if m.type == "opportunity"][1:]
     assert closed.payload["close_reason"] == "shutdown"
     assert detector.open_episodes() == []
+
+
+@pytest.mark.asyncio
+async def test_verification_mismatch_resyncs_the_pair_without_detection() -> None:
+    # ARB-048: an exchange snapshot disagreeing with the book at the same
+    # update invalidates it and asks the adapter for a scoped resync; a
+    # matching one publishes nothing at all.
+    from arb.adapters.gemini import GeminiAdapter
+
+    def levels(*rows: tuple[str, str]) -> tuple[PriceLevel, ...]:
+        return tuple(PriceLevel(Decimal(price), Decimal(size)) for price, size in rows)
+
+    snapshot = MarketEvent(
+        "gemini", "BTC-USD", EventKind.SNAPSHOT, 1, 1, levels(("100", "1")), levels(("101", "1"))
+    )
+    match = MarketEvent(
+        "gemini", "BTC-USD", EventKind.VERIFY, 1, 2, levels(("100", "1")), levels(("101", "1"))
+    )
+    mismatch = MarketEvent(
+        "gemini", "BTC-USD", EventKind.VERIFY, 1, 3, levels(("100.5", "1")), levels(("101", "1"))
+    )
+
+    class ScriptedGemini(GeminiAdapter):
+        def __init__(self) -> None:
+            super().__init__(["btcusd"])
+            self.connected = True
+            self.resyncs: list[str] = []
+
+        async def connect(self) -> AsyncGenerator[MarketEvent, None]:
+            yield snapshot
+            published.append(len(broadcaster.books) + len(broadcaster.messages))
+            yield match
+            published.append(len(broadcaster.books) + len(broadcaster.messages))
+            yield mismatch
+
+        def request_pair_resync(self, pair: str) -> bool:
+            self.resyncs.append(pair)
+            return True
+
+    published: list[int] = []
+    adapter = ScriptedGemini()
+    broadcaster = RecordingBroadcaster()
+    manager = OrderBookManager()
+    detector = Mock(wraps=ArbitrageDetector(Decimal("0.1")))
+
+    await main.consume_adapter(
+        adapter,
+        book_manager=manager,
+        detector=detector,
+        store=Mock(enqueue=AsyncMock()),
+        broadcaster=broadcaster,
+    )
+
+    assert adapter.resyncs == ["BTC-USD"]
+    assert manager.eligibility("gemini", "BTC-USD").eligible is False
+    assert [m.type for _, _, m in broadcaster.books].count("top_of_book") == 1
+    assert detector.detect_for_pair.call_count == 1
+    # The match published nothing; the mismatch published ineligibility.
+    assert published[0] == published[1]
+    last = broadcaster.books[-1][2]
+    assert last.type != "top_of_book"
+    assert last.payload["eligible"] is False

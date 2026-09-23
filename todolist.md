@@ -2,7 +2,7 @@
 
 Open tickets only. Estimates are engineering effort, not calendar duration, and include
 implementation, tests, review fixes, and documentation. Completed tickets (ARB-001 through
-ARB-047) are archived verbatim with their acceptance criteria in
+ARB-048) are archived verbatim with their acceptance criteria in
 [`docs/COMPLETED_TICKETS.md`](docs/COMPLETED_TICKETS.md); user-facing outcomes are in
 [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -28,31 +28,11 @@ ARB-047) are archived verbatim with their acceptance criteria in
 
 - ARB-047 Gemini book audit: complete. Gemini's stream-built books matched Gemini's top-20
   snapshots at all 21,797 aligned update ids; the ARB-046 "drift" is stale levels in
-  Gemini's REST book, which never traded. ARB-048 through ARB-051 are open.
+  Gemini's REST book, which never traded.
+- ARB-048 continuous Gemini verification against `@depth20` at the same update id, with
+  Gemini removed from REST reconciliation: complete. ARB-049 through ARB-051 are open.
 
 ## Open tickets
-
-### [ ] ARB-048 — Verify Gemini books continuously and stop REST-driven Gemini recovery
-
-- Priority: P1
-- Estimate: 4–8 hours
-- Dependencies: ARB-047
-
-Problem: ARB-047 showed the REST comparison is the stale side for Gemini, so the
-reconciler's Gemini confirmations are false positives that rebuild a correct book, while a
-genuinely wrong Gemini book (for example a normalization regression) would still be caught
-only by that noisy, once-a-minute REST check. Gemini's `@depth20` stream allows an exact
-check at the same update id about once a second.
-
-Acceptance criteria:
-
-- Subscribe `{symbol}@depth20` alongside `@depth`; the adapter aligns each partial snapshot
-  to the exact update id and the book manager, as the eligibility owner, compares the top
-  levels. A mismatch invalidates the book and resubscribes the pair through the ARB-046
-  path; matches publish nothing.
-- Exclude continuously verified venues from REST-driven reconciliation recovery.
-- Recovery stays adapter-owned and fail-closed, is counted by outcome, and replays
-  deterministically; replaying the ARB-047 capture shows the verification outcomes.
 
 ### [ ] ARB-049 — Compare reconciliation levels by price set, not by index
 
@@ -128,13 +108,14 @@ ARB-034           -> ARB-044 dashboard route correctness (complete)
 ARB-036..ARB-040 + ARB-044 -> ARB-045 current-code evidence and soak (complete)
 ARB-028 + ARB-045 -> ARB-046 Gemini drift and scoped recovery (complete)
                        -> ARB-047 Gemini book audit (complete)
-                            -> ARB-048 continuous Gemini verification
+                            -> ARB-048 continuous Gemini verification (complete)
                        -> ARB-049 set-based reconciliation comparison
                        -> ARB-050 Coinbase and Binance.US snapshot audit
 ARB-037 + ARB-038 -> ARB-051 replay of failed snapshot fetches
 ```
 
-ARB-049, ARB-050, and ARB-051 are independent of ARB-048 and of each other.
+ARB-049, ARB-050, and ARB-051 are independent of each other. ARB-049 now affects only
+Coinbase and Binance.US, since Gemini is no longer REST-reconciled.
 
 ARB-039 does not block ARB-040 or ARB-041: lead/lag estimator validity is separate from
 book-age diagnostics and executable-route arithmetic. ARB-041 decided against a live
@@ -151,7 +132,8 @@ limit; it should not be bundled with unrelated API performance work.
 | Research correctness and next roadmap (ARB-036 through ARB-045) | 116–188 h | Complete |
 | Gemini drift and scoped recovery (ARB-046) | 6–12 h | Complete |
 | Gemini book audit (ARB-047) | 4–8 h | Complete |
-| Book trust (ARB-048 through ARB-051) | 13–23 h | Open |
+| Gemini verification (ARB-048) | 4–8 h | Complete |
+| Book trust (ARB-049 through ARB-051) | 9–15 h | Open |
 
 Avoid expanding into execution modeling until the current detection-only claims, units,
 and evidence are internally consistent; ARB-041 decided against live net episodes.

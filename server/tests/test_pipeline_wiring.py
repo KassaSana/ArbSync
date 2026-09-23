@@ -556,3 +556,22 @@ async def test_shutdown_flushes_the_open_fill_rate_minute_to_storage(
             db.execute("SELECT SUM(ineligible_missing) FROM fill_rate_minutes").fetchone()[0]
             == samples * 2 * 2 * 2
         )  # two books, two notionals, two sides
+
+
+def test_continuously_verified_venues_are_left_out_of_rest_reconciliation(
+    tmp_path: Path,
+) -> None:
+    # ARB-048: Gemini books are checked against @depth20 at the same update
+    # id; its REST book is the stale side (ARB-047), so REST reconciliation
+    # would only trigger false recoveries.
+    from arb.adapters.gemini import GeminiAdapter
+
+    pipeline = main.build_pipeline(
+        make_config(tmp_path), adapter_types=(StubAdapter, GeminiAdapter), started_at_ns=1
+    )
+
+    assert ("gemini", "BTC-USD") in pipeline.expected_pairs
+    assert [(t.exchange, t.pair) for t in pipeline.reconciler._states] == [
+        ("stub", "BTC-USD"),
+        ("stub", "ETH-USD"),
+    ]

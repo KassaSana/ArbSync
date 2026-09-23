@@ -43,6 +43,11 @@ route_open_age_skew_seconds = Histogram(
 adapter_reconnects_total = Counter(
     "arb_adapter_reconnects_total", "Adapter reconnect attempts", ["exchange", "reason"]
 )
+book_verifications_total = Counter(
+    "arb_book_verifications_total",
+    "Exchange top-N snapshots checked against the book at the same update id",
+    ["exchange", "pair", "outcome"],
+)
 adapter_pair_resyncs_total = Counter(
     "arb_adapter_pair_resyncs_total",
     "Single-pair resynchronizations that kept the shared connection",

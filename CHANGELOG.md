@@ -39,6 +39,12 @@
 
 ### Added
 
+- Verify every Gemini book about once a second against Gemini's own `@depth20` top-20
+  snapshot at exactly the same update id; a disagreement invalidates the book and
+  resubscribes only that pair. Outcomes are counted in `arb_book_verifications_total`.
+  Gemini is no longer REST-reconciled, because its REST book retains levels the stream has
+  deleted (see the ARB-047 evidence). If verification stops arriving for 30 s the venue
+  reconnects with cause `verification_stalled` rather than staying trusted unchecked.
 - Binance.US resynchronizes a single pair over its open socket after a sequence gap or a
   confirmed reconciliation drift instead of reconnecting the whole venue, keeping its
   other books eligible; a full reconnect remains the bounded fallback.

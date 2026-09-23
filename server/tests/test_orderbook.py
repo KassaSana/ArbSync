@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from dataclasses import replace
 from decimal import Decimal
 
 from arb.orderbook import OrderBookManager
@@ -507,3 +508,86 @@ def test_top_of_book_carries_receipt_time_of_the_event_that_produced_it() -> Non
     eligible = manager._evaluate("gemini", "BTC-USD", now[0])[1]
     assert eligible is not None and eligible.received_monotonic_ns == 1_500
     assert manager.now_monotonic_ns() == 2_000
+
+
+BIDS = [("100", "1"), ("99", "2")]
+ASKS = [("101", "1"), ("102", "2")]
+
+
+def verified_manager() -> OrderBookManager:
+    manager = OrderBookManager()
+    manager.apply(event(kind=EventKind.SNAPSHOT, sequence=1, bids=BIDS, asks=ASKS))
+    return manager
+
+
+def test_verify_matching_top_levels_leaves_the_book_untouched() -> None:
+    manager = verified_manager()
+
+    result = manager.apply(event(kind=EventKind.VERIFY, sequence=1, bids=BIDS[:1], asks=ASKS))
+
+    assert result.reason == "verified"
+    assert result.requires_resync is False
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
+    assert top(manager).best_bid_price == Decimal("100")
+
+
+def test_verify_disagreement_clears_the_book_and_requests_resync() -> None:
+    manager = verified_manager()
+
+    # Gemini's own top two bids include 99.5, which the book never received.
+    result = manager.apply(
+        event(kind=EventKind.VERIFY, sequence=1, bids=[("100", "1"), ("99.5", "3")], asks=ASKS)
+    )
+
+    assert result.reason == "verification_mismatch"
+    assert result.requires_resync is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is False
+
+
+def test_verify_size_disagreement_also_counts() -> None:
+    manager = verified_manager()
+
+    result = manager.apply(
+        event(kind=EventKind.VERIFY, sequence=1, bids=BIDS, asks=[("101", "5"), ("102", "2")])
+    )
+
+    assert result.requires_resync is True
+
+
+def test_verify_at_another_sequence_is_skipped_not_judged() -> None:
+    manager = verified_manager()
+
+    result = manager.apply(event(kind=EventKind.VERIFY, sequence=2, bids=[("1", "1")], asks=ASKS))
+
+    assert result.reason == "verification_skipped"
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
+
+
+def test_verify_short_side_must_be_the_whole_book_side() -> None:
+    # Gemini's top-20 side with fewer than 20 levels is the entire side, so a
+    # level beyond it in the book no longer exists on the exchange.
+    manager = verified_manager()
+    short = replace(
+        event(kind=EventKind.VERIFY, sequence=1, bids=BIDS[:1], asks=ASKS), verify_depth=20
+    )
+
+    result = manager.apply(short)
+
+    assert result.requires_resync is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is False
+
+
+def test_verify_complete_short_sides_match() -> None:
+    manager = verified_manager()
+    whole = replace(event(kind=EventKind.VERIFY, sequence=1, bids=BIDS, asks=ASKS), verify_depth=20)
+
+    assert manager.apply(whole).reason == "verified"
+
+
+def test_verify_empty_side_means_the_exchange_has_none() -> None:
+    manager = verified_manager()
+    empty_bids = replace(
+        event(kind=EventKind.VERIFY, sequence=1, bids=[], asks=ASKS), verify_depth=20
+    )
+
+    assert manager.apply(empty_bids).requires_resync is True

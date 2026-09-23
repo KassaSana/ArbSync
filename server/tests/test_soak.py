@@ -259,10 +259,12 @@ def test_operational_counter_baselines_and_exact_metric_names() -> None:
     assert parse_operational_counters(
         f"{metric}\t6.0\n{metric}_created 123\n{late_metric} 3e0\n"
         'arb_adapter_pair_resyncs_total{exchange="binance",trigger="sequence_gap"} 2.0\n'
+        'arb_book_verifications_total{exchange="gemini",outcome="match",pair="BTC-USD"} 9.0\n'
     ) == {
         metric: 6,
         late_metric: 3,
         'arb_adapter_pair_resyncs_total{exchange="binance",trigger="sequence_gap"}': 2,
+        'arb_book_verifications_total{exchange="gemini",outcome="match",pair="BTC-USD"}': 9,
     }
 
 

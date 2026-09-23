@@ -1329,3 +1329,42 @@ stream-divergence conclusion came from comparing books a one-second batch apart;
 `tools/gemini_drift.py` now reports never-announced prices separately. Evidence is in
 `docs/VALIDATION.md` and `docs/RESYNC.md`; ARB-048 was rescoped to exact verification
 replacing REST-driven Gemini recovery.
+
+### [x] ARB-048 — Verify Gemini books continuously and stop REST-driven Gemini recovery
+
+- Priority: P1
+- Estimate: 4–8 hours
+- Dependencies: ARB-047
+
+Problem: ARB-047 showed the REST comparison is the stale side for Gemini, so the
+reconciler's Gemini confirmations are false positives that rebuild a correct book, while a
+genuinely wrong Gemini book (for example a normalization regression) would still be caught
+only by that noisy, once-a-minute REST check. Gemini's `@depth20` stream allows an exact
+check at the same update id about once a second.
+
+Acceptance criteria:
+
+- Subscribe `{symbol}@depth20` alongside `@depth`; the adapter aligns each partial snapshot
+  to the exact update id and the book manager, as the eligibility owner, compares the top
+  levels. A mismatch invalidates the book and resubscribes the pair through the ARB-046
+  path; matches publish nothing.
+- Exclude continuously verified venues from REST-driven reconciliation recovery.
+- Recovery stays adapter-owned and fail-closed, is counted by outcome, and replays
+  deterministically; replaying the ARB-047 capture shows the verification outcomes.
+
+Resolution (2026-09-23): the Gemini adapter subscribes `{symbol}@depth20` with `@depth`,
+holds each top-20 snapshot until the book has applied exactly its `lastUpdateId`, and emits
+a new `verify` event; `OrderBookManager` compares price and size of the top levels (a side
+shorter than the depth cap must be the whole book side) and on any disagreement clears the
+book and requests the ARB-046 per-pair resubscription, while a match publishes nothing and
+never reaches detection. Outcomes are counted in `arb_book_verifications_total`. A pair that
+has received partial snapshots but goes 30 s of frame time without a verification
+reconnects the venue with cause `verification_stalled`; captures without `@depth20` are not
+watched. Adapters with `verifies_continuously` are excluded from REST reconciliation, so
+Gemini's stale REST book no longer triggers recoveries. Replaying the ARB-047 capture
+produced 21,797 `verified` outcomes with no mismatch, stall, or recovery, matching the
+independent audit, and a two-minute live pipeline run emitted 1,033 verifications, all
+`verified`. The multi-hour live run is deferred to the next scheduled soak and recorded in
+`docs/VALIDATION.md`. An independent review found a short-side fail-open (a thin side's
+extra book levels went unchecked) and the missing stall detection; both were fixed with
+tests before this commit.

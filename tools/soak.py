@@ -676,6 +676,7 @@ def parse_operational_counters(metrics: str) -> dict[str, int]:
     prefixes = (
         "arb_adapter_reconnects_total",
         "arb_adapter_pair_resyncs_total",
+        "arb_book_verifications_total",
         "arb_persistence_queue_drops_total",
         "arb_ws_client_queue_overflows_total",
         "arb_ws_sender_failures_total",

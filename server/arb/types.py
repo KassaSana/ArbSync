@@ -12,6 +12,10 @@ class EventKind(str, Enum):
     # Adapter-detected discontinuity: the book is unusable until the next
     # snapshot. Carries no levels.
     RESET = "reset"
+    # The exchange's own top-N levels at exactly the update the book has just
+    # applied (`sequence` is that local sequence). Never changes the book: the
+    # manager compares, and a disagreement invalidates the book for recovery.
+    VERIFY = "verify"
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,10 @@ class MarketEvent:
     exchange_first_sequence: int | None = None
     exchange_last_sequence: int | None = None
     received_monotonic_ns: int | None = None
+    # VERIFY only: the most levels per side the exchange's snapshot can carry.
+    # A side shorter than this is the whole side, so the book must match it
+    # exactly rather than only in its first levels.
+    verify_depth: int | None = None
 
 
 @dataclass(frozen=True)

@@ -11,8 +11,8 @@ from typing import Any
 import structlog
 
 from arb.adapters.base import ExchangeAdapter, IngestResult, parse_level_mappings, parse_levels
-from arb.metrics import adapter_pair_resyncs_total
-from arb.types import EventKind, MarketEvent
+from arb.metrics import adapter_pair_resyncs_total, book_verifications_total
+from arb.types import EventKind, MarketEvent, PriceLevel
 
 logger = structlog.get_logger(__name__)
 
@@ -24,6 +24,16 @@ PAIR_RESYNC_TIMEOUT_NS = 10_000_000_000
 # connect()'s exponential backoff paces the retries instead of a tight loop.
 PAIR_RESYNC_LIMIT = 3
 PAIR_RESYNC_WINDOW_NS = 60_000_000_000
+
+# Gemini's partial book stream: a top-N snapshot about once a second whose
+# `lastUpdateId` is in the same id space as `@depth`, so the incremental book
+# can be checked against Gemini's own levels at exactly the same update.
+VERIFY_DEPTH = 20
+# Once a pair has received a partial snapshot on a connection, going this long
+# (frame time) without one verifying is a stalled check, not a quiet market:
+# Gemini sends the partial every second even when nothing changes. The venue
+# is reconnected rather than left trusted without verification.
+VERIFY_STALL_NS = 30_000_000_000
 
 _UNSUBSCRIBING = "unsubscribing"
 _AWAITING_SNAPSHOT = "awaiting_snapshot"
@@ -59,6 +69,9 @@ class GeminiAdapter(ExchangeAdapter):
     ws_url = "wss://ws.gemini.com?snapshot=-1"
     snapshot_url = "https://api.gemini.com/v1/book"
     normalize_symbol = staticmethod(normalize_gemini_symbol)
+    # Every book is checked against `@depth20` at the same update id. ARB-047
+    # found Gemini's REST book is the stale side, so REST reconciliation is off.
+    verifies_continuously = True
 
     def __init__(self, pairs: list[str]) -> None:
         super().__init__(pairs)
@@ -74,6 +87,15 @@ class GeminiAdapter(ExchangeAdapter):
         self._resync_history: dict[str, deque[int]] = {}
         self._last_received_ns: int | None = None
         self._resync_number = 0
+        # The latest top-N snapshot per pair waiting for the book to reach its
+        # update id: (lastUpdateId, bids, asks).
+        self._pending_verification: dict[
+            str, tuple[int, tuple[PriceLevel, ...], tuple[PriceLevel, ...]]
+        ] = {}
+        # Per pair on this connection: the frame time verification was last
+        # emitted (or armed). Pairs never sent a partial are not watched, so
+        # captures recorded without `@depth20` replay unchanged.
+        self._last_verified_ns: dict[str, int] = {}
         # Control frames for the stream loop to send; request_pair_resync is
         # synchronous and may run on another task while the loop awaits a read.
         self._outbox: list[str] = []
@@ -88,11 +110,18 @@ class GeminiAdapter(ExchangeAdapter):
         self._resync_deadline_ns.clear()
         self._resync_history.clear()
         self._last_received_ns = None
+        self._pending_verification.clear()
+        self._last_verified_ns.clear()
         self._outbox.clear()
         self._outbox_ready.clear()
 
     async def subscribe(self, websocket: Any) -> None:
-        streams = [f"{pair.lower().replace('-', '')}@depth" for pair in self.pairs]
+        # Resubscription only ever touches `@depth`; the partial stream keeps
+        # flowing and is ignored while its pair is being rebuilt.
+        streams: list[str] = []
+        for pair in self.pairs:
+            symbol = pair.lower().replace("-", "")
+            streams.extend((f"{symbol}@depth", f"{symbol}@depth{VERIFY_DEPTH}"))
         await websocket.send(self.encode({"id": 1, "method": "SUBSCRIBE", "params": streams}))
 
     def request_pair_resync(self, pair: str) -> bool:
@@ -156,6 +185,14 @@ class GeminiAdapter(ExchangeAdapter):
         self._local_sequence.pop(pair, None)
         self._last_exchange_update_id.pop(pair, None)
         self._last_sequence_by_pair.pop(pair, None)
+        self._drop_verification(pair)
+
+    def _drop_verification(self, pair: str) -> None:
+        if self._pending_verification.pop(pair, None) is not None:
+            self._count_unaligned(pair)
+
+    def _count_unaligned(self, pair: str) -> None:
+        book_verifications_total.labels(exchange=self.name, pair=pair, outcome="unaligned").inc()
 
     async def parse_message(self, message: str) -> list[MarketEvent]:
         return self._parse(message, time.monotonic_ns())
@@ -168,12 +205,20 @@ class GeminiAdapter(ExchangeAdapter):
         payload = json.loads(message)
         if payload.get("e") == "depthUpdate":
             events = self._on_depth_update(payload)
+        elif "lastUpdateId" in payload and "symbol" in payload:
+            events = self._on_partial_snapshot(payload)
         elif "id" in payload:
             events = self._on_acknowledgement(payload)
         else:
             events = []
         if any(deadline <= received_monotonic_ns for deadline in self._resync_deadline_ns.values()):
             self.request_reconnect("pair_resync_timeout")
+        if any(
+            received_monotonic_ns - verified_ns > VERIFY_STALL_NS
+            for pair, verified_ns in self._last_verified_ns.items()
+            if pair in self._initialized
+        ):
+            self.request_reconnect("verification_stalled")
         for pair in self._resync_phase:
             self._resync_deadline_ns.setdefault(
                 pair, received_monotonic_ns + PAIR_RESYNC_TIMEOUT_NS
@@ -240,6 +285,8 @@ class GeminiAdapter(ExchangeAdapter):
         if pair not in self._initialized:
             self._resync_phase.pop(pair, None)
             self._resync_deadline_ns.pop(pair, None)
+            if pair in self._last_verified_ns and self._last_received_ns is not None:
+                self._last_verified_ns[pair] = self._last_received_ns
             self._initialized.add(pair)
             self._local_sequence[pair] = 1
             self._last_exchange_update_id[pair] = last_id
@@ -255,7 +302,8 @@ class GeminiAdapter(ExchangeAdapter):
                     asks=asks,
                     exchange_first_sequence=first_id,
                     exchange_last_sequence=last_id,
-                )
+                ),
+                *self._verification_due(pair),
             ]
 
         # Gemini chains frames by repeating the previous frame's last id as
@@ -281,6 +329,59 @@ class GeminiAdapter(ExchangeAdapter):
                 asks=asks,
                 exchange_first_sequence=first_id,
                 exchange_last_sequence=last_id,
+            ),
+            *self._verification_due(pair),
+        ]
+
+    def _on_partial_snapshot(self, payload: dict[str, Any]) -> list[MarketEvent]:
+        """Hold Gemini's top-N snapshot until the book has applied its update id.
+
+        The snapshot usually arrives just before the `@depth` frame ending at
+        the same id. A book that is not established, or that has already
+        passed the id, cannot be compared at the same update and is skipped.
+        """
+        pair = normalize_gemini_symbol(str(payload["symbol"]))
+        if pair not in self.expected_pairs():
+            return []
+        if self._last_received_ns is not None:
+            self._last_verified_ns.setdefault(pair, self._last_received_ns)
+        self._drop_verification(pair)
+        target = int(payload["lastUpdateId"])
+        current = self._last_exchange_update_id.get(pair)
+        if pair not in self._initialized or current is None or current > target:
+            self._count_unaligned(pair)
+            return []
+        self._pending_verification[pair] = (
+            target,
+            parse_levels(payload.get("bids", [])),
+            parse_levels(payload.get("asks", [])),
+        )
+        return self._verification_due(pair)
+
+    def _verification_due(self, pair: str) -> list[MarketEvent]:
+        """Emit the pending check if the book is now at exactly its update id."""
+        pending = self._pending_verification.get(pair)
+        current = self._last_exchange_update_id.get(pair)
+        if pending is None or current is None or current < pending[0]:
+            return []
+        del self._pending_verification[pair]
+        if current > pending[0]:
+            self._count_unaligned(pair)
+            return []
+        target, bids, asks = pending
+        if self._last_received_ns is not None:
+            self._last_verified_ns[pair] = self._last_received_ns
+        return [
+            MarketEvent(
+                exchange=self.name,
+                pair=pair,
+                kind=EventKind.VERIFY,
+                sequence=self._local_sequence[pair],
+                timestamp_ns=time.time_ns(),
+                bids=bids,
+                asks=asks,
+                exchange_last_sequence=target,
+                verify_depth=VERIFY_DEPTH,
             )
         ]
 

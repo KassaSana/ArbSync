@@ -76,7 +76,7 @@ def test_gemini_subscribes_to_current_depth_stream_with_full_snapshot() -> None:
     assert json.loads(sent[0]) == {
         "id": 1,
         "method": "SUBSCRIBE",
-        "params": ["btcusd@depth"],
+        "params": ["btcusd@depth", "btcusd@depth20"],
     }
 
 
@@ -443,3 +443,153 @@ def test_gemini_replay_started_resync_does_not_depend_on_the_host_clock() -> Non
         assert any(event.kind == "scoped_resync" for event in report.lifecycle)
         assert not any(event.kind == "reconnect_requested" for event in report.lifecycle)
     assert [event.kind for event in early.lifecycle] == [event.kind for event in late.lifecycle]
+
+
+def partial(symbol: str, update_id: int, bid: str = "100", ask: str = "101") -> str:
+    return json.dumps(
+        {"lastUpdateId": update_id, "symbol": symbol, "bids": [[bid, "1"]], "asks": [[ask, "1"]]}
+    )
+
+
+def test_gemini_partial_snapshot_waits_for_its_exact_update_id() -> None:
+    adapter = two_pair_adapter()
+
+    # Gemini usually sends the partial just before the depth frame ending at its id.
+    assert ingest(adapter, partial("btcusd", 12)) == []
+    events = ingest(adapter, depth("btcusd", 10, 12))
+
+    assert [event.kind for event in events] == [EventKind.DELTA, EventKind.VERIFY]
+    verify = events[1]
+    assert verify.sequence == events[0].sequence
+    assert verify.exchange_last_sequence == 12
+    assert verify.verify_depth == 20
+    assert [(str(level.price), str(level.size)) for level in verify.bids] == [("100", "1")]
+
+
+def test_gemini_partial_snapshot_at_the_current_id_verifies_immediately() -> None:
+    adapter = two_pair_adapter()
+
+    events = ingest(adapter, partial("ethusd", 20, "200", "201"))
+
+    assert [event.kind for event in events] == [EventKind.VERIFY]
+    assert events[0].sequence == 1
+
+
+def test_gemini_partial_snapshot_the_book_passed_is_skipped() -> None:
+    adapter = two_pair_adapter()
+
+    ingest(adapter, partial("btcusd", 11))
+    assert ingest(adapter, depth("btcusd", 10, 13))[-1].kind is EventKind.DELTA
+    assert adapter._pending_verification == {}
+    # Already past this id: nothing to compare at the same update.
+    assert ingest(adapter, partial("btcusd", 12)) == []
+
+
+def test_gemini_partial_snapshot_is_ignored_while_the_pair_resyncs() -> None:
+    adapter = two_pair_adapter()
+    ingest(adapter, partial("btcusd", 15))
+    adapter.request_pair_resync("BTC-USD")
+
+    assert adapter._pending_verification == {}
+    assert ingest(adapter, partial("btcusd", 16)) == []
+    ingest(adapter, ack("resync:btcusd:unsubscribe:1"))
+    assert ingest(adapter, partial("btcusd", 30)) == []
+    snapshot = ingest(adapter, depth("btcusd", 30, 30))
+    # The rebuilt book is checked from its next partial onwards.
+    assert [event.kind for event in snapshot] == [EventKind.SNAPSHOT]
+    assert [event.kind for event in ingest(adapter, partial("btcusd", 30))] == [EventKind.VERIFY]
+
+
+def test_gemini_verification_catches_divergence_in_replay() -> None:
+    # ARB-048: the incremental BTC book misses a bid Gemini's own top-N shows.
+    # The next aligned partial invalidates it and replay resubscribes only
+    # BTC-USD; ETH-USD stays eligible and no reconnect is requested.
+    import time
+
+    from arb.capture import CaptureFrame, CaptureHeader, ConnectionBoundary
+    from arb.replay import replay_frames
+
+    base_mono, base_wall = time.monotonic_ns(), time.time_ns()
+
+    def at(index: int) -> tuple[int, int]:
+        return base_wall + index * SECOND // 10, base_mono + index * SECOND // 10
+
+    def ws_frame(index: int, raw: str) -> CaptureFrame:
+        wall, mono = at(index)
+        return CaptureFrame("gemini", "ws", wall, mono, raw, None, None, ())
+
+    wall, mono = at(0)
+    boundary = ConnectionBoundary(connected=True, generation=1, reason=None)
+    true_bids = [["100", "1"], ["99.5", "2"]]
+    frames = [
+        CaptureFrame("gemini", "connection", wall, mono, None, None, None, (), boundary),
+        ws_frame(1, depth("btcusd", 10, 10)),
+        ws_frame(2, depth("ethusd", 20, 20, "200", "201")),
+        ws_frame(
+            3,
+            json.dumps(
+                {"lastUpdateId": 11, "symbol": "btcusd", "bids": true_bids, "asks": [["101", "1"]]}
+            ),
+        ),
+        ws_frame(4, depth("btcusd", 10, 11)),  # aligned at id 11: 99.5 is missing
+        ws_frame(5, ack("resync:btcusd:unsubscribe:1")),
+        ws_frame(6, json.dumps({"id": "resync:btcusd:subscribe:2", "status": 200})),
+        ws_frame(
+            7,
+            json.dumps(
+                {
+                    "e": "depthUpdate",
+                    "E": 1,
+                    "s": "btcusd",
+                    "U": 40,
+                    "u": 40,
+                    "b": true_bids,
+                    "a": [["101", "1"]],
+                }
+            ),
+        ),
+        ws_frame(8, depth("ethusd", 20, 21, "200", "201")),
+    ]
+    header = CaptureHeader(exchanges={"gemini": ["btcusd", "ethusd"]}, started_wall_ns=0)
+    manager = OrderBookManager(max_age_seconds=60.0)
+
+    report = asyncio.run(replay_frames(header, frames, book_manager=manager))
+    repeat = asyncio.run(replay_frames(header, frames))
+
+    assert report.digest == repeat.digest
+    btc = [(t.kind, t.reason) for t in report.transitions if t.pair == "BTC-USD"]
+    assert btc == [
+        ("snapshot", None),
+        ("delta", None),
+        ("verify", "verification_mismatch"),
+        ("snapshot", None),
+    ]
+    assert any(event.kind == "scoped_resync" for event in report.lifecycle)
+    assert not any(event.kind == "reconnect_requested" for event in report.lifecycle)
+    assert manager.eligibility("gemini", "ETH-USD").eligible is True
+    assert manager.eligibility("gemini", "BTC-USD").eligible is True
+
+
+def test_gemini_stalled_verification_forces_a_labelled_reconnect() -> None:
+    from arb.adapters.gemini import VERIFY_STALL_NS
+
+    adapter = two_pair_adapter()
+    ingest(adapter, partial("btcusd", 10), 1 * SECOND)  # verified: the book is at id 10
+
+    # Depth keeps flowing but no partial ever aligns again.
+    ingest(adapter, depth("btcusd", 10, 11), 1 * SECOND + VERIFY_STALL_NS)
+    assert adapter._reconnect_requested is False
+    ingest(adapter, depth("btcusd", 11, 12), 2 * SECOND + VERIFY_STALL_NS)
+
+    assert adapter._reconnect_requested is True
+    assert adapter.reconnect_request().cause == "verification_stalled"
+
+
+def test_gemini_without_partial_snapshots_is_never_watched() -> None:
+    # Captures recorded before ARB-048 carry no @depth20 frames and must
+    # replay without a spurious stall.
+    adapter = two_pair_adapter()
+
+    ingest(adapter, depth("btcusd", 10, 11), 3_600 * SECOND)
+
+    assert adapter._reconnect_requested is False

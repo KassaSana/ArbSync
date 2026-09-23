@@ -495,9 +495,12 @@ The four-hour requirement is met on the current code by the
 - A run with independently connected dashboard clients under real browser load, in addition
   to the observer's lightweight consumer. Rendering evidence remains the connected-dashboard
   benchmark above.
-- Gemini's REST-confirmed drifts are false positives from stale REST levels (see the
-  [Gemini book audit](#gemini-book-audit-2026-09-22)), so recovery triggered by them only
-  rebuilds a book that was already right. ARB-048 replaces it with continuous exact-id
-  verification; until then no soak has shown Gemini book verification running live for hours.
+- A multi-hour live run of Gemini book verification. ARB-048 replaced REST reconciliation
+  for Gemini with exact-id verification against `@depth20`. Replaying the 45-minute
+  [Gemini book audit](#gemini-book-audit-2026-09-22) capture through it (Binance.US's first
+  40 s excluded, see ARB-051) produced 21,797 `verified` outcomes, no mismatch, stall, or
+  recovery, and a two-minute live pipeline run on the final code (2026-09-23) emitted 1,033
+  verifications that all replay as `verified`, with no resync or reconnect. No soak has yet
+  run it for hours.
 - A soak whose host network actually drops. The ARB-029 probe recorded no outage on
   2026-09-22, so its outage-window attribution is exercised only by automated tests.

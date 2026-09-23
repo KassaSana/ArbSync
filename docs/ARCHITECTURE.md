@@ -71,8 +71,11 @@ different:
 
 - **Gemini** treats the first differential-depth frame for a pair after subscribing as a
   full stream snapshot, validates later exchange update ranges, and assigns a consecutive
-  local sequence. A gap or an externally requested resync on one pair unsubscribes and
+  local sequence. About once a second each book is verified against Gemini's `@depth20`
+  top-20 snapshot at exactly the same update id; a disagreement invalidates the book. A gap,
+  a verification mismatch, or an externally requested resync on one pair unsubscribes and
   resubscribes only that pair's stream on the open socket, which yields a fresh snapshot.
+  Gemini is not REST-reconciled: its REST book is the stale side (ARB-047).
 - **Coinbase** waits for a fresh Level 2 stream snapshot. It does not mix Advanced Trade
   WebSocket sequence numbers with REST Exchange sequence numbers.
 - **Binance.US** buffers WebSocket depth updates while fetching a REST snapshot, discards
@@ -355,6 +358,7 @@ The system makes degraded state visible instead of treating it as valid market d
 | Old, incomplete, or crossed book | The book is excluded from detection, readiness, metrics eligibility, and spread calculations |
 | Transient REST reconciliation mismatch | The mismatch is counted but the book remains eligible while confirmation is pending |
 | Confirmed REST reconciliation mismatch | The affected book is cleared before adapter-owned pair resync (or reconnection); cooldown suppresses recovery storms |
+| Exchange snapshot disagrees with the book at the same update id (Gemini) | The book is cleared at once and the adapter resubscribes that pair |
 | Full persistence queue | The row is dropped and counted without blocking ingestion |
 | Persistence initialization or worker failure | The store enters a terminal failed state, rejects and counts later rows by reason, and reports unflushed work |
 | Full client queue | The slow WebSocket client is disconnected and counted |
