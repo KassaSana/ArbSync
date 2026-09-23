@@ -455,6 +455,36 @@ venues, partial fills, and withdrawal costs are still excluded. The number that 
 useful to a person is therefore not the arbitrage but the venue price difference
 against the venue fee difference, which is larger; see the scope section of the README.
 
+## Gemini book audit (2026-09-22)
+
+ARB-047 measured whether Gemini's stream-built books are wrong, and where, using Gemini's
+`@depth20` top-20 snapshots, whose `lastUpdateId` shares the `@depth` id space. The
+capture was a normal 45-minute pipeline run (all venues, reconciler, detector) with that
+stream and `@trade` added (`tools/gemini_audit_capture.py`); `tools/gemini_book_audit.py`
+compared each snapshot with the incremental book only when the book had applied exactly
+that update id.
+
+| Measurement | Result |
+| --- | ---: |
+| Aligned comparisons (all nine pairs) | 21,797 |
+| Comparisons matching Gemini's top 20 exactly (price and size) | 21,797 |
+| Snapshots skipped because the book never stopped on their id | 2,485 |
+| Gemini trades | 1,214 |
+| Trades better than the book's best whose price the stream showed within 2 s | 160 of 160 |
+| REST comparison sides whose best price beat the stream book's | 112 of 720 |
+| Of those, prices the stream had deleted / never announced | 99 / 13 |
+| Of those, traded within 60 s (stream-book best: 21 of 720, 2.9 %) | 0 |
+| Replayed episodes with a Gemini leg | 38 |
+| Gemini price confirmed by the latest aligned snapshot / phantom | 37 / 0 |
+
+Conclusion: the stream-built Gemini book is correct at every update id Gemini lets us check,
+and trades never hit the extra levels Gemini's REST book shows; ARB-046's
+stream-divergence diagnosis was a timing artifact of comparing across a one-second batch.
+The Gemini-leg research data in this window is sound. One episode had no aligned snapshot
+within 2 s of opening and was not judged. The episode replay started Binance.US at its
+second connection: its first ended when an initial-sync REST fetch failed, which leaves no
+capture frame, so that connection (about 40 s) cannot be replayed.
+
 ## Remaining validation gap
 
 The four-hour requirement is met on the current code by the
@@ -465,11 +495,9 @@ The four-hour requirement is met on the current code by the
 - A run with independently connected dashboard clients under real browser load, in addition
   to the observer's lightweight consumer. Rendering evidence remains the connected-dashboard
   benchmark above.
-- Gemini scoped recovery triggered by a naturally confirmed drift. ARB-046 exercised
-  Gemini's per-pair resubscription live 81 times by forcing it (no reconnect, gap, or
-  refusal) and covers the drift-triggered path with reconciler, adapter, and replay tests,
-  but its 90-minute live capture (2026-09-22, 44,963 Gemini frames) happened to confirm no
-  drift, so no soak has yet shown the reconciler-to-resubscription path end to end. See
-  [`RESYNC.md`](RESYNC.md#gemini-drift-diagnosis-arb-046).
+- Gemini's REST-confirmed drifts are false positives from stale REST levels (see the
+  [Gemini book audit](#gemini-book-audit-2026-09-22)), so recovery triggered by them only
+  rebuilds a book that was already right. ARB-048 replaces it with continuous exact-id
+  verification; until then no soak has shown Gemini book verification running live for hours.
 - A soak whose host network actually drops. The ARB-029 probe recorded no outage on
   2026-09-22, so its outage-window attribution is exercised only by automated tests.

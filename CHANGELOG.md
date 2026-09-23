@@ -6,10 +6,8 @@
 
 - Recover one Gemini pair by unsubscribing and resubscribing its depth stream on the open
   socket instead of reconnecting the venue, for both sequence gaps and confirmed
-  reconciliation drift. Captured traffic showed the drifts are genuine divergence of
-  Gemini's incremental stream from its own snapshots, not REST staleness or a
-  normalization defect; see `docs/RESYNC.md`. A rejected step, no snapshot within 10 s, or
-  more than three resyncs of one pair in a minute still falls back to a full reconnect.
+  reconciliation drift. A rejected step, no snapshot within 10 s, or more than three
+  resyncs of one pair in a minute still falls back to a full reconnect.
 - Keep venue-comparison route economics coherent with canonical book eligibility and
   live-feed state, reject out-of-order pricing responses, and label stale cached pricing
   instead of presenting it as current route economics.
@@ -104,6 +102,11 @@
 
 ### Evidence
 
+- Gemini's stream-built books matched Gemini's own top-20 snapshots exactly at all 21,797
+  aligned update ids of a 45-minute capture, and every Gemini trade printed at a price the
+  stream showed. The recurring Gemini "drift" is stale levels in Gemini's REST book, which
+  never traded, not divergence of the stream; this corrects the ARB-046 diagnosis. See
+  `docs/RESYNC.md` and `tools/gemini_book_audit.py`.
 - A four-hour uninterrupted live soak of the current code (2026-09-22, commit `012537c`)
   completed with 241/241 ready samples, zero sequence gaps, zero restarts or background
   failures, every book eligible in every sample, two Binance.US scoped pair resyncs with no

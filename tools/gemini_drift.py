@@ -3,10 +3,13 @@
 Each time a Gemini book is rebuilt (a reconnect or a single-pair resubscription),
 the first depth frame of the new subscription is a full snapshot taken by the
 exchange. Comparing the incrementally maintained book just before the rebuild
-with that snapshot needs no REST request, so REST staleness cannot explain a
-disagreement. A level counts as ``stale`` when the stream had not mentioned its
-price for longer than ``--stale-seconds`` (or never), which the short gap
-between the two observations cannot explain either.
+with that snapshot needs no REST request. A disagreement counts as ``stale``
+only when the stream last mentioned that price more than ``--stale-seconds``
+earlier. A price the stream never mentioned is reported as ``unannounced``,
+not stale: an order placed during the last one-second depth batch before the
+rebuild looks exactly like that (ARB-047 corrected ARB-046 on this point).
+For an exact comparison, use ``tools/gemini_book_audit.py`` on a capture with
+Gemini's ``@depth20`` stream.
 
 The report also checks the two normalization assumptions the adapter relies
 on: the ``U``/``u`` chain per symbol, and no frame repeating a price on a side.
@@ -101,12 +104,14 @@ def _classify(
         if not low <= price <= high:
             continue
         last = touched_ns.get(price)
-        stale = last is None or now_ns - last > stale_ns
+        stale = last is not None and now_ns - last > stale_ns
         if price in old and price in fresh:
             kind = "agree" if old[price] == fresh[price] else "size_differs"
-            stale = stale and kind != "agree"
         elif price in fresh:
             kind = "missing_from_incremental"
+            if last is None:
+                counts[f"{kind}_unannounced"] += 1
+                continue
         else:
             kind = "ghost_in_incremental"
         counts[f"{kind}_stale" if stale and kind != "agree" else kind] += 1
@@ -136,6 +141,8 @@ async def analyze(
         if event.kind is EventKind.RESET:
             if pair in books:
                 replaced[pair] = (books.pop(pair), "pair_resync")
+            return
+        if event.kind not in (EventKind.SNAPSHOT, EventKind.DELTA):
             return
         if event.kind is EventKind.SNAPSHOT:
             previous = replaced.pop(pair, None)

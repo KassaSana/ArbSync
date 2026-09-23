@@ -1283,3 +1283,49 @@ cause (`confirmed_drift`, `sequence_gap`, `invalid_book`, `transport_error`, ...
 live capture confirmed no drift, so the reconciler-triggered path is proven by tests and
 81 forced live resyncs rather than a natural drift; that gap is recorded in
 `docs/VALIDATION.md`. Evidence and protocol details are in `docs/RESYNC.md`.
+
+Correction (ARB-047, 2026-09-23): the diagnosis above is wrong. An exact comparison at the
+same update id showed the stream-built books match Gemini's own top-20 snapshots, and the
+disagreeing REST levels never traded; the drifts are stale levels in Gemini's REST book.
+The per-pair resubscription and cause-labelled reconnects stand.
+
+### [x] ARB-047 — Measure Gemini top-of-book error and its effect on stored research
+
+- Priority: P1
+- Estimate: 4–8 hours
+- Dependencies: ARB-046
+
+Problem: `tools/gemini_drift.py` counts divergent levels but not where they sit or how long
+they last. A read-only pass over the 2026-09-22 forced-resync capture found stale missing
+levels at rank 0 on 14 of 162 book sides, rank 1 on 14, and rank 2 on 12. Detection,
+spreads, depth-walked pricing, and fill rates all read those levels while the book is
+eligible, so the effect on stored and replayed research is unknown.
+
+Acceptance criteria:
+
+- Report divergence by rank (best price, top 5, within each configured notional's depth
+  walk) and by how long each stale level persisted, per pair.
+- Decide from Gemini trade prints, not REST, whether the incremental book or the snapshot
+  is correct when they disagree, and record the evidence. Probe the live trade stream first.
+- Measure the share of Gemini-leg episodes (stored and replayed from the 2026-09-20
+  capture) that rested on a level the next Gemini snapshot contradicts; record it in
+  `docs/VALIDATION.md` and caveat Gemini-leg research claims if it is material.
+
+Resolution (2026-09-23): measured exactly, the premise was wrong. Gemini's `@depth20`
+stream carries top-20 snapshots whose `lastUpdateId` shares the `@depth` id space, so
+`tools/gemini_audit_capture.py` recorded a 45-minute pipeline run with that stream and
+`@trade`, and `tools/gemini_book_audit.py` compared each snapshot with the incremental book
+at exactly the same update id. All 21,797 aligned comparisons matched in price and size
+across all nine pairs, so there was no divergence to break down by rank or duration; levels
+deeper than the top 20 have no exact reference. Trades adjudicated the REST disagreement:
+all 160 trades better than the book's best printed at prices the stream showed within 2 s,
+while the 112 better prices that only REST showed, 99 of them already deleted by the
+stream, never traded within 60 s (the stream book's best traded in 2.9 % of samples). Of 38
+replayed Gemini-leg episodes, 37 were confirmed by the aligned snapshot and none was
+phantom. The episodes were replayed from the new capture rather than stored rows or the
+2026-09-20 capture, which lack `@depth20`; Binance.US's first 40 s were excluded because
+replay cannot reproduce a failed REST fetch (ticketed as ARB-051). ARB-046's
+stream-divergence conclusion came from comparing books a one-second batch apart;
+`tools/gemini_drift.py` now reports never-announced prices separately. Evidence is in
+`docs/VALIDATION.md` and `docs/RESYNC.md`; ARB-048 was rescoped to exact verification
+replacing REST-driven Gemini recovery.
