@@ -553,3 +553,79 @@ def test_replay_rejects_non_positive_speed_and_keeps_threshold() -> None:
         replay_frames(header({"gemini": ["btcusd"]}), frames, threshold_pct=Decimal("5"))
     )
     assert report.opportunities == []
+
+
+def failed_fetch(requested_tick: float, failed_tick: float, symbol: str) -> CaptureFrame:
+    request_wall, request_mono = _at(requested_tick)
+    failed_wall, failed_mono = _at(failed_tick)
+    return CaptureFrame(
+        exchange="binance",
+        kind="snapshot",
+        wall_ns=failed_wall,
+        mono_ns=failed_mono,
+        raw=None,
+        payload=None,
+        url=BINANCE_URL.format(symbol=symbol),
+        events=(),
+        snapshot_provenance=SnapshotProvenance(
+            purpose="initial_sync",
+            pair=f"{symbol[:-3]}-{symbol[-3:]}",
+            connection_generation=1,
+            request_wall_ns=request_wall,
+            request_mono_ns=request_mono,
+            response_wall_ns=failed_wall,
+            response_mono_ns=failed_mono,
+        ),
+        snapshot_error="ConnectTimeout('timed out')",
+    )
+
+
+def failed_connection_frames(*, record_failure: bool) -> list[CaptureFrame]:
+    # Live: BTCUSD's initial snapshot fetch raised, which dropped the socket;
+    # ETHUSD's fetch was still in flight and died with it. Generation 2 then
+    # synchronized normally.
+    frames = [
+        connection(0, "binance", True, 1),
+        ws(1, "binance", binance("BTCUSD", 95, 99, "100", "101")),
+        ws(1, "binance", binance("ETHUSD", 45, 49, "200", "201")),
+        *([failed_fetch(1, 2, "BTCUSD")] if record_failure else []),
+        connection(2.1, "binance", False, 1, reason="snapshot retrieval failed for BTC-USD"),
+        connection(3, "binance", True, 2),
+        ws(4, "binance", binance("BTCUSD", 200, 205, "100", "101")),
+        snapshot(4, 5, "BTCUSD", 201, "99", "102", generation=2),
+    ]
+    return frames
+
+
+@pytest.mark.parametrize("record_failure", [True, False])
+def test_failed_snapshot_fetch_replays_the_recorded_reconnect(record_failure: bool) -> None:
+    # ARB-051: a fetch that raised left no response. Recorded failures replay
+    # exactly; older captures infer it from the disconnect reason, and the
+    # other request cancelled in flight is abandoned rather than matched to
+    # the next connection's snapshot.
+    head = header({"binance": ["BTCUSD", "ETHUSD"]})
+    report = replay_twice(head, failed_connection_frames(record_failure=record_failure))
+
+    failed_at = 2.0 if record_failure else 2.1 - 1e-9
+    assert [pair for pair, _ in ticks(report, "snapshot_failed")] == ["BTC-USD"]
+    assert ticks(report, "snapshot_failed")[0][1] == pytest.approx(failed_at)
+    assert [pair for pair, _ in ticks(report, "reconnect_requested")] == [None]
+    assert report.snapshots_failed == 1
+    assert report.snapshots_failed_inferred == (0 if record_failure else 1)
+    assert report.snapshots_cancelled_in_flight == 1
+    # A recorded failure is a consumed record too.
+    assert report.snapshots_consumed == (2 if record_failure else 1)
+    assert report.snapshots_unmatched == 0
+    btc = [(t.kind, t.accepted) for t in report.transitions if t.pair == "BTC-USD"]
+    assert btc[-2:] == [("snapshot", True), ("delta", True)]
+
+
+def test_a_missing_response_on_a_connection_that_never_ended_still_fails_loudly() -> None:
+    frames = [
+        connection(0, "binance", True, 1),
+        ws(1, "binance", binance("BTCUSD", 95, 99, "100", "101")),
+        snapshot(4, 5, "BTCUSD", 201, "99", "102", generation=2),
+    ]
+
+    with pytest.raises(ReplayError, match="generation"):
+        asyncio.run(replay_frames(header({"binance": ["BTCUSD"]}), frames))

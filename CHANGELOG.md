@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Record failed REST snapshot fetches with request provenance and replay their failure and
+  reconnect timing. Older captures can infer a known failure from its disconnect reason;
+  the previously truncated ARB-047 capture now replays from its first connection.
+- Compare reconciliation prices by best level and shared-range price set, and size over
+  that same range, so sparse-book shifts no longer look like widespread price drift.
 - Recover one Gemini pair by unsubscribing and resubscribing its depth stream on the open
   socket instead of reconnecting the venue, for both sequence gaps and confirmed
   reconciliation drift. A rejected step, no snapshot within 10 s, or more than three
@@ -39,6 +44,9 @@
 
 ### Added
 
+- Audit tools for Coinbase single-product Level 2 resubscription and Binance.US books at
+  the REST snapshot's exact update id, with timing and alignment limits reported in
+  `docs/VALIDATION.md`.
 - Verify every Gemini book about once a second against Gemini's own `@depth20` top-20
   snapshot at exactly the same update id; a disagreement invalidates the book and
   resubscribes only that pair. Outcomes are counted in `arb_book_verifications_total`.

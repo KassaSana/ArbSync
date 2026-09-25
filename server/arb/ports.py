@@ -55,6 +55,15 @@ class CaptureSink(Protocol):
         provenance: SnapshotProvenance | None = None,
     ) -> bool: ...
 
+    def record_snapshot_failure(
+        self,
+        exchange: str,
+        url: str,
+        error: str,
+        *,
+        provenance: SnapshotProvenance | None = None,
+    ) -> bool: ...
+
     def record_connection(
         self,
         exchange: str,

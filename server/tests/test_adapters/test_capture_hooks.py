@@ -57,6 +57,19 @@ class RecordingSink:
         )
         return True
 
+    def record_snapshot_failure(
+        self,
+        exchange: str,
+        url: str,
+        error: str,
+        *,
+        provenance: SnapshotProvenance | None = None,
+    ) -> bool:
+        self.snapshot_calls.append(
+            {"exchange": exchange, "url": url, "error": error, "provenance": provenance}
+        )
+        return True
+
     def record_connection(
         self,
         exchange: str,
@@ -148,6 +161,29 @@ async def test_snapshot_fetch_records_url_and_payload() -> None:
     assert provenance.connection_generation == 0
     assert provenance.request_wall_ns is not None
     assert provenance.response_wall_ns >= provenance.request_wall_ns
+
+
+@pytest.mark.asyncio
+async def test_failed_snapshot_fetch_is_recorded_and_still_raises() -> None:
+    # ARB-051: replay can only reproduce a failure the capture contains.
+    adapter = GeminiAdapter(["btcusd"])
+    sink = RecordingSink()
+    adapter.set_capture_sink(sink)
+
+    class FailingClient:
+        async def get(self, url: str) -> Any:
+            raise ConnectionResetError("peer reset")
+
+    adapter.http_client = lambda: FailingClient()  # type: ignore[method-assign, assignment, return-value]
+
+    with pytest.raises(ConnectionResetError):
+        await adapter.fetch_snapshot_with_context("BTC-USD", 0, purpose="initial_sync")
+
+    assert len(sink.snapshot_calls) == 1
+    call = sink.snapshot_calls[0]
+    assert call["error"] == "ConnectionResetError('peer reset')"
+    assert call["provenance"].purpose == "initial_sync"
+    assert call["provenance"].pair == "BTC-USD"
 
 
 @pytest.mark.asyncio

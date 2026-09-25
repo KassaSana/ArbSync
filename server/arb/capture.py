@@ -110,6 +110,9 @@ class CaptureFrame:
     events: tuple[EventSummary, ...]
     connection: ConnectionBoundary | None = None
     snapshot_provenance: SnapshotProvenance | None = None
+    # A snapshot request that raised instead of returning: the error text,
+    # with no payload. Replay reproduces the failure at its recorded time.
+    snapshot_error: str | None = None
 
 
 def _open_capture(path: Path, mode: str) -> IO[str]:
@@ -203,19 +206,27 @@ class CaptureWriter:
                 "mono_ns": time.monotonic_ns(),
                 "url": url,
                 "payload": payload,
-                "snapshot_provenance": (
-                    None
-                    if provenance is None
-                    else {
-                        "purpose": provenance.purpose,
-                        "pair": provenance.pair,
-                        "connection_generation": provenance.connection_generation,
-                        "request_wall_ns": provenance.request_wall_ns,
-                        "request_mono_ns": provenance.request_mono_ns,
-                        "response_wall_ns": provenance.response_wall_ns,
-                        "response_mono_ns": provenance.response_mono_ns,
-                    }
-                ),
+                "snapshot_provenance": _provenance_payload(provenance),
+            }
+        )
+
+    def record_snapshot_failure(
+        self,
+        exchange: str,
+        url: str,
+        error: str,
+        *,
+        provenance: SnapshotProvenance | None = None,
+    ) -> bool:
+        return self._enqueue(
+            {
+                "exchange": exchange,
+                "kind": "snapshot",
+                "wall_ns": time.time_ns(),
+                "mono_ns": time.monotonic_ns(),
+                "url": url,
+                "error": error,
+                "snapshot_provenance": _provenance_payload(provenance),
             }
         )
 
@@ -505,6 +516,20 @@ def read_capture(
     )
 
 
+def _provenance_payload(provenance: SnapshotProvenance | None) -> dict[str, Any] | None:
+    if provenance is None:
+        return None
+    return {
+        "purpose": provenance.purpose,
+        "pair": provenance.pair,
+        "connection_generation": provenance.connection_generation,
+        "request_wall_ns": provenance.request_wall_ns,
+        "request_mono_ns": provenance.request_mono_ns,
+        "response_wall_ns": provenance.response_wall_ns,
+        "response_mono_ns": provenance.response_mono_ns,
+    }
+
+
 def _parse_frame(raw_frame: Any, index: int, location: Path) -> CaptureFrame:
     if not isinstance(raw_frame, dict):
         raise CaptureError(f"capture line {index} is not an object: {location}")
@@ -515,8 +540,13 @@ def _parse_frame(raw_frame: Any, index: int, location: Path) -> CaptureFrame:
     payload = raw_frame.get("payload")
     if kind == "ws" and not isinstance(raw, str):
         raise CaptureError(f"capture line {index} has no raw message: {location}")
-    if kind == "snapshot" and not isinstance(payload, dict):
+    error = raw_frame.get("error")
+    if kind == "snapshot" and not isinstance(payload, dict) and not isinstance(error, str):
         raise CaptureError(f"capture line {index} has no snapshot payload: {location}")
+    if kind == "snapshot" and isinstance(payload, dict) and error is not None:
+        raise CaptureError(f"capture line {index} has both snapshot payload and error: {location}")
+    if kind == "snapshot" and error is not None and (not isinstance(error, str) or not error):
+        raise CaptureError(f"capture line {index} has invalid snapshot error: {location}")
     if kind == "connection" and not isinstance(raw_frame.get("connected"), bool):
         raise CaptureError(f"capture line {index} has invalid connection state: {location}")
     summaries: list[EventSummary] = []
@@ -605,4 +635,5 @@ def _parse_frame(raw_frame: Any, index: int, location: Path) -> CaptureFrame:
         events=tuple(summaries),
         connection=connection,
         snapshot_provenance=snapshot_provenance,
+        snapshot_error=error if kind == "snapshot" and isinstance(error, str) else None,
     )

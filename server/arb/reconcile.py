@@ -315,19 +315,45 @@ class SnapshotReconciler:
     def _side_difference(
         live_levels: list[PriceLevel], snapshot_levels: list[PriceLevel]
     ) -> SideDifference:
-        price_pct = Decimal("0")
-        if len(live_levels) != len(snapshot_levels):
-            price_pct = Decimal("100")
-        else:
-            for live_level, snapshot_level in zip(live_levels, snapshot_levels):
-                baseline = abs(snapshot_level.price) or Decimal("1")
-                price_pct = max(
-                    price_pct,
-                    (abs(live_level.price - snapshot_level.price) / baseline) * Decimal("100"),
-                )
+        if not live_levels or not snapshot_levels:
+            return SideDifference(
+                Decimal("100") if bool(live_levels) != bool(snapshot_levels) else Decimal("0"),
+                Decimal("0"),
+            )
 
-        live_size = sum((level.size for level in live_levels), start=Decimal("0"))
-        snapshot_size = sum((level.size for level in snapshot_levels), start=Decimal("0"))
+        # The best price matters even when the two top-10 windows do not overlap.
+        best_baseline = abs(snapshot_levels[0].price) or Decimal("1")
+        price_pct = (
+            abs(live_levels[0].price - snapshot_levels[0].price) / best_baseline
+        ) * Decimal("100")
+
+        # A thin side may contain fewer than ten levels. Compare only prices
+        # inside the range both top-10 windows cover; a level outside either
+        # window says nothing about whether the other book contains it.
+        low = max(
+            min(level.price for level in live_levels), min(level.price for level in snapshot_levels)
+        )
+        high = min(
+            max(level.price for level in live_levels), max(level.price for level in snapshot_levels)
+        )
+        live_shared = {
+            level.price: level.size for level in live_levels if low <= level.price <= high
+        }
+        snapshot_shared = {
+            level.price: level.size for level in snapshot_levels if low <= level.price <= high
+        }
+        # A single extra or missing level should contribute its distance to
+        # the nearest price, not the positional shift of every later level.
+        # The existing 0.5% threshold then filters ordinary dense-book churn.
+        for price in live_shared.keys() - snapshot_shared.keys():
+            nearest = min(snapshot_levels, key=lambda level: abs(level.price - price)).price
+            price_pct = max(price_pct, abs(price - nearest) / (abs(nearest) or 1) * 100)
+        for price in snapshot_shared.keys() - live_shared.keys():
+            nearest = min(live_levels, key=lambda level: abs(level.price - price)).price
+            price_pct = max(price_pct, abs(price - nearest) / (abs(price) or 1) * 100)
+
+        live_size = sum(live_shared.values(), start=Decimal("0"))
+        snapshot_size = sum(snapshot_shared.values(), start=Decimal("0"))
         size_baseline = abs(snapshot_size) or Decimal("1")
         signed_size_pct = ((live_size - snapshot_size) / size_baseline) * Decimal("100")
         return SideDifference(price_pct, signed_size_pct)

@@ -113,6 +113,44 @@ def metric_value(metric: object, **labels: str) -> float:
     return metric.labels(**labels)._value.get()  # type: ignore[attr-defined, no-any-return]
 
 
+def levels(*prices: str, size: str = "1") -> list[PriceLevel]:
+    return [PriceLevel(Decimal(price), Decimal(size)) for price in prices]
+
+
+def test_sparse_shift_uses_shared_price_range() -> None:
+    difference = SnapshotReconciler._side_difference(
+        levels("100", "99", "97"), levels("100", "99", "98", "97")
+    )
+    assert Decimal("0.5") < difference.price_pct < Decimal("2")
+    assert difference.signed_size_pct == Decimal("-25")
+
+    # A missing tail level is outside the shorter window and is not evidence.
+    tail = SnapshotReconciler._side_difference(levels("100", "99"), levels("100", "99", "98"))
+    assert tail.price_pct == 0
+    assert tail.signed_size_pct == 0
+
+
+def test_wrong_best_price_is_explicit_even_without_overlap() -> None:
+    difference = SnapshotReconciler._side_difference(levels("90"), levels("100"))
+    assert difference.price_pct == Decimal("10")
+
+
+def test_shared_range_size_ignores_uncovered_tail() -> None:
+    difference = SnapshotReconciler._side_difference(
+        levels("100", "99", size="2"), levels("100", "99", "98", size="1")
+    )
+    assert difference.price_pct == 0
+    assert difference.signed_size_pct == Decimal("100")
+
+
+def test_dense_one_tick_churn_stays_below_price_threshold() -> None:
+    difference = SnapshotReconciler._side_difference(
+        levels("100", "99.99", "99.98"), levels("100", "99.99", "99.97")
+    )
+    assert difference.price_pct < Decimal("0.5")
+    assert difference.signed_size_pct == Decimal("50")  # at, not above, the size threshold
+
+
 @pytest.mark.asyncio
 async def test_confirmed_mismatch_prefers_single_pair_resync() -> None:
     # ARB-028: when the adapter supports it, confirmed drift re-fetches only

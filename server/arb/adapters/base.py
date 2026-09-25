@@ -343,30 +343,39 @@ class ExchangeAdapter(abc.ABC):
         call means a full TCP and TLS handshake before every resync.
         """
         context = self._snapshot_context.get()
-        response = await self.http_client().get(url)
-        response.raise_for_status()
-        payload = response.json()
+        try:
+            response = await self.http_client().get(url)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            # Replay must reproduce a failed fetch, so it is recorded with the
+            # same provenance a response would carry.
+            if self._capture_sink is not None:
+                self._capture_sink.record_snapshot_failure(
+                    self.name, url, repr(exc), provenance=self._provenance(context)
+                )
+            raise
         if self._capture_sink is not None and isinstance(payload, dict):
-            response_wall_ns = time.time_ns()
-            response_mono_ns = time.monotonic_ns()
-            provenance = SnapshotProvenance(
-                purpose="unknown" if context is None else context.purpose,
-                pair="" if context is None else context.pair,
-                connection_generation=(
-                    self.connection_generation if context is None else context.connection_generation
-                ),
-                request_wall_ns=(None if context is None else context.request_wall_ns),
-                request_mono_ns=(None if context is None else context.request_mono_ns),
-                response_wall_ns=response_wall_ns,
-                response_mono_ns=response_mono_ns,
-            )
             self._capture_sink.record_snapshot(
                 self.name,
                 url,
                 payload,
-                provenance=provenance,
+                provenance=self._provenance(context),
             )
         return payload  # type: ignore[no-any-return]
+
+    def _provenance(self, context: SnapshotRequestContext | None) -> SnapshotProvenance:
+        return SnapshotProvenance(
+            purpose="unknown" if context is None else context.purpose,
+            pair="" if context is None else context.pair,
+            connection_generation=(
+                self.connection_generation if context is None else context.connection_generation
+            ),
+            request_wall_ns=(None if context is None else context.request_wall_ns),
+            request_mono_ns=(None if context is None else context.request_mono_ns),
+            response_wall_ns=time.time_ns(),
+            response_mono_ns=time.monotonic_ns(),
+        )
 
     def http_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:

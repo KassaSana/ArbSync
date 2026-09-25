@@ -500,3 +500,53 @@ def test_replay_command_rejects_bad_speed(
         )
 
     assert "invalid speed" in capsys.readouterr().err
+
+
+def test_failed_snapshot_fetch_round_trips_with_its_provenance(tmp_path: Path) -> None:
+    # ARB-051: a fetch that raised is recorded without a payload so replay can
+    # reproduce the failure instead of matching a later response.
+    path = tmp_path / "capture.jsonl"
+    provenance = SnapshotProvenance(
+        purpose="initial_sync",
+        pair="ETH-USD",
+        connection_generation=1,
+        request_wall_ns=30,
+        request_mono_ns=40,
+        response_wall_ns=50,
+        response_mono_ns=60,
+    )
+
+    async def scenario() -> None:
+        writer = CaptureWriter(path, {"binance": ["ETHUSD"]})
+        task = asyncio.create_task(writer.run())
+        assert writer.record_snapshot_failure(
+            "binance", "https://example.test/depth", "ConnectError('reset')", provenance=provenance
+        )
+        await writer.close()
+        await task
+
+    asyncio.run(scenario())
+    _, frames = read_capture(path)
+
+    assert frames[0].kind == "snapshot"
+    assert frames[0].payload is None
+    assert frames[0].snapshot_error == "ConnectError('reset')"
+    assert frames[0].snapshot_provenance == provenance
+
+
+def test_snapshot_cannot_claim_both_a_response_and_failure(tmp_path: Path) -> None:
+    from arb.capture import _parse_frame
+
+    with pytest.raises(CaptureError, match="both snapshot payload and error"):
+        _parse_frame(
+            {
+                "exchange": "binance",
+                "kind": "snapshot",
+                "wall_ns": 1,
+                "mono_ns": 1,
+                "payload": {"lastUpdateId": 1},
+                "error": "timeout",
+            },
+            2,
+            tmp_path / "capture.jsonl",
+        )

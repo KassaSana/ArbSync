@@ -481,9 +481,109 @@ Conclusion: the stream-built Gemini book is correct at every update id Gemini le
 and trades never hit the extra levels Gemini's REST book shows; ARB-046's
 stream-divergence diagnosis was a timing artifact of comparing across a one-second batch.
 The Gemini-leg research data in this window is sound. One episode had no aligned snapshot
-within 2 s of opening and was not judged. The episode replay started Binance.US at its
-second connection: its first ended when an initial-sync REST fetch failed, which leaves no
-capture frame, so that connection (about 40 s) cannot be replayed.
+within 2 s of opening and was not judged. The original audit replay started Binance.US at
+its second connection because its first ended on an unrecorded failed REST fetch; ARB-051
+now replays that first connection too.
+
+## Book-trust follow-up (2026-09-24)
+
+### ARB-051: failed snapshot fetch replay
+
+Failed REST fetches now have capture frames with request provenance and an error in place of
+a payload. Replay raises the recorded failure at its completion time and follows the
+connection boundary; on older captures it infers the known failed fetch from the recorded
+disconnect reason and abandons other requests still in flight. The full ARB-047 capture,
+including Binance.US's first connection, now replays at maximum speed: 347,046 book
+transitions, 98 episode events, nine consumed successful snapshots, and digest
+`9f63162c57e90032354ab42e9623660da0579911cb410b9cc353266d2138735f`.
+The report counted one inferred failed fetch and three snapshot requests cancelled
+with that connection.
+This removes the earlier 40-second exclusion from the Gemini audit's replay limitation.
+
+### ARB-049: price-set reconciliation counterfactual
+
+`tools/reconcile_capture.py` replayed the September 20 capture and evaluated all 1,111
+recorded reconciliation responses against the book immediately before the request and
+after the response. The old position-by-position rule and new best-price plus shared-range
+price-set rule used the same 0.5% price and 50% size thresholds, 3/5 confirmation counts,
+and 300-second cooldown. The table is mismatch / confirmation counts; zeros are explicit.
+
+| Venue | Pair | Checks | Old | New |
+| --- | --- | ---: | ---: | ---: |
+| Binance.US | AAVE-USD | 41 | 3 / 0 | 1 / 0 |
+| Binance.US | AVAX-USD | 41 | 4 / 0 | 3 / 0 |
+| Binance.US | BTC-USD | 41 | 4 / 0 | 0 / 0 |
+| Binance.US | DOT-USD | 41 | 1 / 0 | 1 / 0 |
+| Binance.US | ETH-USD | 41 | 1 / 0 | 1 / 0 |
+| Binance.US | LINK-USD | 41 | 0 / 0 | 0 / 0 |
+| Binance.US | LTC-USD | 41 | 1 / 0 | 1 / 0 |
+| Binance.US | SOL-USD | 41 | 4 / 0 | 2 / 0 |
+| Binance.US | UNI-USD | 41 | 0 / 0 | 1 / 0 |
+| Coinbase | AAVE-USD | 41 | 4 / 0 | 5 / 0 |
+| Coinbase | AVAX-USD | 42 | 15 / 0 | 16 / 0 |
+| Coinbase | BTC-USD | 42 | 8 / 0 | 17 / 0 |
+| Coinbase | DOT-USD | 41 | 12 / 0 | 14 / 0 |
+| Coinbase | ETH-USD | 42 | 9 / 0 | 12 / 0 |
+| Coinbase | LINK-USD | 42 | 10 / 0 | 7 / 0 |
+| Coinbase | LTC-USD | 42 | 7 / 0 | 8 / 0 |
+| Coinbase | SOL-USD | 42 | 3 / 0 | 4 / 0 |
+| Coinbase | UNI-USD | 42 | 18 / 0 | 9 / 0 |
+| Gemini (historical) | AAVE-USD | 42 | 0 / 0 | 1 / 0 |
+| Gemini (historical) | AVAX-USD | 42 | 6 / 0 | 3 / 0 |
+| Gemini (historical) | BTC-USD | 42 | 5 / 0 | 6 / 0 |
+| Gemini (historical) | DOT-USD | 42 | 10 / 0 | 0 / 0 |
+| Gemini (historical) | ETH-USD | 42 | 8 / 0 | 3 / 0 |
+| Gemini (historical) | LINK-USD | 42 | 2 / 0 | 4 / 0 |
+| Gemini (historical) | LTC-USD | 30 | 13 / 3 | 1 / 0 |
+| Gemini (historical) | SOL-USD | 42 | 6 / 0 | 4 / 0 |
+| Gemini (historical) | UNI-USD | 42 | 1 / 0 | 1 / 0 |
+
+Binance.US totaled 18 / 0 old versus 10 / 0 new; Coinbase totaled 86 / 0 versus
+92 / 0, all of the new Coinbase evidence size-only. The historical Gemini total was
+51 / 3 versus 23 / 0; Gemini is no longer REST-reconciled in the current pipeline.
+These are fixed-book counterfactuals: a different historical confirmation would have
+changed later recovery traffic, which this offline comparison does not synthesize.
+
+### ARB-050: Coinbase and Binance.US book audit
+
+`tools/binance_snapshot_audit.py` replayed the September 20 capture and compared each
+Binance.US book with a reconciliation REST snapshot only if the incremental book had
+stopped on its exact `lastUpdateId`. All 260 aligned top-20 comparisons matched price
+and size; 109 of 369 snapshots had no exact-id book state and were not judged.
+The September 22 ARB-047 capture supplied 251 more aligned exact matches and 107
+unaligned snapshots, for 511 matches and zero disagreements across the two captures.
+
+| Pair | Aligned exact matches, both captures | Unaligned, both captures |
+| --- | ---: | ---: |
+| AAVE-USD | 69 | 11 |
+| AVAX-USD | 48 | 33 |
+| BTC-USD | 53 | 28 |
+| DOT-USD | 77 | 3 |
+| ETH-USD | 29 | 52 |
+| LINK-USD | 70 | 11 |
+| LTC-USD | 73 | 8 |
+| SOL-USD | 34 | 47 |
+| UNI-USD | 58 | 23 |
+
+`tools/coinbase_snapshot_audit.py` ran a two-minute public-data probe on all nine
+products. Each product was unsubscribed and resubscribed on its own socket to obtain a
+fresh Level 2 snapshot; all nine completed without sequence gaps. The old-to-fresh gap
+was roughly 0.2–0.6 seconds. The probe also kept applying WebSocket updates during each
+REST request and compared REST against the books before the request and after its
+response. It found 48 REST-only top-20 price appearances absent at both boundaries,
+but none had a prior deletion as its latest observed stream action. Trade prints in the
+probe did not establish a persistent, non-trading REST level. These time-separated
+comparisons cannot establish that a price was absent at the REST snapshot's actual
+instant; Coinbase offers no shared update id for the two feeds in this audit. The
+September 20 capture's per-pair Coinbase REST mismatch counts are in the ARB-049 table
+above; they are non-atomic comparisons rather than an independent ground truth.
+
+On this evidence, Binance.US does not exhibit Gemini's stale REST-level defect within
+the aligned top 20. Coinbase's stream and fresh WebSocket snapshots had ordinary
+changes across the resubscription gap; a Gemini-like retained REST deletion was not
+confirmed in the short probe and cannot be ruled out by its non-atomic comparisons.
+The historical Binance.US capture contains no trade stream, so trades cannot adjudicate
+its unaligned snapshots.
 
 ## Remaining validation gap
 
@@ -497,8 +597,9 @@ The four-hour requirement is met on the current code by the
   benchmark above.
 - A multi-hour live run of Gemini book verification. ARB-048 replaced REST reconciliation
   for Gemini with exact-id verification against `@depth20`. Replaying the 45-minute
-  [Gemini book audit](#gemini-book-audit-2026-09-22) capture through it (Binance.US's first
-  40 s excluded, see ARB-051) produced 21,797 `verified` outcomes, no mismatch, stall, or
+  [Gemini book audit](#gemini-book-audit-2026-09-22) capture through it (at the time,
+  Binance.US's first 40 s were excluded; ARB-051 now replays them) produced 21,797
+  `verified` outcomes, no mismatch, stall, or
   recovery, and a two-minute live pipeline run on the final code (2026-09-23) emitted 1,033
   verifications that all replay as `verified`, with no resync or reconnect. No soak has yet
   run it for hours.

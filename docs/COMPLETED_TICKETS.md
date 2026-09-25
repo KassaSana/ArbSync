@@ -1368,3 +1368,81 @@ independent audit, and a two-minute live pipeline run emitted 1,033 verification
 `docs/VALIDATION.md`. An independent review found a short-side fail-open (a thin side's
 extra book levels went unchecked) and the missing stall detection; both were fixed with
 tests before this commit.
+
+### [x] ARB-049 — Compare reconciliation levels by price set, not by index
+
+- Priority: P2
+- Estimate: 3–5 hours
+- Dependencies: ARB-046
+
+Problem: `SnapshotReconciler._side_difference` compares the top 10 levels position by
+position. On a sparse book one missing level shifts every later index and reads as a large
+price mismatch (the DOT-USD and LTC-USD confirmations); on a dense book the same defect,
+even a wrong best price, can appear only as a size-only mismatch that needs a longer streak.
+
+Acceptance criteria:
+
+- Compare the best price explicitly and the set of price levels within the range both
+  books cover, keeping the live-read bracketing, confirmation counts, and cooldown.
+- Replay the 2026-09-20 capture's reconciliation snapshots before and after, and record how
+  mismatch and confirmation counts change per venue and pair.
+
+Resolution (2026-09-24): the reconciler compares best prices and then price sets in the
+range both top-10 sides cover, using nearest-price distance for unmatched levels so ordinary
+dense-book churn remains under the 0.5% threshold. Size evidence uses the same range.
+The September 20 capture's 1,111 recorded checks were compared under both rules with the
+same confirmation and cooldown policy; per-pair results and the counterfactual limit are in
+`docs/VALIDATION.md`.
+
+### [x] ARB-050 — Audit Coinbase and Binance.US books against their own snapshots
+
+- Priority: P2
+- Estimate: 4–6 hours
+- Dependencies: ARB-046
+
+Problem: the ARB-045 soak's Coinbase LTC-USD size mismatches (71) and Binance.US drifts
+are explained only as non-atomic comparison noise. The ARB-046 method has not been applied
+to the other venues.
+
+Acceptance criteria:
+
+- Generalize the drift tool: Coinbase compares against a fresh Level 2 snapshot after
+  resubscribing one product; Binance.US compares the book at exactly the REST snapshot's
+  `lastUpdateId`.
+- Record per-venue divergence from existing captures and state whether either venue shows
+  the same class of defect as Gemini, and whether its REST snapshots retain levels the
+  stream deleted (the ARB-047 Gemini finding), using trades where the venue provides them.
+
+Resolution (2026-09-24): `tools/binance_snapshot_audit.py` found 511 exact top-20 matches
+and no divergence across the September 20 and 22 captures, leaving 216 REST snapshots
+unaligned rather than guessing. A two-minute Coinbase probe resubscribed each of nine
+products on a dedicated socket and compared its incremental book with the fresh Level 2
+snapshot, then bracketed a REST request while continuing to apply updates. It found no
+REST-only price whose last observed stream action was deletion. Coinbase has no shared
+update id for this comparison, so a Gemini-like REST retention defect was not confirmed
+and cannot be ruled out by the short, time-separated probe. Per-pair evidence and trade
+limits are in `docs/VALIDATION.md`.
+
+### [x] ARB-051 — Replay a connection that ended on a failed REST snapshot fetch
+
+- Priority: P3
+- Estimate: 2–4 hours
+- Dependencies: ARB-037, ARB-038
+
+Problem: a REST snapshot fetch that raises leaves no capture frame. On the 2026-09-22
+ARB-047 capture, Binance.US's first connection ended when an initial-sync fetch failed and
+reconnected; replay then resolved that pair's fetch to the next connection's recorded
+snapshot and stopped with a provenance mismatch, so the capture replays only with that
+venue's first 40 s removed.
+
+Acceptance criteria:
+
+- Record failed snapshot fetches with their request provenance, and have replay reproduce
+  the failure and the recorded reconnect instead of stopping.
+- The ARB-047 capture replays in full.
+
+Resolution (2026-09-24): failed REST fetches now record provenance and their exception
+instead of a payload; replay schedules the failure and reconnect on the recorded clock.
+Older captures infer the one known failed fetch from the disconnect reason and abandon
+three simultaneous requests cancelled with that connection. The full ARB-047 capture now
+replays from its first frame; evidence is in `docs/VALIDATION.md`.

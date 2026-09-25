@@ -45,6 +45,7 @@ import asyncio
 import hashlib
 import heapq
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -128,7 +129,7 @@ class ReplayLifecycleEvent:
     """One recovery or lifecycle boundary the replay drove on the recorded clock.
 
     Kinds: `connected`, `disconnected`, `reconnect_requested`, `scoped_resync`,
-    `snapshot_requested`, `snapshot_completed`, `snapshot_retry`,
+    `snapshot_requested`, `snapshot_completed`, `snapshot_failed`, `snapshot_retry`,
     `snapshot_abandoned`, `book_expired`.
     """
 
@@ -150,6 +151,12 @@ class ReplayReport:
     snapshots_consumed: int = 0
     snapshots_skipped_reconciliation: int = 0
     snapshots_unmatched: int = 0
+    # Failed fetches replayed (recorded or inferred from a disconnect reason),
+    # how many of those were inferred, and requests cancelled in flight by a
+    # recorded disconnect. Inference keeps pre-ARB-051 captures replayable.
+    snapshots_failed: int = 0
+    snapshots_failed_inferred: int = 0
+    snapshots_cancelled_in_flight: int = 0
     frames_skipped_disconnected: int = 0
     legacy_immediate_reconnects: int = 0
     timing_fidelity: TimingFidelity = "recorded"
@@ -169,9 +176,18 @@ class _VirtualClock:
 @dataclass(frozen=True)
 class _ResolvedSnapshot:
     index: int
-    frame: CaptureFrame
+    frame: CaptureFrame | None
     completion_mono_ns: int
     completion_wall_ns: int
+    # Set when the recorded request raised instead of returning.
+    error: str | None = None
+
+
+class _RecordedSnapshotFailure(Exception):
+    """The recorded fetch raised live; replay raises at the same point."""
+
+
+_FAILED_FETCH = re.compile(r"^snapshot retrieval failed for (\S+)$")
 
 
 class _SnapshotLedger:
@@ -191,12 +207,31 @@ class _SnapshotLedger:
         self.consumed = 0
         self._entries: list[tuple[int, CaptureFrame]] = []
         self._consumed: set[int] = set()
+        # Connections that ended because a snapshot fetch raised, keyed by
+        # (exchange, generation, pair). Captures recorded before failed fetches
+        # were written have only this disconnect reason to show for them.
+        self._failed_connections: dict[tuple[str, int, str], CaptureFrame] = {}
+        # Every recorded disconnect, keyed by (exchange, generation): a fetch
+        # still in flight when its connection ended was cancelled with it and
+        # left no response to record.
+        self._disconnects: dict[tuple[str, int], CaptureFrame] = {}
         for index, frame in enumerate(frames):
+            if frame.kind == "connection" and frame.connection is not None:
+                if not frame.connection.connected:
+                    key2 = (frame.exchange, frame.connection.generation)
+                    self._disconnects.setdefault(key2, frame)
+                    match = _FAILED_FETCH.match(frame.connection.reason or "")
+                    if match is not None:
+                        key = (frame.exchange, frame.connection.generation, match.group(1))
+                        self._failed_connections.setdefault(key, frame)
+                continue
             if frame.kind != "snapshot":
                 continue
-            if frame.payload is None:
+            if frame.payload is None and frame.snapshot_error is None:
                 raise ReplayError(f"capture frame {index} has no snapshot payload")
             self._entries.append((index, frame))
+        self.inferred_failures = 0
+        self.cancelled_in_flight = 0
 
     @staticmethod
     def _is_reconciliation(frame: CaptureFrame) -> bool:
@@ -233,6 +268,10 @@ class _SnapshotLedger:
                     or provenance.purpose != request.purpose
                 ):
                     continue
+                if provenance.connection_generation > generation:
+                    unrecorded = self._unrecorded_outcome(exchange, generation, request)
+                    if unrecorded is not None:
+                        return unrecorded
                 if provenance.connection_generation != generation:
                     raise ReplayError(
                         f"snapshot provenance mismatch at capture frame {index}: recorded "
@@ -249,7 +288,11 @@ class _SnapshotLedger:
                 self._consumed.add(index)
                 self.consumed += 1
                 return _ResolvedSnapshot(
-                    index, frame, provenance.response_mono_ns, provenance.response_wall_ns
+                    index,
+                    frame,
+                    provenance.response_mono_ns,
+                    provenance.response_wall_ns,
+                    frame.snapshot_error,
                 )
             if self._is_reconciliation(frame) or (frame.url or "") != url:
                 continue
@@ -257,11 +300,49 @@ class _SnapshotLedger:
             self.consumed += 1
             completion = max(frame.mono_ns, now_ns)
             return _ResolvedSnapshot(
-                index, frame, completion, frame.wall_ns + (completion - frame.mono_ns)
+                index,
+                frame,
+                completion,
+                frame.wall_ns + (completion - frame.mono_ns),
+                frame.snapshot_error,
             )
+        if self.strict:
+            unrecorded = self._unrecorded_outcome(exchange, generation, request)
+            if unrecorded is not None:
+                return unrecorded
         raise ReplayError(
             f"capture has no snapshot data for {exchange} {request.pair} ({request.purpose}, "
             f"{url}); the recording is missing REST traffic and cannot replay"
+        )
+
+    def _unrecorded_outcome(
+        self, exchange: str, generation: int, request: SnapshotRequest
+    ) -> _ResolvedSnapshot | None:
+        """Resolve a request this generation has no recorded response for.
+
+        Captures from before failed fetches were recorded show a failure only
+        as the disconnect reason it caused: that fetch fails just before the
+        recorded disconnect, where live raised it. Any other request of a
+        generation that the capture shows ending was still in flight and was
+        cancelled with the connection: it completes at the disconnect, which
+        replay processes first, so the response is abandoned exactly as live.
+        """
+        failed = self._failed_connections.pop((exchange, generation, request.pair), None)
+        if failed is not None:
+            self.inferred_failures += 1
+            return _ResolvedSnapshot(
+                -1,
+                None,
+                failed.mono_ns - 1,
+                failed.wall_ns - 1,
+                "inferred from the recorded disconnect reason",
+            )
+        disconnect = self._disconnects.get((exchange, generation))
+        if disconnect is None:
+            return None
+        self.cancelled_in_flight += 1
+        return _ResolvedSnapshot(
+            -1, None, disconnect.mono_ns, disconnect.wall_ns, "cancelled with its connection"
         )
 
 
@@ -269,7 +350,7 @@ class _SnapshotLedger:
 class _PendingSnapshot:
     exchange: str
     request: SnapshotRequest
-    event: MarketEvent
+    event: MarketEvent | None
     resolved: _ResolvedSnapshot
     generation: int
 
@@ -445,7 +526,9 @@ class _Replay:
                 generation=self._generation[exchange],
             )
             self._pending_resolution[exchange] = resolved
-            assert resolved.frame.payload is not None
+            if resolved.error is not None:
+                raise _RecordedSnapshotFailure(resolved.error)
+            assert resolved.frame is not None and resolved.frame.payload is not None
             return resolved.frame.payload
 
         return fake_client_get_json
@@ -562,14 +645,17 @@ class _Replay:
     ) -> None:
         adapter = self.adapters[exchange]
         self._pending_request[exchange] = request
+        event: MarketEvent | None
         try:
             event = await adapter.fetch_snapshot_with_context(
                 request.pair, trigger_sequence=0, purpose=request.purpose
             )
+        except _RecordedSnapshotFailure:
+            event = None
         finally:
             self._pending_request.pop(exchange, None)
         resolved = self._pending_resolution.pop(exchange)
-        if self.recorded:
+        if self.recorded and event is not None:
             event = replace(event, received_monotonic_ns=resolved.completion_mono_ns)
         pending = _PendingSnapshot(exchange, request, event, resolved, self._generation[exchange])
         self._lifecycle(
@@ -756,6 +842,23 @@ class _Replay:
                 f"frame={pending.resolved.index}",
             )
             return
+        if pending.event is None:
+            # Live, the fetch task raised: the adapter records the failure and
+            # the stream loop drops the connection, as the capture then shows.
+            self.report.snapshots_failed += 1
+            self._lifecycle(
+                "snapshot_failed",
+                exchange,
+                pending.request.pair,
+                wall_ns,
+                mono_ns,
+                f"frame={pending.resolved.index} error={pending.resolved.error}",
+            )
+            adapter.snapshot_failed(pending.request.pair)
+            await self._handle_reconnect_request(
+                exchange, wall_ns, mono_ns, f"snapshot retrieval failed for {pending.request.pair}"
+            )
+            return
         try:
             result = adapter.complete_snapshot(pending.request.pair, pending.event)
         except RuntimeError as exc:
@@ -927,6 +1030,8 @@ async def replay_frames(
         report.snapshots_consumed = replay.ledger.consumed
         report.snapshots_skipped_reconciliation = replay.ledger.skipped_reconciliation()
         report.snapshots_unmatched = replay.ledger.unmatched()
+        report.snapshots_failed_inferred = replay.ledger.inferred_failures
+        report.snapshots_cancelled_in_flight = replay.ledger.cancelled_in_flight
         report.digest = _digest(report)
         return report
     finally:
