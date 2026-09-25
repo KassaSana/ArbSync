@@ -585,6 +585,19 @@ confirmed in the short probe and cannot be ruled out by its non-atomic compariso
 The historical Binance.US capture contains no trade stream, so trades cannot adjudicate
 its unaligned snapshots.
 
+## Gemini verification smoke check (2026-09-25)
+
+A five-minute live smoke check on commit `0cb6408f96dafffcfbe9ee5267b89494152ab9d3`
+used a fresh SQLite database, the normal 27-book roster, and 10-second observer samples.
+The [report](../artifacts/benchmarks/soak/smoke_5m_2026-09-24_235212.md) records the
+full 300.0-second duration and configuration hash; its raw JSONL samples remain local
+beside the report. All 31 samples were ready, and every configured book was eligible
+in every sample. Gemini recorded 2,544 exact-id `match` verifications across all nine
+pairs and 138 `unaligned` snapshots, with no mismatch or verification stall. There were
+no adapter reconnects or sequence gaps, background failures, HTTP failures, WebSocket
+delivery failures, or host-probe failures. This is short smoke evidence, not a
+multi-hour verification run.
+
 ## Remaining validation gap
 
 The four-hour requirement is met on the current code by the
@@ -601,7 +614,8 @@ The four-hour requirement is met on the current code by the
   Binance.US's first 40 s were excluded; ARB-051 now replays them) produced 21,797
   `verified` outcomes, no mismatch, stall, or
   recovery, and a two-minute live pipeline run on the final code (2026-09-23) emitted 1,033
-  verifications that all replay as `verified`, with no resync or reconnect. No soak has yet
-  run it for hours.
+  verifications that all replay as `verified`, with no resync or reconnect. The
+  [five-minute smoke check](#gemini-verification-smoke-check-2026-09-25) adds current live
+  evidence across all nine pairs, but no run has yet exercised it for hours.
 - A soak whose host network actually drops. The ARB-029 probe recorded no outage on
   2026-09-22, so its outage-window attribution is exercised only by automated tests.
